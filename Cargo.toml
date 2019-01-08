@@ -4,6 +4,14 @@ version = "0.1.0"
 authors = ["Kai Yao <kai.b.yao@gmail.com>"]
 edition = "2018"
 
+[lib]
+name = "experiment00"
+path = "src/lib.rs"
+
+[[bin]]
+name = "experiment00bin"
+path = "src/main.rs"
+
 [dependencies]
 actix-web = "~0.7"
 postgres = "~0.15"

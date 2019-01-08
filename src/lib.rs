@@ -2,34 +2,41 @@ extern crate actix_web;
 extern crate postgres;
 #[macro_use]
 extern crate serde_derive;
-#[macro_use]
-extern crate serde_json;
+// #[macro_use]
+// extern crate serde_json;
 
-use crate::actix_web::{http::Method, Scope};
-use crate::postgres::{Connection, TlsMode};
-
-mod database;
-use crate::database::create_postgres_url;
-pub use crate::database::DatabaseConfig;
+use crate::actix_web::{http::{Method, StatusCode}, HttpResponse, Scope};
+use crate::postgres::{Connection};
 
 mod table_api;
 use crate::table_api::*;
 
-pub fn table_api_resource<S: 'static>(config: &DatabaseConfig) -> impl Fn(Scope<S>) -> Scope<S> {
-    let database_url = create_postgres_url(config);
-    let conn = Connection::connect(database_url.to_string(), TlsMode::None).unwrap();
+mod database;
+pub use crate::database::{create_postgres_url, DatabaseConfig};
 
-    prepare_all_statements(&conn);
+pub fn table_api_resource<S: 'static>(conn: &'static Connection) -> impl Fn(Scope<S>) -> Scope<S> {
+    prepare_all_statements(conn);
 
-    |scope| {
+    move |scope| {
         scope
-            .resource("", |r| {
+            .resource("", move |r| {
                 // GET: get list of tables
-                r.method(Method::GET).f(|_req| match get_all_tables(&conn) {
-                    Ok(tables) => json!(tables),
-                    Err(message) => json!(ApiError {
-                        message: message.to_string()
-                    }),
+                r.method(Method::GET).f(move |req| {
+                    let mut response = HttpResponse::build_from(req);
+                    match get_all_tables(conn) {
+                        Ok(tables) =>
+                            response
+                                .status(StatusCode::from_u16(200).unwrap())
+                                .json(tables),
+                        Err(message) =>
+                            response
+                                .status(StatusCode::from_u16(500).unwrap())
+                                .json(
+                                    ApiError {
+                                        message: message.to_string()
+                                    }
+                                ),
+                    }
                 })
             })
             .resource("/{table}", |r| {
