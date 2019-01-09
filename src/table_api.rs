@@ -31,16 +31,16 @@ pub fn get_all_tables(conn: &Connection) -> Result<Vec<String>, postgres::Error>
 }
 
 fn prepare_query_table(conn: &Connection) {}
-pub fn query_table(conn: &Connection) {}
+// pub fn query_table(conn: &Connection) {}
 
 fn prepare_insert_into_table(conn: &Connection) {}
-pub fn insert_into_table(conn: &Connection) {}
+// pub fn insert_into_table(conn: &Connection) {}
 
 fn prepare_upsert_into_table(conn: &Connection) {}
-pub fn upsert_into_table(conn: &Connection) {}
+// pub fn upsert_into_table(conn: &Connection) {}
 
 fn prepare_delete_table_rows(conn: &Connection) {}
-pub fn delete_table_rows(conn: &Connection) {}
+// pub fn delete_table_rows(conn: &Connection) {}
 
 fn prepare_update_table_rows(conn: &Connection) {}
-fn update_table_rows(conn: &Connection) {}
+// fn update_table_rows(conn: &Connection) {}

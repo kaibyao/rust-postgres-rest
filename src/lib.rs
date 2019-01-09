@@ -1,13 +1,21 @@
+// used for dev/tests
+#![deny(clippy::complexity, clippy::correctness, clippy::perf, clippy::style)]
+
+#[cfg(test)]
+#[macro_use]
+extern crate pretty_assertions;
+
+// external crates
 extern crate actix_web;
 extern crate postgres;
 #[macro_use]
 extern crate serde_derive;
 // #[macro_use]
 // extern crate serde_json;
-
 use crate::actix_web::{http::{Method, StatusCode}, HttpResponse, Scope};
 use crate::postgres::{Connection};
 
+// library modules
 mod table_api;
 use crate::table_api::*;
 

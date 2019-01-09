@@ -1,3 +1,5 @@
+// This file contains a reference implementation of the library using actix-web and tokio_postgres. Much of the implementation was refactored from TechEmpower's actix benchmarks (https://github.com/TechEmpower/FrameworkBenchmarks/blob/master/frameworks/Rust/actix/).
+
 extern crate actix_web;
 extern crate postgres;
 

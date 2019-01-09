@@ -1,3 +1,5 @@
+use actix_web::actix::{Actor, Addr, Context};
+
 /// Describes the DB config used to connect with the database.
 pub struct DatabaseConfig {
     pub db_host: String,
@@ -27,4 +29,35 @@ pub fn create_postgres_url(config: &DatabaseConfig) -> String {
     ));
 
     database_url
+}
+
+pub struct PgConnection {}
+
+impl Actor for PgConnection {
+    type Context = Context<Self>;
+}
+
+impl PgConnection {
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_postgres_url_correct() {
+        let config = DatabaseConfig {
+            db_host: "test_host".to_string(),
+            db_port: 1234,
+            db_user: "test_user".to_string(),
+            db_pass: "test_pass".to_string(),
+            db_name: "test_db".to_string(),
+        };
+
+        assert_eq!(
+            create_postgres_url(&config),
+            "postgresql://test_user:test_pass@test_host:1234/test_db"
+        );
+    }
 }
