@@ -4,92 +4,36 @@
 
 extern crate actix_web;
 use actix_web::{
-    actix::{/*Addr,*/ SyncArbiter, System},
+    actix::{System},
     App,
-    Error,
-    FutureResponse,
-    http,
-    HttpRequest,
-    HttpResponse,
-    AsyncResponder,
     server,
 };
-extern crate futures;
-use futures::future::Future;
-extern crate num_cpus;
-
-extern crate postgres;
-// use postgres::{Connection};
-
-extern crate r2d2_postgres;
-use r2d2_postgres::{PostgresConnectionManager, TlsMode};
 
 extern crate experiment00;
 use experiment00::{
-    AppState,
-    db::{create_postgres_url, DbConfig, DbExecutor, Pool},
-    queries::{Queries, Tasks},
-    // rest_api_scope
+    add_rest_api_scope,
+    AppConfig,
 };
-
-// fn greet(req: &HttpRequest) -> impl Responder {
-//     let to = req.match_info().get("name").unwrap_or("World");
-//     format!("Hello {}!", to)
-// }
-
-fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
-    let query = Queries {
-        limit: 0,
-        task: Tasks::GetAllTableFields
-    };
-    req.state()
-        .db
-        .send(query)
-        .from_err()
-        .and_then(|res| match res {
-            Ok(rows) => Ok(HttpResponse::Ok().json(rows)),
-            Err(_) => Ok(HttpResponse::InternalServerError().into())
-        })
-        .responder()
-}
 
 fn main() {
     let actix_system_actor = System::new("experiment00");
 
-    // init db connection pool
-    let database_url = create_postgres_url(&DbConfig {
-        db_host: "localhost".to_string(),
-        db_port: 3306,
-        db_user: "kaiby".to_string(),
-        db_pass: "".to_string(),
-        db_name: "crossroads".to_string(),
-    });
-    let manager = PostgresConnectionManager::new(database_url, TlsMode::None).unwrap();
-    let pool = Pool::new(manager).unwrap();
-
-    // create a SyncArbiter (Event Loop Controller) with a DbExecutor actor with worker threads == cpu thread
-    let db_addr = SyncArbiter::start(
-        num_cpus::get(),
-        move || DbExecutor(pool.clone())
-    );
-
     // start server
-    server::new(move || {
-        App::with_state(AppState{db: db_addr.clone()})
-            .scope("/api", |scope| {
-                scope
-                    .resource("", |r| {
-                        // GET: get list of tables
-                        r.method(http::Method::GET).a(index)
-                    })
-            })
+    server::new(|| {
+        let app = App::new();
+
+        // appends an actix-web Scope under the "/api" endpoint to app and returns it
+        add_rest_api_scope(
+            &AppConfig {
+                database_url: "postgresql://kaiby@localhost:3306/crossroads",
+                scope_name: "/api"
+            },
+            app
+        )
     })
     .bind("127.0.0.1:8000")
     .expect("Can not bind to port 8000")
     .run();
-
-
-            // for each thread, use the connection pool handler to open a connection
 
     actix_system_actor.run();
 }

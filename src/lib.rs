@@ -12,60 +12,78 @@ extern crate futures;
 extern crate postgres;
 extern crate r2d2;
 extern crate r2d2_postgres;
-// #[macro_use]
-// extern crate serde_derive;
-// #[macro_use]
-// extern crate serde_json;
 use actix_web::{
-    actix::{Addr},
-    // Error,
-    // http::{Method/*, StatusCode*/},
-    // HttpRequest,
-    // HttpResponse,
-    // FutureResponse,
-    // Scope,
-    // State,
+    actix::{Addr, SyncArbiter},
+    App,
+    AsyncResponder,
+    http::{Method},
+    HttpRequest,
+    HttpResponse,
+    FutureResponse,
 };
-// use failure::Error;
-// use futures::future::Future;
-// use crate::postgres::{Connection as PgConnection};
+use failure::Error;
+use futures::future::Future;
 
 // library modules
-pub mod queries;
-// use crate::queries::{Queries, Tasks};
-// use crate::rest_api::*;
+mod queries;
+use crate::queries::{Queries, Tasks};
 
-pub mod db;
-use crate::db::{DbExecutor};
+mod db;
+use crate::db::{DbExecutor, init_connection_pool};
 
-pub struct AppState {
-    pub db: Addr<DbExecutor>,
+struct AppState {
+    db: Addr<DbExecutor>,
 }
 
-// pub fn rest_api_scope<S: 'static>(scope: Scope<S>) -> Scope<S> {
-//     // prepare_all_statements(conn);
-//     scope
-//         .resource("", |r| {
-//             // GET: get list of tables
-//             r.method(Method::GET).a(index)
-//         })
-//         // .resource("/{table}", |r| {
-//         //     // GET: query table
-//         //     // POST: (bulk) insert
-//         //     // PUT OR PATCH: (bulk) upsert
-//         //     // DELETE: delete rows (also requires confirm_delete query parameter)
-//         // })
-// }
+pub struct AppConfig<'a> {
+    pub database_url: &'a str,
+    pub scope_name: &'a str,
+}
 
-// fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
-//     let query = Queries {
-//         limit: 0,
-//         task: Tasks::GetAllTableFields
-//     };
-//     let result = Box::new(req.state()
-//         .db
-//         .send(query));
-// }
+/// Takes an initialized App and config, and appends the Rest API functionality to the scope’s endpoint.
+pub fn add_rest_api_scope(config: &AppConfig, app: App) -> App {
+    // create database connection pool
+    let pool = init_connection_pool(config.database_url);
+
+    // create a SyncArbiter (Event Loop Controller) with a DbExecutor actor with worker threads == cpu thread
+    let db_addr = SyncArbiter::start(
+        num_cpus::get(),
+        move || DbExecutor(pool.clone())
+    );
+
+    app.scope(config.scope_name, |scope| {
+        scope
+            .with_state("", AppState { db: db_addr.clone() }, |nested_scope| {
+                nested_scope
+                    .resource("", |r| {
+                        // GET: get list of tables
+                        r.method(Method::GET).a(index)
+                    })
+                    // .resource("/{table}", |r| {
+                    //     // GET: query table
+                    //     // POST: (bulk) insert
+                    //     // PUT OR PATCH: (bulk) upsert
+                    //     // DELETE: delete rows (also requires confirm_delete query parameter)
+                    // })
+            })
+    })
+}
+
+fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
+    let query = Queries {
+        limit: 0,
+        task: Tasks::GetAllTableFields
+    };
+    req.state()
+        .db
+        .send(query)
+        .from_err()
+        .and_then(|res| match res {
+            Ok(rows) => Ok(HttpResponse::Ok().json(rows)),
+            Err(_) => Ok(HttpResponse::InternalServerError().into())
+        })
+        .responder()
+}
 
 #[cfg(test)]
 mod tests {

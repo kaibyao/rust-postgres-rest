@@ -1,9 +1,7 @@
 use actix_web::{
     actix::{Message},
-    // Result
 };
 use failure::Error;
-// use postgres::Connection;
 use crate::db::Connection;
 
 pub enum Tasks {
