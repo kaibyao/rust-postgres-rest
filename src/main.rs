@@ -1,4 +1,4 @@
-// This file contains a reference implementation of the library using actix-web and r2
+// This file contains a reference implementation of the library using actix-web and r2d2_postgres
 
 #![deny(clippy::complexity, clippy::correctness, clippy::perf, clippy::style)]
 
