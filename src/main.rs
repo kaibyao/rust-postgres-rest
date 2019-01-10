@@ -4,21 +4,22 @@
 
 extern crate actix_web;
 use actix_web::{
-    actix::{Addr, SyncArbiter, System},
+    actix::{/*Addr,*/ SyncArbiter, System},
     App,
     Error,
     FutureResponse,
     http,
     HttpRequest,
     HttpResponse,
-    Responder,
+    AsyncResponder,
     server,
 };
-
+extern crate futures;
+use futures::future::Future;
 extern crate num_cpus;
 
 extern crate postgres;
-use postgres::{Connection};
+// use postgres::{Connection};
 
 extern crate r2d2_postgres;
 use r2d2_postgres::{PostgresConnectionManager, TlsMode};
@@ -27,7 +28,8 @@ extern crate experiment00;
 use experiment00::{
     AppState,
     db::{create_postgres_url, DbConfig, DbExecutor, Pool},
-    rest_api_scope
+    queries::{Queries, Tasks},
+    // rest_api_scope
 };
 
 // fn greet(req: &HttpRequest) -> impl Responder {
@@ -36,9 +38,19 @@ use experiment00::{
 // }
 
 fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
+    let query = Queries {
+        limit: 0,
+        task: Tasks::GetAllTableFields
+    };
     req.state()
         .db
-        .send()
+        .send(query)
+        .from_err()
+        .and_then(|res| match res {
+            Ok(rows) => Ok(HttpResponse::Ok().json(rows)),
+            Err(_) => Ok(HttpResponse::InternalServerError().into())
+        })
+        .responder()
 }
 
 fn main() {

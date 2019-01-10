@@ -23,14 +23,16 @@ use actix_web::{
     // HttpRequest,
     // HttpResponse,
     // FutureResponse,
-    Scope,
+    // Scope,
     // State,
 };
+// use failure::Error;
 // use futures::future::Future;
 // use crate::postgres::{Connection as PgConnection};
 
 // library modules
-mod queries;
+pub mod queries;
+// use crate::queries::{Queries, Tasks};
 // use crate::rest_api::*;
 
 pub mod db;
@@ -40,38 +42,29 @@ pub struct AppState {
     pub db: Addr<DbExecutor>,
 }
 
-pub fn rest_api_scope<S: 'static>(scope: Scope<S>) -> Scope<S> {
-    // prepare_all_statements(conn);
-    scope
-    // scope
-    //     .resource("", |r| {
-    //         // GET: get list of tables
-    //         r.method(Method::GET).a(index)
-    //     })
-        // .resource("/{table}", |r| {
-        //     // GET: query table
-        //     // POST: (bulk) insert
-        //     // PUT OR PATCH: (bulk) upsert
-        //     // DELETE: delete rows (also requires confirm_delete query parameter)
-        // })
-}
+// pub fn rest_api_scope<S: 'static>(scope: Scope<S>) -> Scope<S> {
+//     // prepare_all_statements(conn);
+//     scope
+//         .resource("", |r| {
+//             // GET: get list of tables
+//             r.method(Method::GET).a(index)
+//         })
+//         // .resource("/{table}", |r| {
+//         //     // GET: query table
+//         //     // POST: (bulk) insert
+//         //     // PUT OR PATCH: (bulk) upsert
+//         //     // DELETE: delete rows (also requires confirm_delete query parameter)
+//         // })
+// }
 
 // fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
-//     let mut response = HttpResponse::build_from(req);
-//     match get_all_tables(conn) {
-//         Ok(tables) =>
-//             response
-//                 .status(StatusCode::from_u16(200).unwrap())
-//                 .json(tables),
-//         Err(message) =>
-//             response
-//                 .status(StatusCode::from_u16(500).unwrap())
-//                 .json(
-//                     ApiError {
-//                         message: message.to_string()
-//                     }
-//                 ),
-//     }
+//     let query = Queries {
+//         limit: 0,
+//         task: Tasks::GetAllTableFields
+//     };
+//     let result = Box::new(req.state()
+//         .db
+//         .send(query));
 // }
 
 #[cfg(test)]
