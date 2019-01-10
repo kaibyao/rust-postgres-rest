@@ -9,9 +9,9 @@ extern crate pretty_assertions;
 extern crate actix_web;
 extern crate failure;
 extern crate futures;
-extern crate postgres;
 extern crate r2d2;
 extern crate r2d2_postgres;
+
 use actix_web::{
     actix::{Addr, SyncArbiter},
     App,
@@ -31,13 +31,13 @@ use crate::queries::{Queries, Tasks};
 mod db;
 use crate::db::{DbExecutor, init_connection_pool};
 
-struct AppState {
-    db: Addr<DbExecutor>,
-}
-
 pub struct AppConfig<'a> {
     pub database_url: &'a str,
     pub scope_name: &'a str,
+}
+
+struct AppState {
+    db: Addr<DbExecutor>,
 }
 
 /// Takes an initialized App and config, and appends the Rest API functionality to the scope’s endpoint.
