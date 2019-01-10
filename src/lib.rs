@@ -7,54 +7,72 @@ extern crate pretty_assertions;
 
 // external crates
 extern crate actix_web;
+extern crate failure;
+extern crate futures;
 extern crate postgres;
-#[macro_use]
-extern crate serde_derive;
+extern crate r2d2;
+extern crate r2d2_postgres;
+// #[macro_use]
+// extern crate serde_derive;
 // #[macro_use]
 // extern crate serde_json;
-use crate::actix_web::{http::{Method, StatusCode}, HttpResponse, Scope};
-use crate::postgres::{Connection};
+use actix_web::{
+    actix::{Addr},
+    // Error,
+    // http::{Method/*, StatusCode*/},
+    // HttpRequest,
+    // HttpResponse,
+    // FutureResponse,
+    Scope,
+    // State,
+};
+// use futures::future::Future;
+// use crate::postgres::{Connection as PgConnection};
 
 // library modules
-mod table_api;
-use crate::table_api::*;
+mod queries;
+// use crate::rest_api::*;
 
-mod database;
-pub use crate::database::{create_postgres_url, DatabaseConfig};
+pub mod db;
+use crate::db::{DbExecutor};
 
-pub fn table_api_resource<S: 'static>(conn: &'static Connection) -> impl Fn(Scope<S>) -> Scope<S> {
-    prepare_all_statements(conn);
-
-    move |scope| {
-        scope
-            .resource("", move |r| {
-                // GET: get list of tables
-                r.method(Method::GET).f(move |req| {
-                    let mut response = HttpResponse::build_from(req);
-                    match get_all_tables(conn) {
-                        Ok(tables) =>
-                            response
-                                .status(StatusCode::from_u16(200).unwrap())
-                                .json(tables),
-                        Err(message) =>
-                            response
-                                .status(StatusCode::from_u16(500).unwrap())
-                                .json(
-                                    ApiError {
-                                        message: message.to_string()
-                                    }
-                                ),
-                    }
-                })
-            })
-            .resource("/{table}", |r| {
-                // GET: query table
-                // POST: (bulk) insert
-                // PUT OR PATCH: (bulk) upsert
-                // DELETE: delete rows (also requires confirm_delete query parameter)
-            })
-    }
+pub struct AppState {
+    pub db: Addr<DbExecutor>,
 }
+
+pub fn rest_api_scope<S: 'static>(scope: Scope<S>) -> Scope<S> {
+    // prepare_all_statements(conn);
+    scope
+    // scope
+    //     .resource("", |r| {
+    //         // GET: get list of tables
+    //         r.method(Method::GET).a(index)
+    //     })
+        // .resource("/{table}", |r| {
+        //     // GET: query table
+        //     // POST: (bulk) insert
+        //     // PUT OR PATCH: (bulk) upsert
+        //     // DELETE: delete rows (also requires confirm_delete query parameter)
+        // })
+}
+
+// fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
+//     let mut response = HttpResponse::build_from(req);
+//     match get_all_tables(conn) {
+//         Ok(tables) =>
+//             response
+//                 .status(StatusCode::from_u16(200).unwrap())
+//                 .json(tables),
+//         Err(message) =>
+//             response
+//                 .status(StatusCode::from_u16(500).unwrap())
+//                 .json(
+//                     ApiError {
+//                         message: message.to_string()
+//                     }
+//                 ),
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

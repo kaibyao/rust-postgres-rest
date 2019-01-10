@@ -8,3 +8,7 @@ Toy project for exploring Rust. Really, I'm trying to see how easy it is to recr
 1. Add security, customizability, optimizations, etc.
 1. ???
 1. Profit!
+
+## Cleanup
+
+* Remove DbConfig, just use r2d2_postgres' params
