@@ -1,16 +1,11 @@
-use actix_web::{
-    actix::{Actor, Handler,SyncContext},
-    // Result,
-};
+use actix_web::actix::{Actor, Handler, SyncContext};
 use failure::Error;
 use r2d2;
 use r2d2_postgres::{PostgresConnectionManager, TlsMode};
 
 use crate::queries::{
     get_all_table_columns,
-    Query,
-    QueryResult,
-    Tasks
+    query_types::{Query, QueryResult, Tasks},
 };
 
 /// Represents a PostgreSQL database pool
@@ -34,7 +29,7 @@ impl Handler<Query> for DbExecutor {
         let conn = self.0.get()?;
 
         match msg.task {
-            Tasks::GetAllTableColumns => get_all_table_columns(&conn)
+            Tasks::GetAllTableColumns => get_all_table_columns(&conn),
         }
     }
 }

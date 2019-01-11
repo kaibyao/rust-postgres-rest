@@ -2,15 +2,10 @@ use std::collections::HashMap;
 use failure::Error;
 use crate::db::Connection;
 
-struct Column {
-    column_name: String,
-    column_type: String,
-    is_nullable: bool,
-    default_value: String,
-}
+use super::query_types::{GetAllTableColumnsColumn, GetAllTableColumnsResult};
 
 /// Convenience type alias
-pub type GetAllTableColumnsResult = HashMap<String, Vec<Column>>;
+// pub type GetAllTableColumnsResult = HashMap<String, Vec<Column>>;
 
 /// Retrieves all user-created table names and relevant column details
 pub fn get_all_table_columns(conn: &Connection) -> Result<GetAllTableColumnsResult, Error> {
@@ -34,13 +29,13 @@ pub fn get_all_table_columns(conn: &Connection) -> Result<GetAllTableColumnsResu
 
         // create hashmap key if a column for a table has not yet been stored
         if !table_columns.contains_key(&table_name) {
-            let columns: Vec<Column> = vec![];
+            let columns: Vec<GetAllTableColumnsColumn> = vec![];
             table_columns.insert(table_name, columns);
         }
 
         // store column data for each table
         match table_columns.get(&table_name) {
-            Some(columns) => columns.push(Column {
+            Some(columns) => columns.push(GetAllTableColumnsColumn {
                 column_name: row.get(1),
                 column_type: row.get(4),
                 is_nullable: row.get(2),
