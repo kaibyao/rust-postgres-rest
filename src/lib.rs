@@ -26,7 +26,7 @@ use futures::future::Future;
 
 // library modules
 mod queries;
-use crate::queries::{Queries, Tasks};
+use crate::queries::{Query, Tasks};
 
 mod db;
 use crate::db::{DbExecutor, init_connection_pool};
@@ -59,6 +59,10 @@ pub fn add_rest_api_scope(config: &AppConfig, app: App) -> App {
                         // GET: get list of tables
                         r.method(Method::GET).a(index)
                     })
+                    .resource("/", |r| {
+                        // GET: get list of tables
+                        r.method(Method::GET).a(index)
+                    })
                     // .resource("/{table}", |r| {
                     //     // GET: query table
                     //     // POST: (bulk) insert
@@ -70,9 +74,9 @@ pub fn add_rest_api_scope(config: &AppConfig, app: App) -> App {
 }
 
 fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
-    let query = Queries {
+    let query = Query {
         limit: 0,
-        task: Tasks::GetAllTableFields
+        task: Tasks::GetAllTableColumns
     };
     req.state()
         .db

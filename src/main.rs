@@ -25,7 +25,7 @@ fn main() {
         // appends an actix-web Scope under the "/api" endpoint to app and returns it
         add_rest_api_scope(
             &AppConfig {
-                database_url: "postgresql://kaiby@localhost:3306/crossroads",
+                database_url: "postgresql://kaiby@localhost:5432/crossroads",
                 scope_name: "/api"
             },
             app

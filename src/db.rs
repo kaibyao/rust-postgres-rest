@@ -7,8 +7,9 @@ use r2d2;
 use r2d2_postgres::{PostgresConnectionManager, TlsMode};
 
 use crate::queries::{
-    get_all_tables,
-    Queries,
+    get_all_table_columns,
+    Query,
+    QueryResult,
     Tasks
 };
 
@@ -26,14 +27,14 @@ impl Actor for DbExecutor {
 }
 
 // We need to implement Handler in order to know what to do when data is sent to the actor via Addr::send(Queries {})
-impl Handler<Queries> for DbExecutor {
-    type Result = Result<Vec<String>, Error>;
+impl Handler<Query> for DbExecutor {
+    type Result = Result<QueryResult, Error>;
 
-    fn handle(&mut self, msg: Queries, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: Query, _: &mut Self::Context) -> Self::Result {
         let conn = self.0.get()?;
 
         match msg.task {
-            Tasks::GetAllTableFields => get_all_tables(&conn)
+            Tasks::GetAllTableColumns => get_all_table_columns(&conn)
         }
     }
 }
