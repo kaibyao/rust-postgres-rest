@@ -5,7 +5,7 @@ use r2d2_postgres::{PostgresConnectionManager, TlsMode};
 
 use crate::queries::{
     get_all_table_columns,
-    query_types::{Query, QueryResult, Tasks},
+    query_types::{Query, QueryResult, QueryTasks},
 };
 
 /// Represents a PostgreSQL database pool
@@ -29,7 +29,7 @@ impl Handler<Query> for DbExecutor {
         let conn = self.0.get()?;
 
         match msg.task {
-            Tasks::GetAllTableColumns => get_all_table_columns(&conn),
+            QueryTasks::GetAllTableColumns => get_all_table_columns(&conn),
         }
     }
 }

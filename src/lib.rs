@@ -11,6 +11,8 @@ extern crate failure;
 extern crate futures;
 extern crate r2d2;
 extern crate r2d2_postgres;
+#[macro_use]
+extern crate serde_derive;
 
 use actix_web::{
     actix::{Addr, SyncArbiter},
@@ -26,7 +28,7 @@ use futures::future::Future;
 
 // library modules
 mod queries;
-use crate::queries::{Query, Tasks};
+use crate::queries::query_types::{Query, QueryTasks};
 
 mod db;
 use crate::db::{DbExecutor, init_connection_pool};
@@ -76,7 +78,7 @@ pub fn add_rest_api_scope(config: &AppConfig, app: App) -> App {
 fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
     let query = Query {
         limit: 0,
-        task: Tasks::GetAllTableColumns
+        task: QueryTasks::GetAllTableColumns
     };
     req.state()
         .db

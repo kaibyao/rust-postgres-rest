@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use failure::Error;
 use crate::db::Connection;
 
-use super::query_types::{GetAllTableColumnsColumn, GetAllTableColumnsResult};
+use super::query_types::{GetAllTableColumnsColumn, QueryResult};
 
 /// Convenience type alias
 // pub type GetAllTableColumnsResult = HashMap<String, Vec<Column>>;
 
 /// Retrieves all user-created table names and relevant column details
-pub fn get_all_table_columns(conn: &Connection) -> Result<GetAllTableColumnsResult, Error> {
+pub fn get_all_table_columns(conn: &Connection) -> Result<QueryResult, Error> {
     let statement = "
         SELECT
             table_name,
@@ -30,21 +30,24 @@ pub fn get_all_table_columns(conn: &Connection) -> Result<GetAllTableColumnsResu
         // create hashmap key if a column for a table has not yet been stored
         if !table_columns.contains_key(&table_name) {
             let columns: Vec<GetAllTableColumnsColumn> = vec![];
-            table_columns.insert(table_name, columns);
+            table_columns.insert(table_name.clone(), columns);
         }
 
         // store column data for each table
-        match table_columns.get(&table_name) {
-            Some(columns) => columns.push(GetAllTableColumnsColumn {
+        if let Some(columns) = table_columns.get_mut(&table_name) {
+            let is_nullable: Option<String> = row.get(2);
+
+            columns.push(GetAllTableColumnsColumn {
                 column_name: row.get(1),
                 column_type: row.get(4),
-                is_nullable: row.get(2),
+                is_nullable: match is_nullable {
+                    Some(is_nullable_string) => if is_nullable_string.eq("true") { Some(true) } else { Some(false) },
+                    None => None
+                },
                 default_value: row.get(3),
-            }),
-            None => {}
+            });
         }
     }
 
-    // let rows: Vec<Table> = prep_statement.query(&[])?.iter().map(|row| row.get(0)).collect();
-    Ok(table_columns)
+    Ok(QueryResult::GetAllTableColumnsResult(table_columns))
 }
