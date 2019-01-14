@@ -3,17 +3,10 @@
 #![deny(clippy::complexity, clippy::correctness, clippy::perf, clippy::style)]
 
 extern crate actix_web;
-use actix_web::{
-    actix::{System},
-    App,
-    server,
-};
+use actix_web::{actix::System, server, App};
 
 extern crate experiment00;
-use experiment00::{
-    add_rest_api_scope,
-    AppConfig,
-};
+use experiment00::{add_rest_api_scope, AppConfig};
 
 fn main() {
     let actix_system_actor = System::new("experiment00");
@@ -26,9 +19,9 @@ fn main() {
         add_rest_api_scope(
             &AppConfig {
                 database_url: "postgresql://kaiby@localhost:5432/crossroads",
-                scope_name: "/api"
+                scope_name: "/api",
             },
-            app
+            app,
         )
     })
     .bind("127.0.0.1:8000")

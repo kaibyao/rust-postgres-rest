@@ -1,11 +1,8 @@
-use std::collections::HashMap;
-use failure::Error;
 use crate::db::Connection;
+use failure::Error;
+use std::collections::HashMap;
 
 use super::query_types::{GetAllTableColumnsColumn, QueryResult};
-
-/// Convenience type alias
-// pub type GetAllTableColumnsResult = HashMap<String, Vec<Column>>;
 
 /// Retrieves all user-created table names and relevant column details
 pub fn get_all_table_columns(conn: &Connection) -> Result<QueryResult, Error> {
@@ -41,8 +38,14 @@ pub fn get_all_table_columns(conn: &Connection) -> Result<QueryResult, Error> {
                 column_name: row.get(1),
                 column_type: row.get(4),
                 is_nullable: match is_nullable {
-                    Some(is_nullable_string) => if is_nullable_string.eq("true") { Some(true) } else { Some(false) },
-                    None => None
+                    Some(is_nullable_string) => {
+                        if is_nullable_string.eq("true") {
+                            Some(true)
+                        } else {
+                            Some(false)
+                        }
+                    }
+                    None => None,
                 },
                 default_value: row.get(3),
             });
