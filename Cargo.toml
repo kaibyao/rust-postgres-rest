@@ -18,16 +18,21 @@ path = "src/main.rs"
 
 [dependencies]
 actix-web = "^0.7"
+bit-vec = "^0.5"
+chrono = "^0.4"
+eui48 = "^0.4"
 failure = "^0.1"
 futures = "^0.1"
 lazy_static = "^1.2"
 num_cpus = "^1.9"
 r2d2 = "^0.8"
 r2d2_postgres = "^0.14"
+postgres = { version = "^0.15", features = ["with-bit-vec", "with-chrono", "with-eui48", "with-serde_json", "with-time", "with-uuid"] }
 regex = "^1.1"
 serde = "^1.0"
 serde_derive = "^1.0"
-# serde_json = "^1.0"
+serde_json = "^1.0"
+uuid = "^0.7"
 
 [dev-dependencies]
 clippy = "^0.0.3"

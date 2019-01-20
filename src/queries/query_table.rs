@@ -1,38 +1,43 @@
 use failure::Error;
-use r2d2_postgres::postgres::types::FromSql;
-use std::collections::HashMap;
-// use std::io::{Error as StdError, ErrorKind};
 
-use super::query_types::Query;
+use super::query_types::{convert_row_fields, Query, QueryResult};
 use super::utils::validate_sql_name;
 use crate::db::Connection;
 
-pub fn query_table(
-    conn: &Connection,
-    query: &Query,
-) -> Result<Vec<HashMap<String, Box<FromSql>>>, Error> {
+pub fn query_table(conn: &Connection, query: &Query) -> Result<QueryResult, Error> {
     validate_sql_name(&query.table)?;
 
-    let statement = "
-        SELECT
-            $1
-        FROM
-            $2
-        ;";
-    let prep_statement = conn.prepare(statement)?;
-
-    let num_columns = &query.columns.len();
-    let mut rows = vec![];
-    for row in prep_statement
-        .query(&[&query.columns.join(", "), &query.table])?
-        .iter()
-    {
-        let mut converted_row = HashMap::new();
-        for i in 0..*num_columns {
-            converted_row.insert(query.columns[i].clone(), Box::new(row.get(i)));
+    let mut statement = String::from("SELECT");
+    for i in 0..query.columns.len() {
+        match i {
+            0 => statement.push_str(&format!(" ${}", i + 1)),
+            _ => statement.push_str(&format!(", ${}", i + 1)),
         }
-        rows.push(converted_row);
     }
+    statement.push_str(&format!(" FROM {};", &query.table));
+    dbg!(&statement);
+    let prep_statement = conn.prepare(&statement)?;
 
-    Ok(rows)
+    // let results = prep_statement.query(&[&query.columns.join(", "), &query.table]);
+    // let query_params: Vec<&String> = query
+    //     .columns // Vec<String>
+    //     .iter()
+    //     .map(|c| &c) // Vec<&str>
+    //     .collect/*::<Vec<&String>>*/();
+
+    // let test: () = &[&query.columns.join(", "), &query.table];
+    // let test2: () = query_params[..];
+    let results = prep_statement
+        // .query(&[&query.columns.join(", "), &query.table])?
+        .query(&query.columns[..])?
+        .iter()
+        .map(|row| {
+            dbg!(&row);
+            convert_row_fields(&row)
+        })
+        .collect();
+
+    dbg!(&results);
+
+    Ok(QueryResult::QueryTableResult(results))
 }
