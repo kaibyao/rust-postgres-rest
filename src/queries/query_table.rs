@@ -1,4 +1,5 @@
 use failure::Error;
+// use postgres::types::ToSql;
 
 use super::query_types::{convert_row_fields, Query, QueryResult};
 use super::utils::validate_sql_name;
@@ -6,38 +7,44 @@ use crate::db::Connection;
 
 pub fn query_table(conn: &Connection, query: &Query) -> Result<QueryResult, Error> {
     validate_sql_name(&query.table)?;
-
     let mut statement = String::from("SELECT");
-    for i in 0..query.columns.len() {
-        match i {
-            0 => statement.push_str(&format!(" ${}", i + 1)),
-            _ => statement.push_str(&format!(", ${}", i + 1)),
+
+    // building prepared statement
+    for (i, column) in query.columns.iter().enumerate() {
+        validate_sql_name(&column)?;
+
+        if i == query.columns.len() - 1 {
+            statement.push_str(&format!(" {}", &column));
+        } else {
+            statement.push_str(&format!(" {},", &column));
         }
     }
+
+    // for i in 0..query.columns.len() {
+    //     match i {
+    //         0 => statement.push_str(&format!(" ${}", i + 1)),
+    //         _ => statement.push_str(&format!(", ${}", i + 1)),
+    //     }
+    // }
     statement.push_str(&format!(" FROM {};", &query.table));
-    dbg!(&statement);
+
+    // dbg!(&statement);
+
+    // sending prepared statement to postgres
     let prep_statement = conn.prepare(&statement)?;
 
-    // let results = prep_statement.query(&[&query.columns.join(", "), &query.table]);
-    // let query_params: Vec<&String> = query
-    //     .columns // Vec<String>
-    //     .iter()
-    //     .map(|c| &c) // Vec<&str>
-    //     .collect/*::<Vec<&String>>*/();
+    // preparing statement params
+    // let mut query_params: Vec<&ToSql> = vec![];
+    // for column in query.columns.iter() {
+    //     query_params.push(column);
+    // }
 
-    // let test: () = &[&query.columns.join(", "), &query.table];
-    // let test2: () = query_params[..];
     let results = prep_statement
-        // .query(&[&query.columns.join(", "), &query.table])?
-        .query(&query.columns[..])?
+        // .query(&query_params)?
+        .query(&[])?
         .iter()
-        .map(|row| {
-            dbg!(&row);
-            convert_row_fields(&row)
-        })
+        .map(|row| convert_row_fields(&row))
         .collect();
-
-    dbg!(&results);
 
     Ok(QueryResult::QueryTableResult(results))
 }

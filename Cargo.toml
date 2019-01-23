@@ -19,7 +19,7 @@ path = "src/main.rs"
 [dependencies]
 actix-web = "^0.7"
 bit-vec = "^0.5"
-chrono = "^0.4"
+chrono = { version = "^0.4", features = ["serde"] }
 eui48 = "^0.4"
 failure = "^0.1"
 futures = "^0.1"
@@ -32,7 +32,8 @@ regex = "^1.1"
 serde = "^1.0"
 serde_derive = "^1.0"
 serde_json = "^1.0"
-uuid = "^0.7"
+# need version 5 because rust-postgres requires it for UUID deserialization
+uuid = {version = "^0.5", features = ["serde"]}
 
 [dev-dependencies]
 clippy = "^0.0.3"
