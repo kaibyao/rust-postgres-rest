@@ -6,21 +6,12 @@
 extern crate pretty_assertions;
 
 // external crates
-extern crate actix_web;
-extern crate bit_vec;
-extern crate chrono;
-extern crate eui48;
-extern crate failure;
-extern crate futures;
 #[macro_use]
 extern crate lazy_static;
-extern crate r2d2;
-extern crate r2d2_postgres;
-extern crate regex;
+#[macro_use]
+extern crate postgres;
 #[macro_use]
 extern crate serde_derive;
-extern crate serde_json;
-extern crate uuid;
 
 use actix_web::{
     actix::{Addr, SyncArbiter},
@@ -114,18 +105,18 @@ fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
         columns: vec![
             "test_bigint".to_string(),
             "test_bigserial".to_string(),
-            // "test_bit".to_string(),
+            "test_bit".to_string(),
             "test_bool".to_string(),
             "test_bytea".to_string(),
             "test_char".to_string(),
             "test_citext".to_string(),
-            // "test_date".to_string(),
+            "test_date".to_string(),
             "test_float8".to_string(),
             "test_hstore".to_string(),
             "test_int".to_string(),
             "test_json".to_string(),
             "test_jsonb".to_string(),
-            // "test_macaddr".to_string(),
+            "test_macaddr".to_string(),
             "test_name".to_string(),
             "test_oid".to_string(),
             "test_real".to_string(),
@@ -133,9 +124,9 @@ fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
             "test_smallint".to_string(),
             "test_smallserial".to_string(),
             "test_text".to_string(),
-            // "test_time".to_string(),
-            // "test_timestamp".to_string(),
-            // "test_timestamptz".to_string(),
+            "test_time".to_string(),
+            "test_timestamp".to_string(),
+            "test_timestamptz".to_string(),
             "test_uuid".to_string(),
             "test_varbit".to_string(),
             "test_varchar".to_string(),
@@ -154,8 +145,7 @@ fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
             Ok(rows) => Ok(HttpResponse::Ok().json(rows)),
             // Err(_) => Ok(HttpResponse::InternalServerError().into()),
             // TODO: proper error handling
-            Err(err) => {
-                dbg!(err.to_string());
+            Err(_) => {
                 // let mut response = HttpResponse::InternalServerError();
                 // let response2 = response.reason(err_str);
                 // let response3 = response2.finish();

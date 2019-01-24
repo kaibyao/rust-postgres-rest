@@ -18,3 +18,4 @@ Toy project for exploring Rust. Really, I'm trying to see how easy it is to recr
 - Need to add filter conditions (check postgrest as their DSL is actually pretty spot on)
 - Need to be able to query for foreign key values (also need to account for when the user attempts to get the foreign key values for fields that aren't actually foreign keys)
 - Need to add a query parser for all endpoints
+- Change String usage to &str for performance reasons

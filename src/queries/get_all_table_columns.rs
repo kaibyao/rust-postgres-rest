@@ -34,18 +34,18 @@ pub fn get_all_table_columns(conn: &Connection) -> Result<QueryResult, Error> {
         if let Some(columns) = table_columns.get_mut(&table_name) {
             let is_nullable: Option<String> = row.get(2);
 
-            for column in row.columns() {
-                println!("name(): {:?}", column.name());
-                println!("type_(): {:?}", column.type_());
-                println!("type.schema(): {:?}", column.type_().schema());
-                println!("type.name(): {:?}", column.type_().name());
-                /*
-                name(): "udt_name"
-                type_(): Type(Varchar)
-                type.schema(): "pg_catalog"
-                type.name(): "varchar"
-                */
-            }
+            // for column in row.columns() {
+            //     println!("name(): {:?}", column.name());
+            //     println!("type_(): {:?}", column.type_());
+            //     println!("type.schema(): {:?}", column.type_().schema());
+            //     println!("type.name(): {:?}", column.type_().name());
+            //     /*
+            //     name(): "udt_name"
+            //     type_(): Type(Varchar)
+            //     type.schema(): "pg_catalog"
+            //     type.name(): "varchar"
+            //     */
+            // }
             // println!("{:?}", row.columns());
             // [Column { name: "table_name", type_: Type(Varchar) }, Column { name: "column_name", type_: Type(Varchar) }, Column { name: "is_nullable", type_: Type(Varchar) }, Column { name: "column_default", type_: Type(Varchar) }, Column { name: "udt_name", type_: Type(Varchar) }]
 
