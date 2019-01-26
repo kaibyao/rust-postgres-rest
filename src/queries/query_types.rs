@@ -157,7 +157,8 @@ pub fn convert_row_fields(row: &Row) -> RowFields {
 pub struct Query {
     pub columns: Vec<String>,
     pub conditions: Option<String>,
-    pub limit: Option<i32>,
+    pub limit: i32,
+    pub offset: i32,
     pub order_by: Option<String>,
     pub table: String,
     pub task: QueryTasks,
