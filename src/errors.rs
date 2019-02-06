@@ -1,8 +1,8 @@
 use actix_web::{error, http, HttpResponse};
 use failure::Fail;
-// use std::collections::HashMap;
 
 #[derive(Debug, Serialize)]
+/// Describes the type of notification we are sending
 pub enum MessageCategory {
     Error,
     // Info,
@@ -11,8 +11,9 @@ pub enum MessageCategory {
 
 #[derive(Debug, Fail, Serialize)]
 #[serde(untagged)]
+/// A wrapper around all the errors we can run into.
 pub enum ApiError {
-    // covers ALL errors that can be reported to the user
+    /// Describes errors that are generated due to user misuse.
     #[fail(
         display = "{}: {} Offender: {}.\n\nDetails:\n{}",
         code, message, offender, details
@@ -26,6 +27,7 @@ pub enum ApiError {
         http_status: u16,
     },
 
+    /// Describes errors that are generated due to system errors.
     #[fail(display = "An internal error has occurred.")]
     InternalError {
         category: MessageCategory,
@@ -34,50 +36,6 @@ pub enum ApiError {
         message: &'static str,
         http_status: u16,
     },
-}
-
-#[derive(Debug, Serialize)]
-pub struct DisplayUserError<'a> {
-    code: &'static str,
-    details: String,
-    message: &'static str,
-    offender: Option<&'a str>,
-}
-
-impl error::ResponseError for ApiError {
-    fn error_response(&self) -> HttpResponse {
-        match self {
-            ApiError::UserError {
-                code,
-                details,
-                http_status,
-                message,
-                offender,
-                ..
-            } => HttpResponse::build(http::StatusCode::from_u16(*http_status).unwrap()).json(
-                DisplayUserError {
-                    code,
-                    details: details.to_string(),
-                    message,
-                    offender: Some(offender),
-                },
-            ),
-            ApiError::InternalError {
-                code,
-                details,
-                http_status,
-                message,
-                ..
-            } => HttpResponse::build(http::StatusCode::from_u16(*http_status).unwrap()).json(
-                DisplayUserError {
-                    code,
-                    details: details.to_string(),
-                    message,
-                    offender: None,
-                },
-            ),
-        }
-    }
 }
 
 impl From<r2d2::Error> for ApiError {
@@ -114,6 +72,54 @@ impl From<postgres::Error> for ApiError {
     }
 }
 
+// How ApiErrors are formatted for an http response
+impl error::ResponseError for ApiError {
+    fn error_response(&self) -> HttpResponse {
+        // Used for formatting the ApiErrors that occur to display in an http response.
+        #[derive(Debug, Serialize)]
+        struct DisplayUserError<'a> {
+            code: &'static str,
+            details: String,
+            message: &'static str,
+            offender: Option<&'a str>,
+        }
+
+        match self {
+            ApiError::UserError {
+                code,
+                details,
+                http_status,
+                message,
+                offender,
+                ..
+            } => HttpResponse::build(http::StatusCode::from_u16(*http_status).unwrap()).json(
+                DisplayUserError {
+                    code,
+                    details: details.to_string(),
+                    message,
+                    offender: Some(offender),
+                },
+            ),
+
+            ApiError::InternalError {
+                code,
+                details,
+                http_status,
+                message,
+                ..
+            } => HttpResponse::build(http::StatusCode::from_u16(*http_status).unwrap()).json(
+                DisplayUserError {
+                    code,
+                    details: details.to_string(),
+                    message,
+                    offender: None,
+                },
+            ),
+        }
+    }
+}
+
+/// Used in other functions to generate an error
 pub fn generate_error(err_id: &'static str, offender: String) -> ApiError {
     match err_id {
         "INVALID_SQL_IDENTIFIER" => ApiError::UserError {
@@ -124,6 +130,8 @@ pub fn generate_error(err_id: &'static str, offender: String) -> ApiError {
             message: "There was an identifier (such as table or column name) that did not have valid characters.",
             offender,
         },
+
+        // If this happens, that means we forgot to implement an error handler
         _ => ApiError::UserError {
             category: MessageCategory::Error,
             code: err_id,
