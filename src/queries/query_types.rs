@@ -1,6 +1,6 @@
+use crate::errors::ApiError;
 use actix_web::actix::Message;
 use eui48::Eui48;
-use failure::Error;
 use postgres::rows::Row;
 use postgres::types::{FromSql, Type, MACADDR};
 use postgres_protocol::types::macaddr_from_sql;
@@ -165,7 +165,7 @@ pub struct Query {
 }
 
 impl Message for Query {
-    type Result = Result<QueryResult, Error>;
+    type Result = Result<QueryResult, ApiError>;
 }
 
 /// Represents the different query tasks that is performed by this library

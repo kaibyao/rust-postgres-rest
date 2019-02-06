@@ -12,10 +12,7 @@ pub fn validate_sql_name(name: &str) -> Result<(), ApiError> {
     }
 
     if !VALID_REGEX.is_match(name) {
-        return Err(generate_error(
-            "INVALID_SQL_IDENTIFIER",
-            vec![name.to_string()],
-        ));
+        return Err(generate_error("INVALID_SQL_IDENTIFIER", name.to_string()));
     }
     Ok(())
 }

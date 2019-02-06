@@ -1,5 +1,6 @@
 use actix_web::actix::{Actor, Handler, SyncContext};
-use failure::Error;
+// use failure::Error;
+use crate::errors::ApiError;
 use r2d2;
 use r2d2_postgres::{PostgresConnectionManager, TlsMode};
 
@@ -23,7 +24,7 @@ impl Actor for DbExecutor {
 
 // We need to implement Handler in order to know what to do when data is sent to the actor via Addr::send(Queries {})
 impl Handler<Query> for DbExecutor {
-    type Result = Result<QueryResult, Error>;
+    type Result = Result<QueryResult, ApiError>;
 
     fn handle(&mut self, msg: Query, _: &mut Self::Context) -> Self::Result {
         let conn = self.0.get()?;

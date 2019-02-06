@@ -1,11 +1,12 @@
 use actix_web::{AsyncResponder, FutureResponse, HttpRequest, HttpResponse};
-use failure::Error;
+// use failure::Error;
+use crate::errors::ApiError;
 use futures::Future;
 
 use crate::queries::query_types::{Query, QueryTasks};
 use crate::AppState;
 
-pub fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
+pub fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, ApiError> {
     let query = Query {
         columns: vec![],
         conditions: None,

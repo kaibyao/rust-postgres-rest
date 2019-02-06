@@ -1,11 +1,11 @@
 use crate::db::Connection;
-use failure::Error;
+use crate::errors::ApiError;
 use std::collections::HashMap;
 
 use super::query_types::{GetAllTableColumnsColumn, QueryResult};
 
 /// Retrieves all user-created table names and relevant column details
-pub fn get_all_table_columns(conn: &Connection) -> Result<QueryResult, Error> {
+pub fn get_all_table_columns(conn: &Connection) -> Result<QueryResult, ApiError> {
     let statement = "
         SELECT
             table_name,

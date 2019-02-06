@@ -1,11 +1,11 @@
 use actix_web::{AsyncResponder, FutureResponse, HttpRequest, HttpResponse};
-use failure::Error;
 use futures::Future;
 
+use crate::errors::ApiError;
 use crate::queries::query_types::{Query, QueryTasks};
 use crate::AppState;
 
-pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
+pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, ApiError> {
     let table: String = req.match_info().query("table").unwrap();
 
     let query_params = req.query();
@@ -92,11 +92,13 @@ pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, 
             Ok(rows) => Ok(HttpResponse::Ok().json(rows)),
             // Err(_) => Ok(HttpResponse::InternalServerError().into()),
             // TODO: proper error handling
-            Err(_) => {
+            Err(err) => {
                 // let mut response = HttpResponse::InternalServerError();
                 // let response2 = response.reason(err_str);
                 // let response3 = response2.finish();
-                Ok(HttpResponse::InternalServerError().into())
+                // Ok(HttpResponse::InternalServerError().into())
+                // Ok(HttpResponse::from_error(err))
+                Err(err)
             }
         })
         .responder()
