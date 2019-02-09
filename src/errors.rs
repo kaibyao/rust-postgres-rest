@@ -42,7 +42,7 @@ impl From<r2d2::Error> for ApiError {
     fn from(err: r2d2::Error) -> Self {
         ApiError::InternalError {
             category: MessageCategory::Error,
-            code: "DATABASE_ERROR",
+            code: "DATABASE_ERROR_R2D2",
             details: format!("{}", err),
             message: "A database error occurred (r2d2).",
             http_status: 500,
@@ -64,7 +64,7 @@ impl From<postgres::Error> for ApiError {
     fn from(err: postgres::Error) -> Self {
         ApiError::InternalError {
             category: MessageCategory::Error,
-            code: "DATABASE_ERROR",
+            code: "DATABASE_ERROR_POSTGRES",
             details: format!("{}", err),
             message: "A database error occurred (postgres).",
             http_status: 500,

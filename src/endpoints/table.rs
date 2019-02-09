@@ -30,8 +30,21 @@ pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, 
         None => default_offset,
     };
 
-    dbg!(query_params);
-    dbg!(limit);
+    // dbg!(query_params);
+    // dbg!(limit);
+
+    // extract columns
+    let columns: Vec<String> = match &query_params.get("columns") {
+        Some(columns_str) => columns_str
+            .split(',')
+            .map(|column_str_raw| String::from(column_str_raw.trim()))
+            .collect(),
+        None => vec![],
+    };
+
+    // if &columns.len() == &0 {
+    //     // need to return the table's stats: number of rows, the foreign keys associated with this table, and column names + types
+    // }
 
     // query string parameters:
     // columns
@@ -42,41 +55,14 @@ pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, 
     // where ()
     // limit (default 10000)
     // offset (default 0)
+    // order by
 
     // request headers
     // Range (alternative to limit/offset). if both limit or offset AND range headers are present, return error.
 
     //
     let query = Query {
-        columns: vec![
-            "test_bigint".to_string(),
-            "test_bigserial".to_string(),
-            "test_bit".to_string(),
-            "test_bool".to_string(),
-            "test_bytea".to_string(),
-            "test_char".to_string(),
-            "test_citext".to_string(),
-            "test_date".to_string(),
-            "test_float8".to_string(),
-            "test_hstore".to_string(),
-            "test_int".to_string(),
-            "test_json".to_string(),
-            "test_jsonb".to_string(),
-            "test_macaddr".to_string(),
-            "test_name".to_string(),
-            "test_oid".to_string(),
-            "test_real".to_string(),
-            "test_serial".to_string(),
-            "test_smallint".to_string(),
-            "test_smallserial".to_string(),
-            "test_text".to_string(),
-            "test_time".to_string(),
-            "test_timestamp".to_string(),
-            "test_timestamptz".to_string(),
-            "test_uuid".to_string(),
-            "test_varbit".to_string(),
-            "test_varchar".to_string(),
-        ],
+        columns,
         conditions: None,
         limit,
         offset,
@@ -84,6 +70,7 @@ pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, 
         table,
         task: QueryTasks::QueryTable,
     };
+
     req.state()
         .db
         .send(query)
