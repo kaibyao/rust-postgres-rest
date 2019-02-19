@@ -4,11 +4,12 @@ pub use self::get_all_table_columns::get_all_table_columns;
 mod query_table;
 pub use self::query_table::query_table;
 
+mod query_table_stats;
+pub use self::query_table_stats::get_table_stats;
+
 pub mod query_types;
 
 mod utils;
-
-// pub fn query_table(conn: &Connection) {}
 
 // pub fn insert_into_table(conn: &Connection) {}
 

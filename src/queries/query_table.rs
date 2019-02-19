@@ -1,10 +1,9 @@
-use crate::errors::ApiError;
-// use postgres::types::ToSql;
-
 use super::query_types::{convert_row_fields, Query, QueryResult};
 use super::utils::validate_sql_name;
 use crate::db::Connection;
+use crate::errors::ApiError;
 
+/// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query
 pub fn query_table(conn: &Connection, query: &Query) -> Result<QueryResult, ApiError> {
     validate_sql_name(&query.table)?;
     let mut statement = String::from("SELECT");

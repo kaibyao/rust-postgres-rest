@@ -42,9 +42,29 @@ pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, 
         None => vec![],
     };
 
-    // if &columns.len() == &0 {
-    //     // need to return the table's stats: number of rows, the foreign keys associated with this table, and column names + types
-    // }
+    let query = if columns.is_empty() {
+        // need to return the table's stats
+        Query {
+            columns,
+            conditions: None,
+            limit,
+            offset,
+            order_by: None,
+            table,
+            task: QueryTasks::QueryTableStats,
+        }
+    } else {
+        // get table rows
+        Query {
+            columns,
+            conditions: None,
+            limit,
+            offset,
+            order_by: None,
+            table,
+            task: QueryTasks::QueryTable,
+        }
+    };
 
     // query string parameters:
     // columns
@@ -59,17 +79,6 @@ pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, 
 
     // request headers
     // Range (alternative to limit/offset). if both limit or offset AND range headers are present, return error.
-
-    //
-    let query = Query {
-        columns,
-        conditions: None,
-        limit,
-        offset,
-        order_by: None,
-        table,
-        task: QueryTasks::QueryTable,
-    };
 
     req.state()
         .db
