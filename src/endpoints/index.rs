@@ -16,6 +16,12 @@ pub fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, ApiErr
                 "GET": {
                     "description": "Queries {table} with given parameters using SELECT. If no columns are provided, returns stats for {table}.",
                     "query_params": {
+                        "columns": {
+                            "default": null,
+                            "description": "A list of column names for which values are retrieved.",
+                            "example": "col1,col2,col_infinity",
+                            "type": "string"
+                        },
                         "limit": {
                             "default": 10000,
                             "description": "The maximum number of rows that can be returned.",
