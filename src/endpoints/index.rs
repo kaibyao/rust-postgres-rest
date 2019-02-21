@@ -1,16 +1,20 @@
-use crate::errors::ApiError;
-use actix_web::{AsyncResponder, FutureResponse, HttpRequest, HttpResponse};
-use futures::Future;
+use actix_web::{HttpRequest, HttpResponse};
 use serde_json::{json, Value};
 
-use crate::queries::query_types::{Query, QueryTasks};
 use crate::AppState;
 
-pub fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, ApiError> {
+pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
     lazy_static! {
         static ref endpoints_json: Value = json!({
+            "endpoints": {
             "/": {
                 "GET": "The current endpoint. Displays REST API endpoints and available tables."
+            },
+            "/table": {
+                "GET": "Displays list of tables.",
+                "POST": "Create table (not implemented)",
+                "PUT|PATCH": "Update table (not implemented)",
+                "DELETE": "Delete table (not implemented)",
             },
             "/{table}": {
                 "GET": {
@@ -63,30 +67,9 @@ pub fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, ApiErr
                         }
                     }
                 }
-            }
+            }}
         });
     }
 
-    let query: Query = Query {
-        columns: vec![],
-        conditions: None,
-        limit: 0,
-        offset: 0,
-        order_by: None,
-        table: "".to_string(),
-        task: QueryTasks::GetAllTables,
-    };
-
-    req.state()
-        .db
-        .send(query)
-        .from_err()
-        .and_then(|res| match res {
-            Ok(tables) => Ok(HttpResponse::Ok().json(json!({
-                "endpoints": &*endpoints_json,
-                "tables": tables
-            }))),
-            Err(err) => Err(err),
-        })
-        .responder()
+    HttpResponse::Ok().json(&*endpoints_json)
 }

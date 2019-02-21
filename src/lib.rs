@@ -25,7 +25,7 @@ mod db;
 use crate::db::{init_connection_pool, DbExecutor};
 
 mod endpoints;
-use endpoints::{index, query_table};
+use endpoints::{get_all_table_names, index, query_table};
 
 pub mod errors;
 
@@ -54,21 +54,15 @@ pub fn add_rest_api_scope(config: &AppConfig, app: App) -> App {
             },
             |nested_scope| {
                 nested_scope
-                    .resource("", |r| {
-                        // GET: get list of tables
-                        // TODO: maybe get list of endpoints?
-                        r.method(Method::GET).f(index)
+                    .resource("", |r| r.method(Method::GET).f(index))
+                    .resource("/", |r| r.method(Method::GET).f(index))
+                    .resource("/table", |r| {
+                        // GET: if table_name is given, get column details for table, otherwise give list of tables
+                        r.method(Method::GET).a(get_all_table_names)
+                        // POST: create new table
+                        // PUT: update table
+                        // DELETE: delete table, requires table_name
                     })
-                    .resource("/", |r| {
-                        // GET: get list of tables
-                        r.method(Method::GET).f(index)
-                    })
-                    // .resource("/table", |r| {
-                    //     // GET: if table_name is given, get column details for table, otherwise give list of tables
-                    //     // POST: create new table
-                    //     // PUT: update table
-                    //     // DELETE: delete table, requires table_name
-                    // })
                     .resource("/{table}", |r| {
                         // GET: query table
                         r.method(Method::GET).a(query_table)

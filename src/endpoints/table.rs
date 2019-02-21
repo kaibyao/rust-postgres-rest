@@ -8,6 +8,29 @@ use crate::queries::{
 };
 use crate::AppState;
 
+// Retrieves a list of table names that exist in the DB.
+pub fn get_all_table_names(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, ApiError> {
+    let query: Query = Query {
+        columns: vec![],
+        conditions: None,
+        limit: 0,
+        offset: 0,
+        order_by: None,
+        table: "".to_string(),
+        task: QueryTasks::GetAllTables,
+    };
+
+    req.state()
+        .db
+        .send(query)
+        .from_err()
+        .and_then(|res| match res {
+            Ok(tables) => Ok(HttpResponse::Ok().json(tables)),
+            Err(err) => Err(err),
+        })
+        .responder()
+}
+
 /// Queries a table using SELECT.
 pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, ApiError> {
     let table: String = req.match_info().query("table").unwrap();
