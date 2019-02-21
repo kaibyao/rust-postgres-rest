@@ -1,5 +1,7 @@
 // used for dev/tests
 #![deny(clippy::complexity, clippy::correctness, clippy::perf, clippy::style)]
+// to serialize large json (like the index)
+#![recursion_limit = "128"]
 
 #[cfg(test)]
 #[macro_use]
@@ -55,11 +57,11 @@ pub fn add_rest_api_scope(config: &AppConfig, app: App) -> App {
                     .resource("", |r| {
                         // GET: get list of tables
                         // TODO: maybe get list of endpoints?
-                        r.method(Method::GET).a(index)
+                        r.method(Method::GET).f(index)
                     })
                     .resource("/", |r| {
                         // GET: get list of tables
-                        r.method(Method::GET).a(index)
+                        r.method(Method::GET).f(index)
                     })
                     // .resource("/table", |r| {
                     //     // GET: if table_name is given, get column details for table, otherwise give list of tables

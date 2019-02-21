@@ -1,4 +1,3 @@
-// use failure::Error;
 use crate::errors::{generate_error, ApiError};
 use regex::Regex;
 

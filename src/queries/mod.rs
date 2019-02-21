@@ -1,5 +1,5 @@
-mod get_all_table_columns;
-pub use self::get_all_table_columns::get_all_table_columns;
+mod get_all_tables;
+pub use self::get_all_tables::get_all_tables;
 
 mod query_table;
 pub use self::query_table::query_table;
@@ -9,7 +9,7 @@ pub use self::query_table_stats::get_table_stats;
 
 pub mod query_types;
 
-mod utils;
+pub mod utils;
 
 // pub fn insert_into_table(conn: &Connection) {}
 

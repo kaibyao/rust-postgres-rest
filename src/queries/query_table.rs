@@ -19,14 +19,22 @@ pub fn query_table(conn: &Connection, query: &Query) -> Result<QueryResult, ApiE
         }
     }
 
-    // for i in 0..query.columns.len() {
-    //     match i {
-    //         0 => statement.push_str(&format!(" ${}", i + 1)),
-    //         _ => statement.push_str(&format!(", ${}", i + 1)),
-    //     }
-    // }
-    statement.push_str(&format!(" FROM {};", &query.table));
+    // TODO: add foreign key traversal
 
+    statement.push_str(&format!(" FROM {}", &query.table));
+
+    // TODO: add WHERE parsing
+
+    // ORDER BY
+    // match query.order_by {
+    //     Some(field)
+    // }
+
+    // LIMIT
+
+    // OFFSET
+
+    statement.push_str(";");
     // dbg!(&statement);
 
     // sending prepared statement to postgres

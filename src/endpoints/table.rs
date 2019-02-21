@@ -2,9 +2,13 @@ use actix_web::{AsyncResponder, FutureResponse, HttpRequest, HttpResponse};
 use futures::Future;
 
 use crate::errors::ApiError;
-use crate::queries::query_types::{Query, QueryTasks};
+use crate::queries::{
+    query_types::{Query, QueryTasks},
+    utils::validate_sql_name,
+};
 use crate::AppState;
 
+/// Queries a table using SELECT.
 pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, ApiError> {
     let table: String = req.match_info().query("table").unwrap();
 
@@ -30,11 +34,8 @@ pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, 
         None => default_offset,
     };
 
-    // dbg!(query_params);
-    // dbg!(limit);
-
     // extract columns
-    let columns: Vec<String> = match &query_params.get("columns") {
+    let columns: Vec<String> = match query_params.get("columns") {
         Some(columns_str) => columns_str
             .split(',')
             .map(|column_str_raw| String::from(column_str_raw.trim()))
@@ -42,43 +43,30 @@ pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, 
         None => vec![],
     };
 
-    let query = if columns.is_empty() {
-        // need to return the table's stats
-        Query {
-            columns,
-            conditions: None,
-            limit,
-            offset,
-            order_by: None,
-            table,
-            task: QueryTasks::QueryTableStats,
-        }
-    } else {
-        // get table rows
-        Query {
-            columns,
-            conditions: None,
-            limit,
-            offset,
-            order_by: None,
-            table,
-            task: QueryTasks::QueryTable,
-        }
+    // extract ORDER BY
+    let order_by: Option<String> = match query_params.get("order_by") {
+        Some(order_by_str) => match validate_sql_name(order_by_str) {
+            Ok(_) => Some(order_by_str.to_string()),
+            Err(_) => None,
+        },
+        None => None,
     };
 
-    // query string parameters:
-    // columns
-    //      requesting to `/{table}` without `columns`:
-    //      - number of rows (`count(*)`)
-    //      - relations (references and referenced_by)
-    //      - and column names and their type
-    // where ()
-    // limit (default 10000)
-    // offset (default 0)
-    // order by
+    let task = if columns.is_empty() {
+        QueryTasks::QueryTableStats
+    } else {
+        QueryTasks::QueryTable
+    };
 
-    // request headers
-    // Range (alternative to limit/offset). if both limit or offset AND range headers are present, return error.
+    let query = Query {
+        columns,
+        conditions: None,
+        limit,
+        offset,
+        order_by,
+        table,
+        task,
+    };
 
     req.state()
         .db
@@ -86,16 +74,7 @@ pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, 
         .from_err()
         .and_then(|res| match res {
             Ok(rows) => Ok(HttpResponse::Ok().json(rows)),
-            // Err(_) => Ok(HttpResponse::InternalServerError().into()),
-            // TODO: proper error handling
-            Err(err) => {
-                // let mut response = HttpResponse::InternalServerError();
-                // let response2 = response.reason(err_str);
-                // let response3 = response2.finish();
-                // Ok(HttpResponse::InternalServerError().into())
-                // Ok(HttpResponse::from_error(err))
-                Err(err)
-            }
+            Err(err) => Err(err),
         })
         .responder()
 }

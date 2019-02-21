@@ -7,20 +7,6 @@ use postgres_protocol::types::macaddr_from_sql;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 
-// get_all_table_columns types
-
-#[derive(Serialize)]
-/// Represents a single table column returned by get_all_table_columns
-pub struct GetAllTableColumnsColumn {
-    pub column_name: Option<String>,
-    pub column_type: Option<String>,
-    pub is_nullable: Option<bool>,
-    pub default_value: Option<String>,
-}
-
-/// Convenience type alias
-pub type GetAllTableColumnsResult = HashMap<String, Vec<GetAllTableColumnsColumn>>;
-
 // query_table types
 
 #[derive(Debug, Serialize)]
@@ -240,7 +226,7 @@ impl Message for Query {
 
 /// Represents the different query tasks that is performed by this library
 pub enum QueryTasks {
-    GetAllTableColumns,
+    GetAllTables,
     // InsertIntoTable,
     // UpsertIntoTable,
     // DeleteTableRows,
@@ -253,7 +239,7 @@ pub enum QueryTasks {
 #[serde(untagged)]
 /// Represents the response from sending a QueryTask to DbExecutor
 pub enum QueryResult {
-    GetAllTableColumnsResult(GetAllTableColumnsResult),
+    GetAllTablesResult(Vec<String>),
     QueryTableResult(Vec<RowFields>),
     TableStats(TableStats),
     // QueryTable(Result<
