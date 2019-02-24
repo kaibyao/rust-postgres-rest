@@ -31,8 +31,8 @@ impl Handler<Query> for DbExecutor {
 
         match msg.task {
             QueryTasks::GetAllTables => get_all_tables(&conn),
-            QueryTasks::QueryTable => query_table(&conn, &msg),
-            QueryTasks::QueryTableStats => get_table_stats(&conn, &msg.params.table),
+            QueryTasks::QueryTable => query_table(&conn, msg),
+            QueryTasks::QueryTableStats => get_table_stats(&conn, msg.params.table),
         }
     }
 }

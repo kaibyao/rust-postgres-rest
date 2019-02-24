@@ -5,9 +5,23 @@ use crate::db::Connection;
 use crate::errors::ApiError;
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query
-pub fn query_table(conn: &Connection, query: &Query) -> Result<QueryResult, ApiError> {
+pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiError> {
     validate_sql_name(&query.params.table)?;
     let mut statement = String::from("SELECT");
+
+    // DISTINCT clause if exists
+    if let Some(distinct_str) = query.params.distinct {
+        let distinct_columns: Vec<String> = distinct_str
+            .split(',')
+            .map(|column_str_raw| String::from(column_str_raw.trim()))
+            .collect();
+
+        for column in &distinct_columns {
+            validate_sql_name(column)?;
+        }
+
+        statement.push_str(&format!(" DISTINCT ON ({}) ", distinct_columns.join(", ")));
+    }
 
     // building prepared statement
     for (i, column) in query.params.columns.iter().enumerate() {
@@ -20,20 +34,33 @@ pub fn query_table(conn: &Connection, query: &Query) -> Result<QueryResult, ApiE
         }
     }
 
-    // TODO: add foreign key traversal
-
     statement.push_str(&format!(" FROM {}", &query.params.table));
 
-    // TODO: add WHERE parsing
+    // TODO: add WHERE parsing with prepared statements
 
-    // ORDER BY
-    // match query.order_by {
-    //     Some(field)
-    // }
+    // TODO: add foreign key traversal
+
+    // Append ORDER BY if the param exists
+    if let Some(order_by_column_str) = query.params.order_by {
+        let columns: Vec<String> = order_by_column_str
+            .split(',')
+            .map(|column_str_raw| String::from(column_str_raw.trim()))
+            .collect();
+
+        for column in &columns {
+            validate_sql_name(column)?;
+        }
+
+        statement.push_str(&format!(" ORDER BY {}", columns.join(", ")));
+    }
 
     // LIMIT
+    statement.push_str(&format!(" LIMIT {}", query.params.limit));
 
     // OFFSET
+    if query.params.offset > 0 {
+        statement.push_str(&format!(" OFFSET {}", query.params.offset));
+    }
 
     statement.push_str(";");
     // dbg!(&statement);

@@ -76,14 +76,14 @@ pub struct TableStats {
 }
 
 /// Returns the requested table’s stats: number of rows, the foreign keys referring to the table, and column names + types
-pub fn get_table_stats(conn: &Connection, table: &str) -> Result<QueryResult, ApiError> {
-    validate_sql_name(table)?;
+pub fn get_table_stats(conn: &Connection, table: String) -> Result<QueryResult, ApiError> {
+    validate_sql_name(&table)?;
 
     // get stats
-    let row_count = get_row_count(conn, table)?;
-    let constraints = get_constraints(conn, table)?;
-    let indexes = get_indexes(conn, table)?;
-    let column_stats = get_column_stats(conn, table)?;
+    let row_count = get_row_count(conn, &table)?;
+    let constraints = get_constraints(conn, &table)?;
+    let indexes = get_indexes(conn, &table)?;
+    let column_stats = get_column_stats(conn, &table)?;
 
     // calculate primary key + referenced_by by iterating constraints and trimming the pK_column
     let mut opt_primary_key = vec![];
@@ -93,7 +93,7 @@ pub fn get_table_stats(conn: &Connection, table: &str) -> Result<QueryResult, Ap
             "foreign_key" => {
                 if let Some(fk_table) = &constraint.fk_table {
                     // push foreign key information to referenced_by if fk_table matches the current table
-                    if fk_table == table {
+                    if fk_table == &table {
                         referenced_by.push(TableReferencedBy {
                             referencing_table: constraint.table.clone(),
                             referencing_columns: constraint.columns.clone(),
