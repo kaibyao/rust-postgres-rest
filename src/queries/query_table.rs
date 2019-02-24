@@ -5,14 +5,14 @@ use crate::errors::ApiError;
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query
 pub fn query_table(conn: &Connection, query: &Query) -> Result<QueryResult, ApiError> {
-    validate_sql_name(&query.table)?;
+    validate_sql_name(&query.params.table)?;
     let mut statement = String::from("SELECT");
 
     // building prepared statement
-    for (i, column) in query.columns.iter().enumerate() {
+    for (i, column) in query.params.columns.iter().enumerate() {
         validate_sql_name(&column)?;
 
-        if i == query.columns.len() - 1 {
+        if i == query.params.columns.len() - 1 {
             statement.push_str(&format!(" {}", &column));
         } else {
             statement.push_str(&format!(" {},", &column));
@@ -21,7 +21,7 @@ pub fn query_table(conn: &Connection, query: &Query) -> Result<QueryResult, ApiE
 
     // TODO: add foreign key traversal
 
-    statement.push_str(&format!(" FROM {}", &query.table));
+    statement.push_str(&format!(" FROM {}", &query.params.table));
 
     // TODO: add WHERE parsing
 

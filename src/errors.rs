@@ -131,6 +131,15 @@ pub fn generate_error(err_id: &'static str, offender: String) -> ApiError {
             offender,
         },
 
+        "SQL_IDENTIFIER_KEYWORD" => ApiError::UserError {
+            category: MessageCategory::Error,
+            code: err_id,
+            details: "`table` is a reserved keyword and cannot be used to name SQL identifiers".to_string(),
+            http_status: 400,
+            message: "There was an identifier (such as table or column name) that used a reserved keyword.",
+            offender,
+        },
+
         // If this happens, that means we forgot to implement an error handler
         _ => ApiError::UserError {
             category: MessageCategory::Error,

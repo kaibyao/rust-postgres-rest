@@ -3,17 +3,11 @@
 // to serialize large json (like the index)
 #![recursion_limit = "128"]
 
-#[cfg(test)]
-#[macro_use]
-extern crate pretty_assertions;
-
 // external crates
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
-extern crate postgres;
-#[macro_use]
-extern crate serde_derive;
+extern crate serde;
 
 use actix::{Addr, SyncArbiter};
 use actix_web::{actix, http::Method, App};
@@ -27,7 +21,7 @@ use crate::db::{init_connection_pool, DbExecutor};
 mod endpoints;
 use endpoints::{get_all_table_names, index, query_table};
 
-pub mod errors;
+mod errors;
 
 pub struct AppConfig<'a> {
     pub database_url: &'a str,
@@ -57,14 +51,12 @@ pub fn add_rest_api_scope(config: &AppConfig, app: App) -> App {
                     .resource("", |r| r.method(Method::GET).f(index))
                     .resource("/", |r| r.method(Method::GET).f(index))
                     .resource("/table", |r| {
-                        // GET: if table_name is given, get column details for table, otherwise give list of tables
                         r.method(Method::GET).a(get_all_table_names)
                         // POST: create new table
                         // PUT: update table
                         // DELETE: delete table, requires table_name
                     })
                     .resource("/{table}", |r| {
-                        // GET: query table
                         r.method(Method::GET).a(query_table)
                         // POST: (bulk) insert
                         // PUT OR PATCH: (bulk) upsert

@@ -1,11 +1,79 @@
-use super::query_types::{
-    Constraint, QueryResult, TableColumnStat, TableIndex, TableReferencedBy, TableStats,
-};
+use super::query_types::QueryResult;
 use super::utils::validate_sql_name;
 use crate::db::Connection;
 use crate::errors::ApiError;
 use regex::Regex;
 use std::collections::HashMap;
+
+#[derive(Debug, Serialize)]
+/// Stats for a single column of a table
+pub struct TableColumnStat {
+    /// name of column
+    pub column_name: String,
+    /// type of column
+    pub column_type: String,
+    /// default value of column
+    pub default_value: Option<String>,
+    /// if null can be a column value
+    pub is_nullable: bool,
+    /// whether the column is a foreign key referencing another table
+    pub is_foreign_key: bool,
+    /// table being referenced (if is_foreign_key)
+    pub foreign_key_table: Option<String>,
+    /// table column being referenced (if is_foreign_key)
+    pub foreign_key_columns: Option<String>,
+    /// If data_type identifies a character or bit string type, the declared maximum length; null for all other data types or if no maximum length was declared.
+    pub char_max_length: Option<i32>,
+    /// If data_type identifies a character type, the maximum possible length in octets (bytes) of a datum; null for all other data types. The maximum octet length depends on the declared character maximum length (see above) and the server encoding.
+    pub char_octet_length: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+/// Details about other tables’ foreign keys that are referencing the current table
+pub struct TableReferencedBy {
+    /// The table with a foreign key referencing the current table
+    pub referencing_table: String,
+    /// The column that is a foreign key referencing the current table
+    pub referencing_columns: Vec<String>,
+    /// the column of the current table being referenced by the foreign key
+    pub columns_referenced: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+/// A single index on the table.
+pub struct TableIndex {
+    /// index name
+    pub name: String,
+    /// columns involved
+    pub columns: Vec<String>,
+    /// btree, hash, gin, etc.
+    pub access_method: String,
+    pub is_exclusion: bool,
+    pub is_primary_key: bool,
+    pub is_unique: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Constraint {
+    pub name: String,
+    pub table: String,
+    pub columns: Vec<String>,
+    pub constraint_type: &'static str,
+    pub definition: String,
+    pub fk_table: Option<String>,
+    pub fk_columns: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+/// A table’s stats: columns, indexes, foreign + primary keys, number of rows.
+pub struct TableStats {
+    pub columns: Vec<TableColumnStat>,
+    pub constraints: Vec<Constraint>,
+    pub indexes: Vec<TableIndex>,
+    pub primary_key: Option<Vec<String>>,
+    pub referenced_by: Vec<TableReferencedBy>,
+    pub rows: u64,
+}
 
 /// Returns the requested table’s stats: number of rows, the foreign keys referring to the table, and column names + types
 pub fn get_table_stats(conn: &Connection, table: &str) -> Result<QueryResult, ApiError> {

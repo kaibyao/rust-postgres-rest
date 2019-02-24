@@ -4,8 +4,8 @@ pub use self::get_all_tables::get_all_tables;
 mod query_table;
 pub use self::query_table::query_table;
 
-mod query_table_stats;
-pub use self::query_table_stats::get_table_stats;
+mod table_stats;
+pub use self::table_stats::get_table_stats;
 
 pub mod query_types;
 

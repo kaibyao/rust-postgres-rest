@@ -1,83 +1,17 @@
+use super::table_stats::TableStats;
 use crate::errors::ApiError;
-use actix_web::actix::Message;
+use crate::AppState;
+use actix_web::{actix::Message, HttpRequest};
 use eui48::Eui48;
-use postgres::rows::Row;
-use postgres::types::{FromSql, Type, MACADDR};
+use postgres::{
+    accepts,
+    rows::Row,
+    types::{FromSql, Type, MACADDR},
+};
 use postgres_protocol::types::macaddr_from_sql;
+use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::error::Error as StdError;
-
-// query_table types
-
-#[derive(Debug, Serialize)]
-/// Stats for a single column of a table
-pub struct TableColumnStat {
-    /// name of column
-    pub column_name: String,
-    /// type of column
-    pub column_type: String,
-    /// default value of column
-    pub default_value: Option<String>,
-    /// if null can be a column value
-    pub is_nullable: bool,
-    /// whether the column is a foreign key referencing another table
-    pub is_foreign_key: bool,
-    /// table being referenced (if is_foreign_key)
-    pub foreign_key_table: Option<String>,
-    /// table column being referenced (if is_foreign_key)
-    pub foreign_key_columns: Option<String>,
-    /// If data_type identifies a character or bit string type, the declared maximum length; null for all other data types or if no maximum length was declared.
-    pub char_max_length: Option<i32>,
-    /// If data_type identifies a character type, the maximum possible length in octets (bytes) of a datum; null for all other data types. The maximum octet length depends on the declared character maximum length (see above) and the server encoding.
-    pub char_octet_length: Option<i32>,
-}
-
-#[derive(Debug, Serialize)]
-/// Details about other tables’ foreign keys that are referencing the current table
-pub struct TableReferencedBy {
-    /// The table with a foreign key referencing the current table
-    pub referencing_table: String,
-    /// The column that is a foreign key referencing the current table
-    pub referencing_columns: Vec<String>,
-    /// the column of the current table being referenced by the foreign key
-    pub columns_referenced: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-/// A single index on the table.
-pub struct TableIndex {
-    /// index name
-    pub name: String,
-    /// columns involved
-    pub columns: Vec<String>,
-    /// btree, hash, gin, etc.
-    pub access_method: String,
-    pub is_exclusion: bool,
-    pub is_primary_key: bool,
-    pub is_unique: bool,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Constraint {
-    pub name: String,
-    pub table: String,
-    pub columns: Vec<String>,
-    pub constraint_type: &'static str,
-    pub definition: String,
-    pub fk_table: Option<String>,
-    pub fk_columns: Option<Vec<String>>,
-}
-
-#[derive(Debug, Serialize)]
-/// A table’s stats: columns, indexes, foreign + primary keys, number of rows.
-pub struct TableStats {
-    pub columns: Vec<TableColumnStat>,
-    pub constraints: Vec<Constraint>,
-    pub indexes: Vec<TableIndex>,
-    pub primary_key: Option<Vec<String>>,
-    pub referenced_by: Vec<TableReferencedBy>,
-    pub rows: u64,
-}
 
 /// we have to define our own MacAddress type in order for Serde to serialize it properly. Really it's a copy of eui48's MacAddress
 #[derive(Debug, Serialize)]
@@ -136,6 +70,7 @@ pub enum ColumnType {
     Char(ColumnValue<String>),
     Citext(ColumnValue<String>),
     Date(ColumnValue<chrono::NaiveDate>),
+    Decimal(ColumnValue<Decimal>),
     Float8(ColumnValue<f64>),
     HStore(ColumnValue<HashMap<String, Option<String>>>),
     Int(ColumnValue<i32>),
@@ -185,6 +120,9 @@ pub fn convert_row_fields(row: &Row) -> RowFields {
                 "jsonb" => ColumnType::JsonB(row.get(i)),
                 "macaddr" => ColumnType::MacAddr(row.get(i)),
                 "name" => ColumnType::Name(row.get(i)),
+                // using rust-decimal per discussion at https://www.reddit.com/r/rust/comments/a7frqj/have_anyone_reviewed_any_of_the_decimal_crates/.
+                // keep in mind that at the time of this writing, diesel uses bigdecimal
+                "numeric" => ColumnType::Decimal(row.get(i)),
                 "oid" => ColumnType::Oid(row.get(i)),
                 "text" => ColumnType::Text(row.get(i)),
                 "time" => ColumnType::Time(row.get(i)),
@@ -209,14 +147,69 @@ pub fn convert_row_fields(row: &Row) -> RowFields {
 
 // used for sending queries
 
-/// Represents a single database query to be sent via DbExecutor
-pub struct Query {
+/// Represents a single database query
+pub struct QueryParams {
     pub columns: Vec<String>,
     pub conditions: Option<String>,
+    pub distinct: Option<String>,
     pub limit: i32,
     pub offset: i32,
     pub order_by: Option<String>,
     pub table: String,
+}
+
+impl QueryParams {
+    pub fn from_http_request(req: &HttpRequest<AppState>) -> Self {
+        let default_limit = 10000;
+        let default_offset = 0;
+
+        let query_params = req.query();
+
+        QueryParams {
+            columns: match query_params.get("columns") {
+                Some(columns_str) => columns_str
+                    .split(',')
+                    .map(|column_str_raw| String::from(column_str_raw.trim()))
+                    .collect(),
+                None => vec![],
+            },
+            conditions: match query_params.get("where") {
+                Some(where_string) => Some(where_string.clone()),
+                None => None,
+            },
+            distinct: match query_params.get("distinct") {
+                Some(distinct_string) => Some(distinct_string.clone()),
+                None => None,
+            },
+            limit: match query_params.get("limit") {
+                Some(limit_string) => match limit_string.parse() {
+                    Ok(limit_i32) => limit_i32,
+                    Err(_) => default_limit,
+                },
+                None => default_limit,
+            },
+            offset: match query_params.get("offset") {
+                Some(offset_string) => match offset_string.parse() {
+                    Ok(offset_i32) => offset_i32,
+                    Err(_) => default_offset,
+                },
+                None => default_offset,
+            },
+            order_by: match query_params.get("order_by") {
+                Some(order_by_str) => Some(order_by_str.clone()),
+                None => None,
+            },
+            table: match req.match_info().query("table") {
+                Ok(table_name) => table_name,
+                Err(_) => "".to_string(),
+            },
+        }
+    }
+}
+
+/// Represents a database task (w/ included query) to be performed by DbExecutor
+pub struct Query {
+    pub params: QueryParams,
     pub task: QueryTasks,
 }
 
