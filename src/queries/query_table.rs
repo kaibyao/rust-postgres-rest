@@ -1,4 +1,5 @@
-use super::query_types::{convert_row_fields, Query, QueryResult};
+use super::postgres_types::convert_row_fields;
+use super::query_types::{Query, QueryResult};
 use super::utils::validate_sql_name;
 use crate::db::Connection;
 use crate::errors::ApiError;

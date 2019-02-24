@@ -7,6 +7,7 @@ pub use self::query_table::query_table;
 mod table_stats;
 pub use self::table_stats::get_table_stats;
 
+pub mod postgres_types;
 pub mod query_types;
 
 pub mod utils;
