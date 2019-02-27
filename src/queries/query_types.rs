@@ -12,6 +12,7 @@ pub struct QueryParams {
     pub limit: i32,
     pub offset: i32,
     pub order_by: Option<String>,
+    pub prepared_values: Option<String>,
     pub table: String,
 }
 
@@ -54,6 +55,10 @@ impl QueryParams {
             },
             order_by: match query_params.get("order_by") {
                 Some(order_by_str) => Some(order_by_str.clone()),
+                None => None,
+            },
+            prepared_values: match query_params.get("prepared_values") {
+                Some(prepared_values) => Some(prepared_values.clone()),
                 None => None,
             },
             table: match req.match_info().query("table") {

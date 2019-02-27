@@ -8,7 +8,7 @@ pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
         static ref endpoints_json: Value = json!({
             "endpoints": {
             "/": {
-                "GET": "The current endpoint. Displays REST API endpoints and available tables."
+                "GET": "The current endpoint. Displays REST API endpoints and available tables.",
             },
             "/table": {
                 "GET": "Displays list of tables.",
@@ -22,12 +22,12 @@ pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
                     "query_params": {
                         "columns": {
                             "default": null,
-                            "description": "A list of column names for which values are retrieved.",
+                            "description": "A comma-separated list of column names for which values are retrieved.",
                             "example": "col1,col2,col_infinity",
                         },
                         "distinct": {
                             "default": null,
-                            "description": "A list of column names for which rows that have duplicate values are excluded.",
+                            "description": "A comma-separated list of column names for which rows that have duplicate values are excluded.",
                             "example": "col1,col2,col_infinity",
                         },
                         "limit": {
@@ -40,17 +40,25 @@ pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
                         },
                         "order_by": {
                             "default": null,
-                            "description": "The field(s) on which to sort the resulting rows.",
+                            "description": "Comma-separated list representing the field(s) on which to sort the resulting rows.",
                             "example": "date DESC, id ASC",
                         },
                         "where": {
                             "default": null,
-                            "description": "The WHERE clause of a SELECT statement. Remember to URI-encode the final result.",
+                            "description": "The WHERE clause of a SELECT statement. Remember to URI-encode the final result. NOTE: $1, $2, etc. can be used in combination with `prepared_values` to create prepared statements (see https://www.postgresql.org/docs/current/sql-prepare.html).",
                             "example": "(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1",
-                        }
+                        },
+                        "prepared_values": {
+                            "default": null,
+                            "description": "If the WHERE clause contains ${number}, this comma-separated list of values is used to substitute the numbered parameters.",
+                            "example": "col2,'Test'",
+                        },
                     }
-                }
-            }}
+                },
+            }},
+            "/sql": {
+                "GET|POST|PUT|PATCH|DELETE": "Runs a raw SQL statement. (not implemented)",
+            },
         });
     }
 
