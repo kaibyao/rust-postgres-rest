@@ -5,7 +5,7 @@ use crate::AppState;
 
 pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
     lazy_static! {
-        static ref endpoints_json: Value = json!({
+        static ref ENDPOINTS_JSON: Value = json!({
             "endpoints": {
             "/": {
                 "GET": "The current endpoint. Displays REST API endpoints and available tables.",
@@ -62,5 +62,5 @@ pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
         });
     }
 
-    HttpResponse::Ok().json(&*endpoints_json)
+    HttpResponse::Ok().json(&*ENDPOINTS_JSON)
 }

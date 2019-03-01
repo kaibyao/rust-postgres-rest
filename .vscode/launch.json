@@ -15,7 +15,8 @@
         }
       },
       "args": [],
-      "cwd": "${workspaceFolder}"
+      "cwd": "${workspaceFolder}",
+      "terminal": "integrated"
     },
     {
       "type": "lldb",
@@ -47,7 +48,8 @@
         }
       },
       "args": [],
-      "cwd": "${workspaceFolder}"
+      "cwd": "${workspaceFolder}",
+      "terminal": "integrated"
     }
   ]
 }
