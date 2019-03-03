@@ -6,14 +6,15 @@ use actix_web::{actix::Message, HttpRequest};
 
 /// Represents a single database query
 pub struct QueryParams {
-    pub columns: Vec<String>,
-    pub conditions: Option<String>,
     pub distinct: Option<String>,
+    pub columns: Vec<String>,
+    pub table: String,
+    pub conditions: Option<String>,
+    pub group_by: Option<String>,
+    pub order_by: Option<String>,
     pub limit: i32,
     pub offset: i32,
-    pub order_by: Option<String>,
     pub prepared_values: Option<String>,
-    pub table: String,
 }
 
 impl QueryParams {
@@ -31,12 +32,24 @@ impl QueryParams {
                     .collect(),
                 None => vec![],
             },
+            distinct: match query_params.get("distinct") {
+                Some(distinct_string) => Some(distinct_string.clone()),
+                None => None,
+            },
+            table: match req.match_info().query("table") {
+                Ok(table_name) => table_name,
+                Err(_) => "".to_string(),
+            },
             conditions: match query_params.get("where") {
                 Some(where_string) => Some(where_string.clone()),
                 None => None,
             },
-            distinct: match query_params.get("distinct") {
-                Some(distinct_string) => Some(distinct_string.clone()),
+            group_by: match query_params.get("group_by") {
+                Some(group_by_str) => Some(group_by_str.clone()),
+                None => None,
+            },
+            order_by: match query_params.get("order_by") {
+                Some(order_by_str) => Some(order_by_str.clone()),
                 None => None,
             },
             limit: match query_params.get("limit") {
@@ -53,17 +66,9 @@ impl QueryParams {
                 },
                 None => default_offset,
             },
-            order_by: match query_params.get("order_by") {
-                Some(order_by_str) => Some(order_by_str.clone()),
-                None => None,
-            },
             prepared_values: match query_params.get("prepared_values") {
                 Some(prepared_values) => Some(prepared_values.clone()),
                 None => None,
-            },
-            table: match req.match_info().query("table") {
-                Ok(table_name) => table_name,
-                Err(_) => "".to_string(),
             },
         }
     }

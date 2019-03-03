@@ -1,6 +1,6 @@
 use super::postgres_types::convert_row_fields;
 use super::query_types::{Query, QueryResult};
-use super::utils::validate_sql_name;
+use super::utils::{validate_sql_name, validate_where_column};
 use crate::db::Connection;
 use crate::errors::ApiError;
 use postgres::types::ToSql;
@@ -60,15 +60,15 @@ fn build_select_statement(query: Query) -> Result<(String, Vec<PreparedStatement
             .collect();
 
         for column in &distinct_columns {
-            validate_sql_name(column)?;
+            validate_where_column(column)?;
         }
 
         statement.push_str(&format!(" DISTINCT ON ({})", distinct_columns.join(", ")));
     }
-
+    // dbg!(&query.params.columns);
     // building prepared statement
     for (i, column) in query.params.columns.iter().enumerate() {
-        validate_sql_name(&column)?;
+        validate_where_column(&column)?;
 
         if i == query.params.columns.len() - 1 {
             statement.push_str(&format!(" {}", &column));
@@ -120,6 +120,20 @@ fn build_select_statement(query: Query) -> Result<(String, Vec<PreparedStatement
 
     // TODO: add foreign key traversal
 
+    // GROUP BY statement
+    if let Some(group_by_str) = query.params.group_by {
+        let group_bys: Vec<String> = group_by_str
+            .split(',')
+            .map(|group_by_col| String::from(group_by_col.trim()))
+            .collect();
+
+        for column in &group_bys {
+            validate_where_column(column)?;
+        }
+
+        statement.push_str(&format!(" GROUP BY {}", group_bys.join(", ")));
+    }
+
     // Append ORDER BY if the param exists
     if let Some(order_by_column_str) = query.params.order_by {
         let columns: Vec<String> = order_by_column_str
@@ -137,14 +151,14 @@ fn build_select_statement(query: Query) -> Result<(String, Vec<PreparedStatement
                 match ORDER_DIRECTION_RE.find(column) {
                     Some(order_direction_match) => {
                         let order_by_column = &column[..order_direction_match.start()];
-                        validate_sql_name(order_by_column)?;
+                        validate_where_column(order_by_column)?;
                     }
                     None => {
-                        validate_sql_name(column)?;
+                        validate_where_column(column)?;
                     }
                 }
             } else {
-                validate_sql_name(column)?;
+                validate_where_column(column)?;
             }
         }
 
@@ -177,6 +191,7 @@ mod build_select_statement_tests {
                 columns: vec!["id".to_string()],
                 conditions: None,
                 distinct: None,
+                group_by: None,
                 limit: 100,
                 offset: 0,
                 order_by: None,
@@ -203,6 +218,7 @@ mod build_select_statement_tests {
                 columns: vec!["id".to_string(), "name".to_string()],
                 conditions: None,
                 distinct: None,
+                group_by: None,
                 limit: 100,
                 offset: 0,
                 order_by: None,
@@ -229,6 +245,7 @@ mod build_select_statement_tests {
                 columns: vec!["id".to_string()],
                 conditions: None,
                 distinct: Some("name, blah".to_string()),
+                group_by: None,
                 limit: 100,
                 offset: 0,
                 order_by: None,
@@ -258,6 +275,7 @@ mod build_select_statement_tests {
                 columns: vec!["id".to_string()],
                 conditions: None,
                 distinct: None,
+                group_by: None,
                 limit: 1000,
                 offset: 100,
                 order_by: None,
@@ -284,6 +302,7 @@ mod build_select_statement_tests {
                 columns: vec!["id".to_string()],
                 conditions: None,
                 distinct: None,
+                group_by: None,
                 limit: 1000,
                 offset: 0,
                 order_by: Some("name,test".to_string()),
@@ -313,6 +332,7 @@ mod build_select_statement_tests {
                 columns: vec!["id".to_string()],
                 conditions: Some("(id > 10 OR id < 20) AND name = 'test'".to_string()),
                 distinct: None,
+                group_by: None,
                 limit: 10,
                 offset: 0,
                 order_by: None,
@@ -342,6 +362,7 @@ mod build_select_statement_tests {
                 columns: vec!["id".to_string()],
                 conditions: Some("(id > $1 OR id < $2) AND name = $3".to_string()),
                 distinct: None,
+                group_by: None,
                 limit: 10,
                 offset: 0,
                 order_by: None,
@@ -384,6 +405,7 @@ mod build_select_statement_tests {
                 ],
                 conditions: Some("id = $1 AND test_name = $2".to_string()),
                 distinct: Some("test_date,test_timestamptz".to_string()),
+                group_by: None,
                 limit: 10000,
                 offset: 2000,
                 order_by: Some("due_date DESC".to_string()),
