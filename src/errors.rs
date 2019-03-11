@@ -60,6 +60,28 @@ impl From<actix_web::actix::MailboxError> for ApiError {
         }
     }
 }
+impl From<error::PayloadError> for ApiError {
+    fn from(err: error::PayloadError) -> Self {
+        ApiError::InternalError {
+            category: MessageCategory::Error,
+            code: "PAYLOAD_ERROR",
+            details: format!("{}", err),
+            message: "Could not parse request payload.",
+            http_status: 500,
+        }
+    }
+}
+impl From<error::Error> for ApiError {
+    fn from(err: error::Error) -> Self {
+        ApiError::InternalError {
+            category: MessageCategory::Error,
+            code: "ACTIX_ERROR",
+            details: format!("{}", err),
+            message: "Error occurred with Actix.",
+            http_status: 500,
+        }
+    }
+}
 impl From<postgres::Error> for ApiError {
     fn from(err: postgres::Error) -> Self {
         ApiError::InternalError {

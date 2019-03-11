@@ -76,6 +76,7 @@ impl QueryParams {
 
 /// Represents a database task (w/ included query) to be performed by DbExecutor
 pub struct Query {
+    // pub req_body: Option<String>,
     pub params: QueryParams,
     pub task: QueryTasks,
 }
@@ -86,6 +87,7 @@ impl Message for Query {
 
 /// Represents the different query tasks that is performed by this library
 pub enum QueryTasks {
+    CreateTable,
     GetAllTables,
     // InsertIntoTable,
     // UpsertIntoTable,
@@ -101,5 +103,6 @@ pub enum QueryTasks {
 pub enum QueryResult {
     GetAllTablesResult(Vec<String>),
     QueryTableResult(Vec<RowFields>),
+    Success(bool),
     TableStats(TableStats),
 }

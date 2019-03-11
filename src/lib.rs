@@ -19,7 +19,7 @@ mod db;
 use crate::db::{init_connection_pool, DbExecutor};
 
 mod endpoints;
-use endpoints::{get_all_table_names, index, query_table};
+use endpoints::{create_table, get_all_table_names, index, query_table};
 
 mod errors;
 
@@ -51,17 +51,10 @@ pub fn add_rest_api_scope(config: &AppConfig, app: App) -> App {
                     .resource("", |r| r.method(Method::GET).f(index))
                     .resource("/", |r| r.method(Method::GET).f(index))
                     .resource("/table", |r| {
-                        r.method(Method::GET).a(get_all_table_names)
-                        // POST: create new table
-                        // PUT: update table
-                        // DELETE: delete table, requires table_name
+                        r.method(Method::GET).a(get_all_table_names);
+                        r.method(Method::POST).with_async(create_table);
                     })
-                    .resource("/{table}", |r| {
-                        r.method(Method::GET).a(query_table)
-                        // POST: (bulk) insert
-                        // PUT OR PATCH: (bulk) upsert
-                        // DELETE: delete rows (also requires confirm_delete query parameter)
-                    })
+                    .resource("/{table}", |r| r.method(Method::GET).a(query_table))
             },
         )
     })
