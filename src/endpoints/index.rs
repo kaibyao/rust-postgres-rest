@@ -5,17 +5,17 @@ use crate::AppState;
 
 pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
     lazy_static! {
-        static ref TABLE_COLUMN_STAT_HELP: Value = json!({
-            "column_name": "column_name_string",
-            "column_type": "valid PostgreSQL type",
-            "default_value": "default value (use single quote for string value)",
-            "is_nullable": "whether NULL can be a column value (default true)",
-            "is_foreign_key": "whether this column references another table column (default false)",
-            "foreign_key_table": "table being referenced (if is_foreign_key). Default null",
-            "foreign_key_columns": "table column being referenced (if is_foreign_key). Default null",
-            "char_max_length": "If data_type identifies a character or bit string type, the declared maximum length; null for all other data types or if no maximum length was declared.",
-            "char_octet_length": "If data_type identifies a character type, the maximum possible length in octets (bytes) of a datum; null for all other data types. The maximum octet length depends on the declared character maximum length (see above) and the server encoding.",
-        });
+        // static ref TABLE_COLUMN_STAT_HELP: Value = json!({
+        //     "column_name": "column_name_string",
+        //     "column_type": "valid PostgreSQL type",
+        //     "default_value": "default value (use single quote for string value)",
+        //     "is_nullable": "whether NULL can be a column value (default true)",
+        //     "is_foreign_key": "whether this column references another table column (default false)",
+        //     "foreign_key_table": "table being referenced (if is_foreign_key). Default null",
+        //     "foreign_key_columns": "table column being referenced (if is_foreign_key). Default null",
+        //     "char_max_length": "If data_type identifies a character or bit string type, the declared maximum length; null for all other data types or if no maximum length was declared.",
+        //     "char_octet_length": "If data_type identifies a character type, the maximum possible length in octets (bytes) of a datum; null for all other data types. The maximum octet length depends on the declared character maximum length (see above) and the server encoding.",
+        // });
         static ref ENDPOINTS_JSON: Value = json!({
             "endpoints": {
             "/": {
@@ -23,18 +23,18 @@ pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
             },
             "/table": {
                 "GET": "Displays list of tables.",
-                "POST": {
-                    "description": "Create table.",
-                    "body": {
-                        "description": "A JSON object describing the table name, columns, and constraints",
-                        "schema": {
-                            "table_name": "The table name.",
-                            "columns": [*TABLE_COLUMN_STAT_HELP],
-                        },
-                    },
-                },
-                "PUT|PATCH": "Update table (not implemented)",
-                "DELETE": "Delete table (not implemented)",
+                // "POST": {
+                //     "description": "Create table.",
+                //     "body": {
+                //         "description": "A JSON object describing the table name, columns, and constraints",
+                //         "schema": {
+                //             "table_name": "The table name.",
+                //             "columns": [*TABLE_COLUMN_STAT_HELP],
+                //         },
+                //     },
+                // },
+                // "PUT|PATCH": "Update table (not implemented)",
+                // "DELETE": "Delete table (not implemented)",
             },
             "/{table}": {
                 "GET": {

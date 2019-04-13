@@ -89,7 +89,6 @@ impl Message for Query {
 
 /// Represents the different query tasks that is performed by this library
 pub enum QueryTasks {
-    CreateTable,
     GetAllTables,
     // InsertIntoTable,
     // UpsertIntoTable,
@@ -105,6 +104,6 @@ pub enum QueryTasks {
 pub enum QueryResult {
     GetAllTablesResult(Vec<String>),
     QueryTableResult(Vec<RowFields>),
-    Success(bool),
+    // Success(bool),
     TableStats(TableStats),
 }

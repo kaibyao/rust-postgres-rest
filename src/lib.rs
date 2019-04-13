@@ -19,7 +19,7 @@ mod db;
 use crate::db::{init_connection_pool, DbExecutor};
 
 mod endpoints;
-use endpoints::{create_table, get_all_table_names, index, query_table};
+use endpoints::{get_all_table_names, index, query_table};
 
 mod errors;
 
@@ -52,7 +52,7 @@ pub fn add_rest_api_scope(config: &AppConfig, app: App) -> App {
                     .resource("/", |r| r.method(Method::GET).f(index))
                     .resource("/table", |r| {
                         r.method(Method::GET).a(get_all_table_names);
-                        r.method(Method::POST).with_async(create_table);
+                        // r.method(Method::POST).with_async(create_table);
                     })
                     .resource("/{table}", |r| r.method(Method::GET).a(query_table))
             },
