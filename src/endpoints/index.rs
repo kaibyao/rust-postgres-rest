@@ -6,10 +6,10 @@ use crate::AppState;
 pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
     lazy_static! {
         static ref TABLE_COLUMN_STAT_HELP: Value = json!({
-            "name": "column_name_string",
-            "type": "column_type (valid PostgreSQL type)",
-            "default": "default value (use single quote for string value)",
-            "nullable": "whether NULL can be a column value (default true)",
+            "column_name": "column_name_string",
+            "column_type": "valid PostgreSQL type",
+            "default_value": "default value (use single quote for string value)",
+            "is_nullable": "whether NULL can be a column value (default true)",
             "is_foreign_key": "whether this column references another table column (default false)",
             "foreign_key_table": "table being referenced (if is_foreign_key). Default null",
             "foreign_key_columns": "table column being referenced (if is_foreign_key). Default null",
@@ -28,6 +28,7 @@ pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
                     "body": {
                         "description": "A JSON object describing the table name, columns, and constraints",
                         "schema": {
+                            "table_name": "The table name.",
                             "columns": [*TABLE_COLUMN_STAT_HELP],
                         },
                     },

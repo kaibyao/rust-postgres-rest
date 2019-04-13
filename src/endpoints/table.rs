@@ -14,11 +14,9 @@ pub fn create_table(
 ) -> impl Future<Item = HttpResponse, Error = ApiError> {
     Json::<Value>::extract(&req).from_err().and_then(
         move |body| -> FutureResponse<HttpResponse, ApiError> {
-            dbg!(body);
-
             let query: Query = Query {
                 params: QueryParams::from_http_request(&req),
-                // req_body: req, // need to get the body string
+                req_body: Some(body.into_inner()),
                 task: QueryTasks::CreateTable,
             };
 
@@ -39,7 +37,7 @@ pub fn create_table(
 pub fn get_all_table_names(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, ApiError> {
     let query: Query = Query {
         params: QueryParams::from_http_request(req),
-        // request: req,
+        req_body: None,
         task: QueryTasks::GetAllTables,
     };
 
@@ -66,7 +64,7 @@ pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, 
 
     let query = Query {
         params,
-        // request: req,
+        req_body: None,
         task,
     };
 

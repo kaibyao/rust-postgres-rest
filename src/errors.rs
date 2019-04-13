@@ -93,6 +93,18 @@ impl From<postgres::Error> for ApiError {
         }
     }
 }
+impl From<serde_json::error::Error> for ApiError {
+    fn from(err: serde_json::error::Error) -> Self {
+        ApiError::UserError {
+            category: MessageCategory::Error,
+            code: "JSON_ERROR",
+            details: format!("{}", err),
+            message: "A message occurred when parsing JSON.",
+            offender: "".to_string(),
+            http_status: 400,
+        }
+    }
+}
 
 // How ApiErrors are formatted for an http response
 impl error::ResponseError for ApiError {
@@ -159,6 +171,15 @@ pub fn generate_error(err_id: &'static str, offender: String) -> ApiError {
             details: "`table` is a reserved keyword and cannot be used to name SQL identifiers".to_string(),
             http_status: 400,
             message: "There was an identifier (such as table or column name) that used a reserved keyword.",
+            offender,
+        },
+
+        "REQUIRED_PARAMETER_MISSING" => ApiError::UserError {
+            category: MessageCategory::Error,
+            code: err_id,
+            details: "".to_string(),
+            http_status: 400,
+            message: "There was a parameter required by this action, but it was not found.",
             offender,
         },
 

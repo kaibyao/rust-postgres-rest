@@ -5,7 +5,7 @@ use crate::errors::ApiError;
 use regex::Regex;
 use std::collections::HashMap;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 /// Stats for a single column of a table
 pub struct TableColumnStat {
     /// name of column

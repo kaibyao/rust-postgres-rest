@@ -198,6 +198,7 @@ mod build_select_statement_tests {
                 prepared_values: None,
                 table: "a_table".to_string(),
             },
+            req_body: None,
             task: QueryTasks::GetAllTables,
         };
 
@@ -225,6 +226,7 @@ mod build_select_statement_tests {
                 prepared_values: None,
                 table: "a_table".to_string(),
             },
+            req_body: None,
             task: QueryTasks::GetAllTables,
         };
 
@@ -252,6 +254,7 @@ mod build_select_statement_tests {
                 prepared_values: None,
                 table: "a_table".to_string(),
             },
+            req_body: None,
             task: QueryTasks::GetAllTables,
         };
 
@@ -282,6 +285,7 @@ mod build_select_statement_tests {
                 prepared_values: None,
                 table: "a_table".to_string(),
             },
+            req_body: None,
             task: QueryTasks::GetAllTables,
         };
 
@@ -309,6 +313,7 @@ mod build_select_statement_tests {
                 prepared_values: None,
                 table: "a_table".to_string(),
             },
+            req_body: None,
             task: QueryTasks::GetAllTables,
         };
 
@@ -339,6 +344,7 @@ mod build_select_statement_tests {
                 prepared_values: None,
                 table: "a_table".to_string(),
             },
+            req_body: None,
             task: QueryTasks::GetAllTables,
         };
 
@@ -369,6 +375,7 @@ mod build_select_statement_tests {
                 prepared_values: Some("10,20,'test'".to_string()),
                 table: "a_table".to_string(),
             },
+            req_body: None,
             task: QueryTasks::GetAllTables,
         };
 
@@ -412,6 +419,7 @@ mod build_select_statement_tests {
                 prepared_values: Some("46327143679919107,'a name'".to_string()),
                 table: "a_table".to_string(),
             },
+            req_body: None,
             task: QueryTasks::GetAllTables,
         };
 

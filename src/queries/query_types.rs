@@ -3,6 +3,7 @@ use super::table_stats::TableStats;
 use crate::errors::ApiError;
 use crate::AppState;
 use actix_web::{actix::Message, HttpRequest};
+use serde_json::Value;
 
 /// Represents a single database query
 pub struct QueryParams {
@@ -78,6 +79,7 @@ impl QueryParams {
 pub struct Query {
     // pub req_body: Option<String>,
     pub params: QueryParams,
+    pub req_body: Option<Value>,
     pub task: QueryTasks,
 }
 
