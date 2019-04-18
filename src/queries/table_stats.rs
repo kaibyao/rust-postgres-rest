@@ -345,7 +345,7 @@ ORDER BY
                 name: row.get(0),
                 columns: column_names_str
                     .split(',')
-                    .map(|col| col.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect(),
                 access_method: row.get(1),
                 is_exclusion: row.get(4),

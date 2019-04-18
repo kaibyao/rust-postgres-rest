@@ -90,7 +90,7 @@ impl Message for Query {
 /// Represents the different query tasks that is performed by this library
 pub enum QueryTasks {
     GetAllTables,
-    // InsertIntoTable,
+    InsertIntoTable,
     // UpsertIntoTable,
     // DeleteTableRows,
     // UpdateTableRows,
@@ -104,6 +104,6 @@ pub enum QueryTasks {
 pub enum QueryResult {
     GetAllTablesResult(Vec<String>),
     QueryTableResult(Vec<RowFields>),
-    // Success(bool),
+    RowsAffected(u64),
     TableStats(TableStats),
 }

@@ -83,6 +83,12 @@ pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
                 "POST": {
                     "description": "Inserts new records into the table. (not implemented)",
                     "body": "An array of objects, whose key-values represent column names and their values.",
+                    "query_params": {
+                        "is_upsert": {
+                            "default": false,
+                            "description": "Whether to update records if there is a conflict during the insert operation."
+                        }
+                    },
                 },
                 "PUT|PATCH": {
                     "description": "Updates table records (not implemented).",

@@ -5,7 +5,7 @@ use r2d2;
 use r2d2_postgres::{PostgresConnectionManager, TlsMode};
 
 use crate::queries::{
-    get_all_tables, get_table_stats, query_table,
+    get_all_tables, get_table_stats, insert_into_table, query_table,
     query_types::{Query, QueryResult, QueryTasks},
 };
 
@@ -31,6 +31,7 @@ impl Handler<Query> for DbExecutor {
 
         match msg.task {
             QueryTasks::GetAllTables => get_all_tables(&conn),
+            QueryTasks::InsertIntoTable => insert_into_table(&conn, msg),
             QueryTasks::QueryTable => query_table(&conn, msg),
             QueryTasks::QueryTableStats => get_table_stats(&conn, msg.params.table),
         }

@@ -1,3 +1,6 @@
+mod insert_into_table;
+pub use self::insert_into_table::insert_into_table;
+
 mod get_all_tables;
 pub use self::get_all_tables::get_all_tables;
 
@@ -11,8 +14,6 @@ pub mod postgres_types;
 pub mod query_types;
 
 pub mod utils;
-
-// pub fn insert_into_table(conn: &Connection) {}
 
 // pub fn upsert_into_table(conn: &Connection) {}
 

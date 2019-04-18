@@ -207,7 +207,7 @@ mod build_select_statement_tests {
                 assert_eq!(&sql, "SELECT id FROM a_table LIMIT 100;");
             }
             Err(e) => {
-                assert!(false, e);
+                panic!(e);
             }
         };
     }
@@ -235,7 +235,7 @@ mod build_select_statement_tests {
                 assert_eq!(&sql, "SELECT id, name FROM a_table LIMIT 100;");
             }
             Err(e) => {
-                assert!(false, e);
+                panic!(e);
             }
         };
     }
@@ -266,7 +266,7 @@ mod build_select_statement_tests {
                 );
             }
             Err(e) => {
-                assert!(false, e);
+                panic!(e);
             }
         };
     }
@@ -294,7 +294,7 @@ mod build_select_statement_tests {
                 assert_eq!(&sql, "SELECT id FROM a_table LIMIT 1000 OFFSET 100;");
             }
             Err(e) => {
-                assert!(false, e);
+                panic!(e);
             }
         };
     }
@@ -325,7 +325,7 @@ mod build_select_statement_tests {
                 );
             }
             Err(e) => {
-                assert!(false, e);
+                panic!(e);
             }
         };
     }
@@ -356,7 +356,7 @@ mod build_select_statement_tests {
                 );
             }
             Err(e) => {
-                assert!(false, e);
+                panic!(e);
             }
         };
     }
@@ -396,7 +396,7 @@ mod build_select_statement_tests {
                 );
             }
             Err(e) => {
-                assert!(false, e);
+                panic!(e);
             }
         };
     }
@@ -439,7 +439,7 @@ mod build_select_statement_tests {
                 );
             }
             Err(e) => {
-                assert!(false, format!("{}", e));
+                panic!(e);
             }
         };
     }
