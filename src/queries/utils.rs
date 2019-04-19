@@ -1,4 +1,4 @@
-use crate::errors::{generate_error, ApiError};
+use crate::errors::ApiError;
 use regex::Regex;
 
 /// Checks an SQL identifier (such as table or column name) and returns true if it is valid or false otherwise.
@@ -11,11 +11,17 @@ pub fn validate_sql_name(name: &str) -> Result<(), ApiError> {
     }
 
     if name == "table" {
-        return Err(generate_error("SQL_IDENTIFIER_KEYWORD", name.to_string()));
+        return Err(ApiError::generate_error(
+            "SQL_IDENTIFIER_KEYWORD",
+            name.to_string(),
+        ));
     }
 
     if !VALID_REGEX.is_match(name) {
-        return Err(generate_error("INVALID_SQL_IDENTIFIER", name.to_string()));
+        return Err(ApiError::generate_error(
+            "INVALID_SQL_IDENTIFIER",
+            name.to_string(),
+        ));
     }
 
     Ok(())
@@ -29,11 +35,17 @@ pub fn validate_where_column(name: &str) -> Result<(), ApiError> {
     }
 
     if name == "table" {
-        return Err(generate_error("SQL_IDENTIFIER_KEYWORD", name.to_string()));
+        return Err(ApiError::generate_error(
+            "SQL_IDENTIFIER_KEYWORD",
+            name.to_string(),
+        ));
     }
 
     if !VALID_REGEX.is_match(name) && !VALID_AS_REGEX.is_match(name) {
-        return Err(generate_error("INVALID_SQL_IDENTIFIER", name.to_string()));
+        return Err(ApiError::generate_error(
+            "INVALID_SQL_IDENTIFIER",
+            name.to_string(),
+        ));
     }
 
     Ok(())

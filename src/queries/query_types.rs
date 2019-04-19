@@ -3,8 +3,7 @@ use super::table_stats::TableStats;
 use crate::errors::ApiError;
 use crate::AppState;
 use actix_web::{actix::Message, HttpRequest};
-use serde_json::Value;
-use std::collections::HashMap;
+use serde_json::{Map, Value};
 
 /// Represents a single SELECT query
 pub struct QueryParamsSelect {
@@ -80,23 +79,42 @@ impl QueryParamsSelect {
 /// Represents a single SELECT query
 pub struct QueryParamsInsert {
     pub is_upsert: bool,
-    pub rows: Vec<HashMap<String, String>>,
+    pub rows: Vec<Map<String, Value>>,
     pub table: String,
 }
 
 impl QueryParamsInsert {
     /// Fills the struct’s values based on the HttpRequest data.
-    pub fn from_http_request(req: &HttpRequest<AppState>) -> Self {
+    pub fn from_http_request(req: &HttpRequest<AppState>, body: Value) -> Result<Self, ApiError> {
         let query_params = req.query();
+        let rows: Vec<Map<String, Value>> = match body.as_array() {
+            Some(body_rows_to_insert) => {
+                if !body_rows_to_insert
+                .iter().all(Value::is_object) {
+                    return Err(ApiError::generate_error("INCORRECT_REQUEST_BODY", "The body needs to be an array of objects where each object represents a row and whose key-values represent column names and their values.".to_string()));
+                }
 
-        QueryParamsInsert {
+                body_rows_to_insert
+                .iter().map(|json_value| {
+                    if let Some(row_obj_map) = json_value.as_object() {
+                        row_obj_map.clone()
+                    } else {
+                        unreachable!("Taken care of via above conditional.")
+                    }
+                })
+                .collect()
+            },
+            None => return Err(ApiError::generate_error("INCORRECT_REQUEST_BODY", "The body needs to be an array of objects where each object represents a row and whose key-values represent column names and their values.".to_string())),
+        };
+
+        Ok(QueryParamsInsert {
             is_upsert: query_params.get("is_upsert").is_some(),
-            rows: vec![],
+            rows,
             table: match req.match_info().query("table") {
                 Ok(table_name) => table_name,
                 Err(_) => "".to_string(),
             },
-        }
+        })
     }
 }
 
@@ -107,9 +125,7 @@ pub enum QueryParams {
 
 /// Represents a database task (w/ included query) to be performed by DbExecutor
 pub struct Query {
-    // pub req_body: Option<String>,
     pub params: QueryParams,
-    pub req_body: Option<Value>,
     pub task: QueryTasks,
 }
 

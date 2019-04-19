@@ -38,6 +38,59 @@ pub enum ApiError {
     },
 }
 
+impl ApiError {
+    /// Used to generate an ApiError
+    pub fn generate_error(err_id: &'static str, offender: String) -> Self {
+        match err_id {
+            "INCORRECT_REQUEST_BODY" => ApiError::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "".to_string(),
+                http_status: 400,
+                message: "The request body does not match the expected shape. Please check the documentation for the correct format.",
+                offender,
+            },
+
+            "INVALID_SQL_IDENTIFIER" => ApiError::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "Valid identifiers must only contain alphanumeric and underscore (_) characters. The first character must also be a letter or underscore.".to_string(),
+                http_status: 400,
+                message: "There was an identifier (such as table or column name) that did not have valid characters.",
+                offender,
+            },
+
+            "SQL_IDENTIFIER_KEYWORD" => ApiError::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "`table` is a reserved keyword and cannot be used to name SQL identifiers".to_string(),
+                http_status: 400,
+                message: "There was an identifier (such as table or column name) that used a reserved keyword.",
+                offender,
+            },
+
+            "REQUIRED_PARAMETER_MISSING" => ApiError::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "".to_string(),
+                http_status: 400,
+                message: "There was a parameter required by this action, but it was not found.",
+                offender,
+            },
+
+            // If this happens, that means we forgot to implement an error handler
+            _ => ApiError::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "Generic error.".to_string(),
+                http_status: 418,
+                message: "An error occurred that we did not anticipate. Please let admins know.",
+                offender,
+            }
+        }
+    }
+}
+
 impl From<r2d2::Error> for ApiError {
     fn from(err: r2d2::Error) -> Self {
         ApiError::InternalError {
@@ -149,48 +202,6 @@ impl error::ResponseError for ApiError {
                     offender: None,
                 },
             ),
-        }
-    }
-}
-
-/// Used in other functions to generate an error
-pub fn generate_error(err_id: &'static str, offender: String) -> ApiError {
-    match err_id {
-        "INVALID_SQL_IDENTIFIER" => ApiError::UserError {
-            category: MessageCategory::Error,
-            code: err_id,
-            details: "Valid identifiers must only contain alphanumeric and underscore (_) characters. The first character must also be a letter or underscore.".to_string(),
-            http_status: 400,
-            message: "There was an identifier (such as table or column name) that did not have valid characters.",
-            offender,
-        },
-
-        "SQL_IDENTIFIER_KEYWORD" => ApiError::UserError {
-            category: MessageCategory::Error,
-            code: err_id,
-            details: "`table` is a reserved keyword and cannot be used to name SQL identifiers".to_string(),
-            http_status: 400,
-            message: "There was an identifier (such as table or column name) that used a reserved keyword.",
-            offender,
-        },
-
-        "REQUIRED_PARAMETER_MISSING" => ApiError::UserError {
-            category: MessageCategory::Error,
-            code: err_id,
-            details: "".to_string(),
-            http_status: 400,
-            message: "There was a parameter required by this action, but it was not found.",
-            offender,
-        },
-
-        // If this happens, that means we forgot to implement an error handler
-        _ => ApiError::UserError {
-            category: MessageCategory::Error,
-            code: err_id,
-            details: "Generic error.".to_string(),
-            http_status: 418,
-            message: "An error occurred that we did not anticipate. Please let admins know.",
-            offender,
         }
     }
 }
