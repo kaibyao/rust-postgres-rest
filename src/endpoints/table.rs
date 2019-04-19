@@ -5,13 +5,13 @@ use futures::Future;
 use serde_json::Value;
 
 use crate::errors::ApiError;
-use crate::queries::query_types::{Query, QueryParams, QueryTasks};
+use crate::queries::query_types::{Query, QueryParams, QueryParamsSelect, QueryTasks};
 use crate::AppState;
 
 /// Retrieves a list of table names that exist in the DB.
 pub fn get_all_table_names(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, ApiError> {
     let query: Query = Query {
-        params: QueryParams::from_http_request(req),
+        params: QueryParams::Select(QueryParamsSelect::from_http_request(req)),
         req_body: None,
         task: QueryTasks::GetAllTables,
     };
@@ -35,7 +35,7 @@ pub fn insert_into_table(
         move |body| -> FutureResponse<HttpResponse, ApiError> {
             // need to rethink how to pass unique endpoint params, QueryParams isn't gonna cut it.
             let query: Query = Query {
-                params: QueryParams::from_http_request(&req),
+                params: QueryParams::Select(QueryParamsSelect::from_http_request(&req)),
                 req_body: Some(body.into_inner()),
                 task: QueryTasks::InsertIntoTable,
             };
@@ -55,7 +55,7 @@ pub fn insert_into_table(
 
 /// Queries a table using SELECT.
 pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, ApiError> {
-    let params = QueryParams::from_http_request(req);
+    let params = QueryParamsSelect::from_http_request(req);
 
     let task = if params.columns.is_empty() {
         QueryTasks::QueryTableStats
@@ -64,7 +64,7 @@ pub fn query_table(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse, 
     };
 
     let query = Query {
-        params,
+        params: QueryParams::Select(params),
         req_body: None,
         task,
     };

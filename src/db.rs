@@ -6,7 +6,7 @@ use r2d2_postgres::{PostgresConnectionManager, TlsMode};
 
 use crate::queries::{
     get_all_tables, get_table_stats, insert_into_table, query_table,
-    query_types::{Query, QueryResult, QueryTasks},
+    query_types::{Query, QueryParams, QueryResult, QueryTasks},
 };
 
 /// Represents a PostgreSQL database pool
@@ -33,7 +33,12 @@ impl Handler<Query> for DbExecutor {
             QueryTasks::GetAllTables => get_all_tables(&conn),
             QueryTasks::InsertIntoTable => insert_into_table(&conn, msg),
             QueryTasks::QueryTable => query_table(&conn, msg),
-            QueryTasks::QueryTableStats => get_table_stats(&conn, msg.params.table),
+            QueryTasks::QueryTableStats => {
+                match msg.params {
+                    QueryParams::Select(params) => get_table_stats(&conn, params.table),
+                    _ => unreachable!("QueryTableStats should never be reached unless QueryParams is of the Select variant.")
+                }
+            },
         }
     }
 }

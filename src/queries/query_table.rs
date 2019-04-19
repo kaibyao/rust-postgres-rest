@@ -1,5 +1,5 @@
 use super::postgres_types::convert_row_fields;
-use super::query_types::{Query, QueryResult};
+use super::query_types::{Query, QueryParams, QueryParamsSelect, QueryResult};
 use super::utils::{validate_sql_name, validate_where_column};
 use crate::db::Connection;
 use crate::errors::ApiError;
@@ -15,45 +15,54 @@ enum PreparedStatementValue {
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query
 pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiError> {
-    validate_sql_name(&query.params.table)?;
-    let (statement, prepared_values) = build_select_statement(query)?;
-    // dbg!(&statement);
-    // dbg!(&prepared_values);
+    match &query.params {
+        QueryParams::Select(params) => {
+            validate_sql_name(&params.table)?;
 
-    // sending prepared statement to postgres
-    let prep_statement = conn.prepare(&statement)?;
-    let prep_values: Vec<&ToSql> = if prepared_values.is_empty() {
-        vec![]
-    } else {
-        prepared_values
-            .iter()
-            .map(|val| {
-                let val_to_sql: &ToSql = match val {
-                    PreparedStatementValue::Int4(val_i32) => val_i32,
-                    PreparedStatementValue::Int8(val_i64) => val_i64,
-                    PreparedStatementValue::String(val_string) => val_string,
-                };
-                val_to_sql
-            })
-            .collect()
-    };
+            let (statement, prepared_values) = build_select_statement(params)?;
+            // dbg!(&statement);
+            // dbg!(&prepared_values);
 
-    // dbg!(&prep_values);
+            // sending prepared statement to postgres
+            let prep_statement = conn.prepare(&statement)?;
+            let prep_values: Vec<&ToSql> = if prepared_values.is_empty() {
+                vec![]
+            } else {
+                prepared_values
+                    .iter()
+                    .map(|val| {
+                        let val_to_sql: &ToSql = match val {
+                            PreparedStatementValue::Int4(val_i32) => val_i32,
+                            PreparedStatementValue::Int8(val_i64) => val_i64,
+                            PreparedStatementValue::String(val_string) => val_string,
+                        };
+                        val_to_sql
+                    })
+                    .collect()
+            };
 
-    let results = prep_statement
-        .query(&prep_values)?
-        .iter()
-        .map(|row| convert_row_fields(&row))
-        .collect();
+            // dbg!(&prep_values);
 
-    Ok(QueryResult::QueryTableResult(results))
+            let results = prep_statement
+                .query(&prep_values)?
+                .iter()
+                .map(|row| convert_row_fields(&row))
+                .collect();
+
+            Ok(QueryResult::QueryTableResult(results))
+        },
+        _ => unreachable!("This function should never be called with params that aren’t shaped as a QueryParamsSelect.")
+    }
+    // validate_sql_name(&query.params.table)?;
 }
 
-fn build_select_statement(query: Query) -> Result<(String, Vec<PreparedStatementValue>), ApiError> {
+fn build_select_statement(
+    params: &QueryParamsSelect,
+) -> Result<(String, Vec<PreparedStatementValue>), ApiError> {
     let mut statement = String::from("SELECT");
 
     // DISTINCT clause if exists
-    if let Some(distinct_str) = query.params.distinct {
+    if let Some(distinct_str) = &params.distinct {
         let distinct_columns: Vec<String> = distinct_str
             .split(',')
             .map(|column_str_raw| String::from(column_str_raw.trim()))
@@ -65,25 +74,25 @@ fn build_select_statement(query: Query) -> Result<(String, Vec<PreparedStatement
 
         statement.push_str(&format!(" DISTINCT ON ({})", distinct_columns.join(", ")));
     }
-    // dbg!(&query.params.columns);
+    // dbg!(&params.columns);
     // building prepared statement
-    for (i, column) in query.params.columns.iter().enumerate() {
+    for (i, column) in params.columns.iter().enumerate() {
         validate_where_column(&column)?;
 
-        if i == query.params.columns.len() - 1 {
+        if i == params.columns.len() - 1 {
             statement.push_str(&format!(" {}", &column));
         } else {
             statement.push_str(&format!(" {},", &column));
         }
     }
 
-    statement.push_str(&format!(" FROM {}", &query.params.table));
+    statement.push_str(&format!(" FROM {}", &params.table));
 
     let mut prepared_values = vec![];
-    if let Some(conditions) = query.params.conditions {
+    if let Some(conditions) = &params.conditions {
         statement.push_str(&format!(" WHERE ({})", conditions));
 
-        if let Some(prepared_values_opt) = query.params.prepared_values {
+        if let Some(prepared_values_opt) = &params.prepared_values {
             lazy_static! {
                 // need to parse integer strings as i32 or i64 so we don’t run into conversion errors
                 // (because rust-postgres attempts to convert really large integer strings as i32, which fails)
@@ -121,7 +130,7 @@ fn build_select_statement(query: Query) -> Result<(String, Vec<PreparedStatement
     // TODO: add foreign key traversal
 
     // GROUP BY statement
-    if let Some(group_by_str) = query.params.group_by {
+    if let Some(group_by_str) = &params.group_by {
         let group_bys: Vec<String> = group_by_str
             .split(',')
             .map(|group_by_col| String::from(group_by_col.trim()))
@@ -135,7 +144,7 @@ fn build_select_statement(query: Query) -> Result<(String, Vec<PreparedStatement
     }
 
     // Append ORDER BY if the param exists
-    if let Some(order_by_column_str) = query.params.order_by {
+    if let Some(order_by_column_str) = &params.order_by {
         let columns: Vec<String> = order_by_column_str
             .split(',')
             .map(|column_str_raw| String::from(column_str_raw.trim()))
@@ -166,11 +175,11 @@ fn build_select_statement(query: Query) -> Result<(String, Vec<PreparedStatement
     }
 
     // LIMIT
-    statement.push_str(&format!(" LIMIT {}", query.params.limit));
+    statement.push_str(&format!(" LIMIT {}", params.limit));
 
     // OFFSET
-    if query.params.offset > 0 {
-        statement.push_str(&format!(" OFFSET {}", query.params.offset));
+    if params.offset > 0 {
+        statement.push_str(&format!(" OFFSET {}", params.offset));
     }
 
     statement.push_str(";");
@@ -180,29 +189,23 @@ fn build_select_statement(query: Query) -> Result<(String, Vec<PreparedStatement
 
 #[cfg(test)]
 mod build_select_statement_tests {
-    use super::super::query_types::{QueryParams, QueryTasks};
+    use super::super::query_types::QueryParamsSelect;
     use super::*;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn basic_query() {
-        let query = Query {
-            params: QueryParams {
-                columns: vec!["id".to_string()],
-                conditions: None,
-                distinct: None,
-                group_by: None,
-                limit: 100,
-                offset: 0,
-                order_by: None,
-                prepared_values: None,
-                table: "a_table".to_string(),
-            },
-            req_body: None,
-            task: QueryTasks::GetAllTables,
-        };
-
-        match build_select_statement(query) {
+        match build_select_statement(&QueryParamsSelect {
+            columns: vec!["id".to_string()],
+            conditions: None,
+            distinct: None,
+            group_by: None,
+            limit: 100,
+            offset: 0,
+            order_by: None,
+            prepared_values: None,
+            table: "a_table".to_string(),
+        }) {
             Ok((sql, _)) => {
                 assert_eq!(&sql, "SELECT id FROM a_table LIMIT 100;");
             }
@@ -214,23 +217,17 @@ mod build_select_statement_tests {
 
     #[test]
     fn multiple_columns() {
-        let query = Query {
-            params: QueryParams {
-                columns: vec!["id".to_string(), "name".to_string()],
-                conditions: None,
-                distinct: None,
-                group_by: None,
-                limit: 100,
-                offset: 0,
-                order_by: None,
-                prepared_values: None,
-                table: "a_table".to_string(),
-            },
-            req_body: None,
-            task: QueryTasks::GetAllTables,
-        };
-
-        match build_select_statement(query) {
+        match build_select_statement(&QueryParamsSelect {
+            columns: vec!["id".to_string(), "name".to_string()],
+            conditions: None,
+            distinct: None,
+            group_by: None,
+            limit: 100,
+            offset: 0,
+            order_by: None,
+            prepared_values: None,
+            table: "a_table".to_string(),
+        }) {
             Ok((sql, _)) => {
                 assert_eq!(&sql, "SELECT id, name FROM a_table LIMIT 100;");
             }
@@ -242,23 +239,17 @@ mod build_select_statement_tests {
 
     #[test]
     fn distinct() {
-        let query = Query {
-            params: QueryParams {
-                columns: vec!["id".to_string()],
-                conditions: None,
-                distinct: Some("name, blah".to_string()),
-                group_by: None,
-                limit: 100,
-                offset: 0,
-                order_by: None,
-                prepared_values: None,
-                table: "a_table".to_string(),
-            },
-            req_body: None,
-            task: QueryTasks::GetAllTables,
-        };
-
-        match build_select_statement(query) {
+        match build_select_statement(&QueryParamsSelect {
+            columns: vec!["id".to_string()],
+            conditions: None,
+            distinct: Some("name, blah".to_string()),
+            group_by: None,
+            limit: 100,
+            offset: 0,
+            order_by: None,
+            prepared_values: None,
+            table: "a_table".to_string(),
+        }) {
             Ok((sql, _)) => {
                 assert_eq!(
                     &sql,
@@ -273,23 +264,17 @@ mod build_select_statement_tests {
 
     #[test]
     fn offset() {
-        let query = Query {
-            params: QueryParams {
-                columns: vec!["id".to_string()],
-                conditions: None,
-                distinct: None,
-                group_by: None,
-                limit: 1000,
-                offset: 100,
-                order_by: None,
-                prepared_values: None,
-                table: "a_table".to_string(),
-            },
-            req_body: None,
-            task: QueryTasks::GetAllTables,
-        };
-
-        match build_select_statement(query) {
+        match build_select_statement(&QueryParamsSelect {
+            columns: vec!["id".to_string()],
+            conditions: None,
+            distinct: None,
+            group_by: None,
+            limit: 1000,
+            offset: 100,
+            order_by: None,
+            prepared_values: None,
+            table: "a_table".to_string(),
+        }) {
             Ok((sql, _)) => {
                 assert_eq!(&sql, "SELECT id FROM a_table LIMIT 1000 OFFSET 100;");
             }
@@ -301,23 +286,17 @@ mod build_select_statement_tests {
 
     #[test]
     fn order_by() {
-        let query = Query {
-            params: QueryParams {
-                columns: vec!["id".to_string()],
-                conditions: None,
-                distinct: None,
-                group_by: None,
-                limit: 1000,
-                offset: 0,
-                order_by: Some("name,test".to_string()),
-                prepared_values: None,
-                table: "a_table".to_string(),
-            },
-            req_body: None,
-            task: QueryTasks::GetAllTables,
-        };
-
-        match build_select_statement(query) {
+        match build_select_statement(&QueryParamsSelect {
+            columns: vec!["id".to_string()],
+            conditions: None,
+            distinct: None,
+            group_by: None,
+            limit: 1000,
+            offset: 0,
+            order_by: Some("name,test".to_string()),
+            prepared_values: None,
+            table: "a_table".to_string(),
+        }) {
             Ok((sql, _)) => {
                 assert_eq!(
                     &sql,
@@ -332,23 +311,17 @@ mod build_select_statement_tests {
 
     #[test]
     fn conditions() {
-        let query = Query {
-            params: QueryParams {
-                columns: vec!["id".to_string()],
-                conditions: Some("(id > 10 OR id < 20) AND name = 'test'".to_string()),
-                distinct: None,
-                group_by: None,
-                limit: 10,
-                offset: 0,
-                order_by: None,
-                prepared_values: None,
-                table: "a_table".to_string(),
-            },
-            req_body: None,
-            task: QueryTasks::GetAllTables,
-        };
-
-        match build_select_statement(query) {
+        match build_select_statement(&QueryParamsSelect {
+            columns: vec!["id".to_string()],
+            conditions: Some("(id > 10 OR id < 20) AND name = 'test'".to_string()),
+            distinct: None,
+            group_by: None,
+            limit: 10,
+            offset: 0,
+            order_by: None,
+            prepared_values: None,
+            table: "a_table".to_string(),
+        }) {
             Ok((sql, _)) => {
                 assert_eq!(
                     &sql,
@@ -363,23 +336,17 @@ mod build_select_statement_tests {
 
     #[test]
     fn prepared_values() {
-        let query = Query {
-            params: QueryParams {
-                columns: vec!["id".to_string()],
-                conditions: Some("(id > $1 OR id < $2) AND name = $3".to_string()),
-                distinct: None,
-                group_by: None,
-                limit: 10,
-                offset: 0,
-                order_by: None,
-                prepared_values: Some("10,20,'test'".to_string()),
-                table: "a_table".to_string(),
-            },
-            req_body: None,
-            task: QueryTasks::GetAllTables,
-        };
-
-        match build_select_statement(query) {
+        match build_select_statement(&QueryParamsSelect {
+            columns: vec!["id".to_string()],
+            conditions: Some("(id > $1 OR id < $2) AND name = $3".to_string()),
+            distinct: None,
+            group_by: None,
+            limit: 10,
+            offset: 0,
+            order_by: None,
+            prepared_values: Some("10,20,'test'".to_string()),
+            table: "a_table".to_string(),
+        }) {
             Ok((sql, prepared_values)) => {
                 assert_eq!(
                     &sql,
@@ -403,27 +370,21 @@ mod build_select_statement_tests {
 
     #[test]
     fn complex_query() {
-        let query = Query {
-            params: QueryParams {
-                columns: vec![
-                    "id".to_string(),
-                    "test_bigint".to_string(),
-                    "test_bigserial".to_string(),
-                ],
-                conditions: Some("id = $1 AND test_name = $2".to_string()),
-                distinct: Some("test_date,test_timestamptz".to_string()),
-                group_by: None,
-                limit: 10000,
-                offset: 2000,
-                order_by: Some("due_date DESC".to_string()),
-                prepared_values: Some("46327143679919107,'a name'".to_string()),
-                table: "a_table".to_string(),
-            },
-            req_body: None,
-            task: QueryTasks::GetAllTables,
-        };
-
-        match build_select_statement(query) {
+        match build_select_statement(&QueryParamsSelect {
+            columns: vec![
+                "id".to_string(),
+                "test_bigint".to_string(),
+                "test_bigserial".to_string(),
+            ],
+            conditions: Some("id = $1 AND test_name = $2".to_string()),
+            distinct: Some("test_date,test_timestamptz".to_string()),
+            group_by: None,
+            limit: 10000,
+            offset: 2000,
+            order_by: Some("due_date DESC".to_string()),
+            prepared_values: Some("46327143679919107,'a name'".to_string()),
+            table: "a_table".to_string(),
+        }) {
             Ok((sql, prepared_values)) => {
                 assert_eq!(
                     &sql,

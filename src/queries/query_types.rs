@@ -4,9 +4,10 @@ use crate::errors::ApiError;
 use crate::AppState;
 use actix_web::{actix::Message, HttpRequest};
 use serde_json::Value;
+use std::collections::HashMap;
 
-/// Represents a single database query
-pub struct QueryParams {
+/// Represents a single SELECT query
+pub struct QueryParamsSelect {
     pub distinct: Option<String>,
     pub columns: Vec<String>,
     pub table: String,
@@ -18,14 +19,15 @@ pub struct QueryParams {
     pub prepared_values: Option<String>,
 }
 
-impl QueryParams {
+impl QueryParamsSelect {
+    /// Fills the struct’s values based on the HttpRequest data.
     pub fn from_http_request(req: &HttpRequest<AppState>) -> Self {
         let default_limit = 10000;
         let default_offset = 0;
 
         let query_params = req.query();
 
-        QueryParams {
+        QueryParamsSelect {
             columns: match query_params.get("columns") {
                 Some(columns_str) => columns_str
                     .split(',')
@@ -73,6 +75,34 @@ impl QueryParams {
             },
         }
     }
+}
+
+/// Represents a single SELECT query
+pub struct QueryParamsInsert {
+    pub is_upsert: bool,
+    pub rows: Vec<HashMap<String, String>>,
+    pub table: String,
+}
+
+impl QueryParamsInsert {
+    /// Fills the struct’s values based on the HttpRequest data.
+    pub fn from_http_request(req: &HttpRequest<AppState>) -> Self {
+        let query_params = req.query();
+
+        QueryParamsInsert {
+            is_upsert: query_params.get("is_upsert").is_some(),
+            rows: vec![],
+            table: match req.match_info().query("table") {
+                Ok(table_name) => table_name,
+                Err(_) => "".to_string(),
+            },
+        }
+    }
+}
+
+pub enum QueryParams {
+    Select(QueryParamsSelect),
+    Insert(QueryParamsInsert),
 }
 
 /// Represents a database task (w/ included query) to be performed by DbExecutor
