@@ -86,7 +86,11 @@ pub struct QueryParamsInsert {
 impl QueryParamsInsert {
     /// Fills the struct’s values based on the HttpRequest data.
     pub fn from_http_request(req: &HttpRequest<AppState>, body: Value) -> Result<Self, ApiError> {
-        let query_params = req.query();
+        let table = match req.match_info().query("table") {
+            Ok(table_name) => table_name,
+            Err(_) => unreachable!("Not possible to reach this endpoint without a table name."),
+        };
+
         let rows: Vec<Map<String, Value>> = match body.as_array() {
             Some(body_rows_to_insert) => {
                 if !body_rows_to_insert
@@ -108,12 +112,9 @@ impl QueryParamsInsert {
         };
 
         Ok(QueryParamsInsert {
-            is_upsert: query_params.get("is_upsert").is_some(),
+            is_upsert: req.query().get("is_upsert").is_some(),
             rows,
-            table: match req.match_info().query("table") {
-                Ok(table_name) => table_name,
-                Err(_) => "".to_string(),
-            },
+            table,
         })
     }
 }
@@ -150,6 +151,6 @@ pub enum QueryTasks {
 pub enum QueryResult {
     GetAllTablesResult(Vec<String>),
     QueryTableResult(Vec<RowFields>),
-    RowsAffected(u64),
+    RowsAffected(usize),
     TableStats(TableStats),
 }

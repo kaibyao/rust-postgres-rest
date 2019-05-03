@@ -23,15 +23,16 @@ Theoretically I could just use that, but I'm doubting its performance. It’s pr
 1. Add security, customizability, optimizations, etc.
 1. GraphQL API
 1. gRPC, Flatbuffers
+1. Optimization: Get rid of HashMap usage (convert to tuples or Serde_Json Maps)
+1. Optimization: Convert Strings to &str / statics.
 
 ## Notes
 
 - Need to be able to query for foreign key values (also need to account for when the user attempts to get the foreign key values for fields that aren't actually foreign keys)
 - Dotwalking foreign keys (also see [Resource embedding](http://postgrest.org/en/v5.2/api.html#resource-embedding))
 - there should probably be an option for users to add custom API endpoint/configuration for `add_rest_api_scope()`
+- there should probably be an option to disable specific endpoints.
 - Need to add a query parser for all endpoints
-- Change String usage to &str for performance reasons
-- Convert HashMap to tuples, also for performance reasons
 
 ## How API requests should work
 

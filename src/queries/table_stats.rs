@@ -261,7 +261,7 @@ ORDER BY "table";"#, table);
         .map(|row| {
             let constraint_type_int: i8 = row.get(1);
             let constraint_type_uint: u8 = constraint_type_int as u8;
-            let constraint_type_char = constraint_type_uint as char;
+            let constraint_type_char: char = constraint_type_uint.into();
 
             Constraint {
                 name: row.get(0),
