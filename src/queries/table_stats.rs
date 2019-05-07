@@ -129,7 +129,7 @@ pub fn get_table_stats(conn: &Connection, table: String) -> Result<QueryResult, 
     Ok(QueryResult::TableStats(stats))
 }
 
-fn get_column_stats(conn: &Connection, table: &str) -> Result<Vec<TableColumnStat>, ApiError> {
+pub fn get_column_stats(conn: &Connection, table: &str) -> Result<Vec<TableColumnStat>, ApiError> {
     let statement = &format!("
 WITH foreign_keys as (
     SELECT

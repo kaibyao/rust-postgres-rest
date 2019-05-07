@@ -1,8 +1,15 @@
-use super::query_types::{Query, QueryParams, QueryParamsInsert, QueryResult};
+use super::{
+    postgres_types::convert_json_value_to_rust,
+    query_types::{Query, QueryParams, QueryParamsInsert, QueryResult},
+    table_stats::get_column_stats,
+};
 use crate::db::Connection;
 use crate::errors::ApiError;
 use postgres::types::ToSql;
 use serde_json::{Map, Value};
+use std::collections::HashMap;
+
+static INSERT_ROWS_BATCH_COUNT: usize = 2;
 
 pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiError> {
     // extract query data
@@ -16,13 +23,13 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
 
     let num_rows = query_params.rows.len();
     let mut total_num_rows_affected = 0;
-    if num_rows >= 100 {
+    if num_rows >= INSERT_ROWS_BATCH_COUNT {
         // batch inserts into groups of 100 (see https://www.depesz.com/2007/07/05/how-to-insert-data-to-database-as-fast-as-possible/)
         let mut batch_rows = vec![];
         for (i, row) in query_params.rows.into_iter().enumerate() {
             batch_rows.push(row);
 
-            if (i + 1) % 100 == 0 || i == num_rows - 1 {
+            if (i + 1) % INSERT_ROWS_BATCH_COUNT == 0 || i == num_rows - 1 {
                 // do batch inserts on pushed rows
                 match execute_insert(conn, &batch_rows, &query_params.table) {
                     Ok(num_rows_affected) => total_num_rows_affected += num_rows_affected,
@@ -74,6 +81,13 @@ fn execute_insert<'a>(
 
     let prep_statement = conn.prepare(&insert_query_str)?;
 
+    // OK, apparently serde_json::Values can't automatically convert to non-JSON/JSONB columns. We need to actually get column types of the table we're inserting into so we know what type to convert each value into.
+    let column_stats = get_column_stats(conn, table)?;
+    let mut column_types: HashMap<String, String> = HashMap::new();
+    for stat in column_stats.into_iter() {
+        column_types.insert(stat.column_name, stat.column_type);
+    }
+
     // create the vector of "values" query string (use DEFAULT for the columns that don't have a value in that row)
     let default_str = "DEFAULT".to_string();
     let prep_values: Vec<&ToSql> = rows
@@ -83,7 +97,11 @@ fn execute_insert<'a>(
                 .iter()
                 .map(|column| -> &ToSql {
                     match row.get(*column) {
-                        Some(val) => val,
+                        Some(val) => {
+                            let column_type = &column_types[*column];
+                            // &convert_json_value_to_rust(column_type, val)
+                            val
+                        }
                         None => &default_str,
                     }
                 })
@@ -93,9 +111,10 @@ fn execute_insert<'a>(
         .flatten()
         .collect();
 
+    dbg!(&prep_values);
+
     // execute sql & return results
     let results = prep_statement.query(&prep_values)?;
-
     Ok(results.len())
 }
 

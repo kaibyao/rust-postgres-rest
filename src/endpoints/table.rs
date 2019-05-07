@@ -52,7 +52,7 @@ pub fn insert_into_table(
                 .send(query)
                 .from_err()
                 .and_then(|res| match res {
-                    Ok(_) => Ok(HttpResponse::Ok().into()),
+                    Ok(num_rows_affected) => Ok(HttpResponse::Ok().json(num_rows_affected)),
                     Err(err) => Err(err),
                 })
                 .responder()

@@ -2,10 +2,11 @@ use eui48::Eui48;
 use postgres::{
     accepts,
     rows::Row,
-    types::{FromSql, Type, MACADDR},
+    types::{FromSql, ToSql, Type, MACADDR},
 };
 use postgres_protocol::types::macaddr_from_sql;
 use rust_decimal::Decimal;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 
@@ -63,7 +64,7 @@ pub enum ColumnTypeValue {
     // Bit(bit_vec::BitVec),
     Bool(ColumnValue<bool>),
     ByteA(ColumnValue<Vec<u8>>),
-    Char(ColumnValue<String>),
+    Char(ColumnValue<String>), // apparently it's a bad practice to use char(n)
     Citext(ColumnValue<String>),
     Date(ColumnValue<chrono::NaiveDate>),
     Decimal(ColumnValue<Decimal>),
@@ -140,4 +141,8 @@ pub fn convert_row_fields(row: &Row) -> RowFields {
     }
 
     row_fields
+}
+
+pub fn convert_json_value_to_rust(column_type: &str, value: &Value) -> impl ToSql {
+    String::from("")
 }
