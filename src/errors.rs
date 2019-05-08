@@ -78,6 +78,24 @@ impl ApiError {
                 offender,
             },
 
+            "INVALID_JSON_TYPE_CONVERSION" => ApiError::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "The type of the JSON data does not match the type of the database column.".to_string(),
+                http_status: 400,
+                message: "Failed conversion of data from JSON to database column.",
+                offender
+            },
+
+            "UNSUPPORTED_DATA_TYPE" => ApiError::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "".to_string(),
+                http_status: 400,
+                message: "The type of the database column is not supported by the REST API.",
+                offender
+            },
+
             // If this happens, that means we forgot to implement an error handler
             _ => ApiError::UserError {
                 category: MessageCategory::Error,

@@ -49,7 +49,10 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
                 .map(|row| convert_row_fields(&row))
                 .collect();
 
-            Ok(QueryResult::QueryTableResult(results))
+            match results {
+                Ok(result_rows) => Ok(QueryResult::QueryTableResult(result_rows)),
+                Err(e) => Err(e),
+            }
         },
         _ => unreachable!("This function should never be called with params that aren’t shaped as a QueryParamsSelect.")
     }
