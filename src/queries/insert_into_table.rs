@@ -99,7 +99,14 @@ fn execute_insert<'a>(
                     match row.get(*column) {
                         Some(val) => {
                             let column_type = &column_types[*column];
-                            // convert_json_value_to_rust(column_type, val)
+                            // match convert_json_value_to_rust(column_type, val) {
+                            //     Ok(column_type_val) => {
+                            //         match column_type_val {
+
+                            //         }
+                            //     },
+                            //     Err(e) => Err(e),
+                            // };
                             val
                         }
                         None => &default_str,

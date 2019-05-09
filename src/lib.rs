@@ -8,6 +8,8 @@
 extern crate lazy_static;
 #[macro_use]
 extern crate serde;
+#[macro_use]
+extern crate postgres;
 
 use actix::{Addr, SyncArbiter};
 use actix_web::{actix, http::Method, App};

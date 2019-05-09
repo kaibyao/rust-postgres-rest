@@ -1,12 +1,12 @@
 use crate::errors::ApiError;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
-use eui48::Eui48;
+use eui48::MacAddress as Eui48MacAddress;
 use postgres::{
     accepts,
     rows::Row,
-    types::{FromSql, Type, MACADDR},
+    types::{FromSql, IsNull, ToSql, Type, MACADDR},
 };
-use postgres_protocol::types::macaddr_from_sql;
+use postgres_protocol::types::{macaddr_from_sql, macaddr_to_sql};
 use rust_decimal::Decimal;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -14,29 +14,41 @@ use std::error::Error as StdError;
 use std::str::FromStr;
 use uuid::Uuid;
 
-/// we have to define our own MacAddress type in order for Serde to serialize it properly. Really it's a copy of eui48's MacAddress
+/// we have to define our own MacAddress type in order for Serde to serialize it properly.
 #[derive(Debug, Serialize)]
-pub struct MacAddress(Eui48);
+pub struct MacAddress(Eui48MacAddress);
 
 // mostly copied from the postgres-protocol and postgres-shared libraries
 impl FromSql for MacAddress {
     fn from_sql(_: &Type, raw: &[u8]) -> Result<MacAddress, Box<StdError + Sync + Send>> {
         let bytes = macaddr_from_sql(raw)?;
-        Ok(MacAddress(bytes))
+        Ok(MacAddress(Eui48MacAddress::new(bytes)))
     }
 
     accepts!(MACADDR);
 }
 
+impl ToSql for MacAddress {
+    fn to_sql(&self, _: &Type, w: &mut Vec<u8>) -> Result<IsNull, Box<dyn StdError + Sync + Send>> {
+        let mut bytes = [0; 6];
+        bytes.copy_from_slice(self.0.as_bytes());
+        macaddr_to_sql(bytes, w);
+        Ok(IsNull::No)
+    }
+
+    accepts!(MACADDR);
+    to_sql_checked!();
+}
+
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 /// Represents a single column value for a returned row. We have to have an Enum describing column data that is non-nullable vs nullable
-pub enum ColumnValue<T: FromSql> {
+pub enum ColumnValue<T: FromSql + ToSql> {
     Nullable(Option<T>),
     NotNullable(T),
 }
 
-impl<T: FromSql> FromSql for ColumnValue<T> {
+impl<T: FromSql + ToSql> FromSql for ColumnValue<T> {
     fn accepts(ty: &Type) -> bool {
         <T as FromSql>::accepts(ty)
     }
@@ -56,6 +68,37 @@ impl<T: FromSql> FromSql for ColumnValue<T> {
         match raw {
             Some(raw_inner) => Self::from_sql(ty, raw_inner),
             None => Self::from_sql_null(ty),
+        }
+    }
+}
+
+impl<T: FromSql + ToSql> ToSql for ColumnValue<T> {
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut Vec<u8>,
+    ) -> Result<IsNull, Box<dyn StdError + 'static + Send + Sync>> {
+        match self {
+            ColumnValue::Nullable(val_opt) => val_opt.to_sql(ty, out),
+            ColumnValue::NotNullable(val) => val.to_sql(ty, out),
+        }
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        <T as ToSql>::accepts(ty)
+    }
+
+    to_sql_checked!();
+}
+
+impl<T: FromSql + ToSql> ColumnValue<T> {
+    pub fn as_inner(&self) -> Result<&T, ()> {
+        match self {
+            ColumnValue::Nullable(val_opt) => match val_opt {
+                Some(val) => Ok(val),
+                None => Err(()),
+            },
+            ColumnValue::NotNullable(val) => Ok(val),
         }
     }
 }
@@ -91,6 +134,12 @@ pub enum ColumnTypeValue {
     // VarBit(ColumnValue<bit_vec::BitVec>),
     VarChar(ColumnValue<String>),
 }
+
+// impl <T: FromSql + ToSql> FromSql for ColumnTypeValue {
+//     fn from_sql(ty: &Type, raw: &[u8]) -> Result<Self, Box<StdError + 'static + Send + Sync>> {
+//         let cv = ColumnValue::<T>::from_sql(ty, raw);
+//     }
+// }
 
 /// The field names and their values for a single table row.
 pub type RowFields = HashMap<String, ColumnTypeValue>;
@@ -267,7 +316,24 @@ pub fn convert_json_value_to_rust(
         "jsonb" => Ok(ColumnTypeValue::JsonB(ColumnValue::NotNullable(
             value.clone(),
         ))),
-        // "macaddr" => ColumnTypeValue::MacAddr(),
+        // "macaddr" => match value.as_str() { // temporarily commenting this out to avoid clippy errors
+        //     Some(val) => match Eui48MacAddress::from_str(val) {
+        //         Ok(mac) => Ok(ColumnTypeValue::MacAddr(ColumnValue::NotNullable(
+        //             MacAddress(mac),
+        //         ))),
+        //         Err(e) => Err(ApiError::generate_error(
+        //             "INVALID_JSON_TYPE_CONVERSION",
+        //             format!(
+        //                 "Value: `{}`. Column type: `{}`. Message: `{}`.",
+        //                 value, column_type, e
+        //             ),
+        //         )),
+        //     },
+        //     None => Err(ApiError::generate_error(
+        //         "INVALID_JSON_TYPE_CONVERSION",
+        //         format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        //     )),
+        // },
         "name" => match value.as_str() {
             Some(val) => Ok(ColumnTypeValue::Name(ColumnValue::NotNullable(
                 val.to_string(),

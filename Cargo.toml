@@ -20,7 +20,7 @@ path = "src/main.rs"
 actix-web = "^0.7"
 bit-vec = "^0.5"
 chrono = { version = "^0.4", features = ["serde"] }
-eui48 = "^0.4"
+eui48 = { version = "^0.4", features = ["serde"] }
 failure = "^0.1"
 futures = "^0.1"
 lazy_static = "^1.2"

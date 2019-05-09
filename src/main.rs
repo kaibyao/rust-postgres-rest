@@ -2,10 +2,7 @@
 
 #![deny(clippy::complexity, clippy::correctness, clippy::perf, clippy::style)]
 
-extern crate actix_web;
 use actix_web::{actix::System, server, App};
-
-extern crate experiment00;
 use experiment00::{add_rest_api_scope, AppConfig};
 
 fn main() {
