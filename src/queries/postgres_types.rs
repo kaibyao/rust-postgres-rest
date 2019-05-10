@@ -91,18 +91,6 @@ impl<T: FromSql + ToSql> ToSql for ColumnValue<T> {
     to_sql_checked!();
 }
 
-impl<T: FromSql + ToSql> ColumnValue<T> {
-    pub fn as_inner(&self) -> Result<&T, ()> {
-        match self {
-            ColumnValue::Nullable(val_opt) => match val_opt {
-                Some(val) => Ok(val),
-                None => Err(()),
-            },
-            ColumnValue::NotNullable(val) => Ok(val),
-        }
-    }
-}
-
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 /// Represents a postgres column's type
@@ -134,12 +122,6 @@ pub enum ColumnTypeValue {
     // VarBit(ColumnValue<bit_vec::BitVec>),
     VarChar(ColumnValue<String>),
 }
-
-// impl <T: FromSql + ToSql> FromSql for ColumnTypeValue {
-//     fn from_sql(ty: &Type, raw: &[u8]) -> Result<Self, Box<StdError + 'static + Send + Sync>> {
-//         let cv = ColumnValue::<T>::from_sql(ty, raw);
-//     }
-// }
 
 /// The field names and their values for a single table row.
 pub type RowFields = HashMap<String, ColumnTypeValue>;
@@ -201,241 +183,437 @@ pub fn convert_row_fields(row: &Row) -> Result<RowFields, ApiError> {
     Ok(row_fields)
 }
 
-pub fn convert_json_value_to_rust(
+pub fn convert_json_value_to_postgres(
     column_type: &str,
     value: &Value,
 ) -> Result<ColumnTypeValue, ApiError> {
     match column_type {
-        "int8" => match value.as_i64() {
-            Some(val) => Ok(ColumnTypeValue::BigInt(ColumnValue::NotNullable(val))),
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "bool" => match value.as_bool() {
-            Some(val) => Ok(ColumnTypeValue::Bool(ColumnValue::NotNullable(val))),
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "bytea" => match value.as_array() {
-            Some(raw_bytea_json_vec) => {
-                let bytea_conversion: Result<Vec<u8>, ApiError> = raw_bytea_json_vec
-                    .iter()
-                    .map(|json_val| match json_val.as_u64() {
-                        Some(bytea_val) => Ok(bytea_val as u8),
-                        None => Err(ApiError::generate_error(
-                            "INVALID_JSON_TYPE_CONVERSION",
-                            format!("Value: `{}`. Column type: `{}`.", value, column_type),
-                        )),
-                    })
-                    .collect();
-
-                match bytea_conversion {
-                    Ok(bytea_vec) => {
-                        Ok(ColumnTypeValue::ByteA(ColumnValue::NotNullable(bytea_vec)))
-                    }
-                    Err(e) => Err(e),
-                }
-            }
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "bpchar" => match value.as_str() {
-            Some(val) => Ok(ColumnTypeValue::Char(ColumnValue::NotNullable(
-                val.to_string(),
-            ))),
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "citext" => match value.as_str() {
-            Some(val) => Ok(ColumnTypeValue::Citext(ColumnValue::NotNullable(
-                val.to_string(),
-            ))),
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "date" => match value.as_str() {
-            Some(val) => match NaiveDate::from_str(val) {
-                Ok(date) => Ok(ColumnTypeValue::Date(ColumnValue::NotNullable(date))),
-                Err(e) => Err(ApiError::generate_error(
-                    "INVALID_JSON_TYPE_CONVERSION",
-                    format!(
-                        "Value: `{}`. Column type: `{}`. Message: `{}`.",
-                        value, column_type, e
-                    ),
-                )),
-            },
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "float4" => match value.as_f64() {
-            Some(n) => Ok(ColumnTypeValue::Real(ColumnValue::NotNullable(n as f32))),
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "float8" => match value.as_f64() {
-            Some(n) => Ok(ColumnTypeValue::Float8(ColumnValue::NotNullable(n))),
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        // "hstore" => ColumnTypeValue::HStore(),
-        "int2" => match value.as_i64() {
-            Some(n) => Ok(ColumnTypeValue::SmallInt(ColumnValue::NotNullable(
-                n as i16,
-            ))),
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "int4" => match value.as_i64() {
-            Some(n) => Ok(ColumnTypeValue::Int(ColumnValue::NotNullable(n as i32))),
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "json" => Ok(ColumnTypeValue::Json(ColumnValue::NotNullable(
-            value.clone(),
-        ))),
-        "jsonb" => Ok(ColumnTypeValue::JsonB(ColumnValue::NotNullable(
-            value.clone(),
-        ))),
-        // "macaddr" => match value.as_str() { // temporarily commenting this out to avoid clippy errors
-        //     Some(val) => match Eui48MacAddress::from_str(val) {
-        //         Ok(mac) => Ok(ColumnTypeValue::MacAddr(ColumnValue::NotNullable(
-        //             MacAddress(mac),
-        //         ))),
-        //         Err(e) => Err(ApiError::generate_error(
-        //             "INVALID_JSON_TYPE_CONVERSION",
-        //             format!(
-        //                 "Value: `{}`. Column type: `{}`. Message: `{}`.",
-        //                 value, column_type, e
-        //             ),
-        //         )),
-        //     },
-        //     None => Err(ApiError::generate_error(
-        //         "INVALID_JSON_TYPE_CONVERSION",
-        //         format!("Value: `{}`. Column type: `{}`.", value, column_type),
-        //     )),
-        // },
-        "name" => match value.as_str() {
-            Some(val) => Ok(ColumnTypeValue::Name(ColumnValue::NotNullable(
-                val.to_string(),
-            ))),
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        // // using rust-decimal per discussion at https://www.reddit.com/r/rust/comments/a7frqj/have_anyone_reviewed_any_of_the_decimal_crates/.
-        // // keep in mind that at the time of this writing, diesel uses bigdecimal
-        // "numeric" => ColumnTypeValue::Decimal(row.get(i)),
-        // "oid" => ColumnTypeValue::Oid(row.get(i)),
-        "text" => match value.as_str() {
-            Some(val) => Ok(ColumnTypeValue::Text(ColumnValue::NotNullable(
-                val.to_string(),
-            ))),
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "time" => match value.as_str() {
-            Some(val) => match NaiveTime::from_str(val) {
-                Ok(time) => Ok(ColumnTypeValue::Time(ColumnValue::NotNullable(time))),
-                Err(e) => Err(ApiError::generate_error(
-                    "INVALID_JSON_TYPE_CONVERSION",
-                    format!(
-                        "Value: `{}`. Column type: `{}`. Message: `{}`.",
-                        value, column_type, e
-                    ),
-                )),
-            },
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "timestamp" => match value.as_str() {
-            Some(val) => match NaiveDateTime::from_str(val) {
-                Ok(timestamp) => Ok(ColumnTypeValue::Timestamp(ColumnValue::NotNullable(
-                    timestamp,
-                ))),
-                Err(e) => Err(ApiError::generate_error(
-                    "INVALID_JSON_TYPE_CONVERSION",
-                    format!(
-                        "Value: `{}`. Column type: `{}`. Message: `{}`.",
-                        value, column_type, e
-                    ),
-                )),
-            },
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "timestamptz" => match value.as_str() {
-            Some(val) => match DateTime::from_str(val) {
-                Ok(timestamptz) => Ok(ColumnTypeValue::TimestampTz(ColumnValue::NotNullable(
-                    timestamptz,
-                ))),
-                Err(e) => Err(ApiError::generate_error(
-                    "INVALID_JSON_TYPE_CONVERSION",
-                    format!(
-                        "Value: `{}`. Column type: `{}`. Message: `{}`.",
-                        value, column_type, e
-                    ),
-                )),
-            },
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "uuid" => match value.as_str() {
-            Some(val) => match Uuid::parse_str(val) {
-                Ok(uuid_val) => Ok(ColumnTypeValue::Uuid(ColumnValue::NotNullable(uuid_val))),
-                Err(e) => Err(ApiError::generate_error(
-                    "INVALID_JSON_TYPE_CONVERSION",
-                    format!(
-                        "Value: `{}`. Column type: `{}`. Message: `{}`.",
-                        value, column_type, e
-                    ),
-                )),
-            },
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
-        "varchar" => match value.as_str() {
-            Some(val) => Ok(ColumnTypeValue::VarChar(ColumnValue::NotNullable(
-                val.to_string(),
-            ))),
-            None => Err(ApiError::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        },
+        "int8" => convert_json_value_to_bigint(column_type, value),
+        "bool" => convert_json_value_to_bool(column_type, value),
+        "bytea" => convert_json_value_to_bytea(column_type, value),
+        "bpchar" => convert_json_value_to_char(column_type, value),
+        "citext" => convert_json_value_to_citext(column_type, value),
+        "date" => convert_json_value_to_date(column_type, value),
+        "float4" => convert_json_value_to_real(column_type, value),
+        "float8" => convert_json_value_to_float8(column_type, value),
+        "hstore" => convert_json_value_to_hstore(column_type, value),
+        "int2" => convert_json_value_to_smallint(column_type, value),
+        "int4" => convert_json_value_to_int(column_type, value),
+        "json" => convert_json_value_to_json(value),
+        "jsonb" => convert_json_value_to_jsonb(value),
+        "macaddr" => convert_json_value_to_macaddr(column_type, value),
+        "name" => convert_json_value_to_name(column_type, value),
+        "numeric" => convert_json_value_to_decimal(column_type, value),
+        "oid" => convert_json_value_to_oid(column_type, value),
+        "text" => convert_json_value_to_text(column_type, value),
+        "time" => convert_json_value_to_time(column_type, value),
+        "timestamp" => convert_json_value_to_timestamp(column_type, value),
+        "timestamptz" => convert_json_value_to_timestamptz(column_type, value),
+        "uuid" => convert_json_value_to_uuid(column_type, value),
+        "varchar" => convert_json_value_to_varchar(column_type, value),
         _ => Err(ApiError::generate_error(
             "UNSUPPORTED_DATA_TYPE",
             format!("Value {} has unsupported type: {}", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_bigint(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_i64() {
+        Some(val) => Ok(ColumnTypeValue::BigInt(ColumnValue::NotNullable(val))),
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_bool(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_bool() {
+        Some(val) => Ok(ColumnTypeValue::Bool(ColumnValue::NotNullable(val))),
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_bytea(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_array() {
+        Some(raw_bytea_json_vec) => {
+            let bytea_conversion: Result<Vec<u8>, ApiError> = raw_bytea_json_vec
+                .iter()
+                .map(|json_val| match json_val.as_u64() {
+                    Some(bytea_val) => Ok(bytea_val as u8),
+                    None => Err(ApiError::generate_error(
+                        "INVALID_JSON_TYPE_CONVERSION",
+                        format!("Value: `{}`. Column type: `{}`.", value, column_type),
+                    )),
+                })
+                .collect();
+
+            match bytea_conversion {
+                Ok(bytea_vec) => Ok(ColumnTypeValue::ByteA(ColumnValue::NotNullable(bytea_vec))),
+                Err(e) => Err(e),
+            }
+        }
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_char(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_str() {
+        Some(val) => Ok(ColumnTypeValue::Char(ColumnValue::NotNullable(
+            val.to_string(),
+        ))),
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_citext(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_str() {
+        Some(val) => Ok(ColumnTypeValue::Citext(ColumnValue::NotNullable(
+            val.to_string(),
+        ))),
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_date(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_str() {
+        Some(val) => match NaiveDate::from_str(val) {
+            Ok(date) => Ok(ColumnTypeValue::Date(ColumnValue::NotNullable(date))),
+            Err(e) => Err(ApiError::generate_error(
+                "INVALID_JSON_TYPE_CONVERSION",
+                format!(
+                    "Value: `{}`. Column type: `{}`. Message: `{}`.",
+                    value, column_type, e
+                ),
+            )),
+        },
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_decimal(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_str() {
+        Some(val) => match Decimal::from_str(val) {
+            Ok(decimal) => Ok(ColumnTypeValue::Decimal(ColumnValue::NotNullable(decimal))),
+            Err(e) => Err(ApiError::generate_error(
+                "INVALID_JSON_TYPE_CONVERSION",
+                format!(
+                    "Value: `{}`. Column type: `{}`. Message: `{}`.",
+                    value, column_type, e
+                ),
+            )),
+        },
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_float8(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_f64() {
+        Some(n) => Ok(ColumnTypeValue::Float8(ColumnValue::NotNullable(n))),
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_hstore(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_object() {
+        Some(val_obj) => {
+            let mut val_hash: HashMap<String, Option<String>> = HashMap::new();
+            for key in val_obj.keys() {
+                match val_obj.get(key) {
+                    Some(val) => match val.as_str() {
+                        Some(val_str) => val_hash.insert(key.clone(), Some(val_str.to_string())),
+                        None => {
+                            return Err(ApiError::generate_error(
+                                "INVALID_JSON_TYPE_CONVERSION",
+                                format!("Value: `{}`. Column type: `{}`.", value, column_type),
+                            ))
+                        }
+                    },
+                    None => val_hash.insert(key.clone(), None),
+                };
+            }
+
+            Ok(ColumnTypeValue::HStore(ColumnValue::NotNullable(val_hash)))
+        }
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_int(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_i64() {
+        Some(n) => Ok(ColumnTypeValue::Int(ColumnValue::NotNullable(n as i32))),
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_json(value: &Value) -> Result<ColumnTypeValue, ApiError> {
+    Ok(ColumnTypeValue::Json(ColumnValue::NotNullable(
+        value.clone(),
+    )))
+}
+
+fn convert_json_value_to_jsonb(value: &Value) -> Result<ColumnTypeValue, ApiError> {
+    Ok(ColumnTypeValue::JsonB(ColumnValue::NotNullable(
+        value.clone(),
+    )))
+}
+
+fn convert_json_value_to_macaddr(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_str() {
+        Some(val) => match Eui48MacAddress::from_str(val) {
+            Ok(mac) => Ok(ColumnTypeValue::MacAddr(ColumnValue::NotNullable(
+                MacAddress(mac),
+            ))),
+            Err(e) => Err(ApiError::generate_error(
+                "INVALID_JSON_TYPE_CONVERSION",
+                format!(
+                    "Value: `{}`. Column type: `{}`. Message: `{}`.",
+                    value, column_type, e
+                ),
+            )),
+        },
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_name(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_str() {
+        Some(val) => Ok(ColumnTypeValue::Name(ColumnValue::NotNullable(
+            val.to_string(),
+        ))),
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_oid(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_u64() {
+        Some(val) => Ok(ColumnTypeValue::Oid(ColumnValue::NotNullable(val as u32))),
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_real(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_f64() {
+        Some(n) => Ok(ColumnTypeValue::Real(ColumnValue::NotNullable(n as f32))),
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_smallint(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_i64() {
+        Some(n) => Ok(ColumnTypeValue::SmallInt(ColumnValue::NotNullable(
+            n as i16,
+        ))),
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_text(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_str() {
+        Some(val) => Ok(ColumnTypeValue::Text(ColumnValue::NotNullable(
+            val.to_string(),
+        ))),
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_time(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_str() {
+        Some(val) => match NaiveTime::from_str(val) {
+            Ok(time) => Ok(ColumnTypeValue::Time(ColumnValue::NotNullable(time))),
+            Err(e) => Err(ApiError::generate_error(
+                "INVALID_JSON_TYPE_CONVERSION",
+                format!(
+                    "Value: `{}`. Column type: `{}`. Message: `{}`.",
+                    value, column_type, e
+                ),
+            )),
+        },
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_timestamp(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_str() {
+        Some(val) => match NaiveDateTime::from_str(val) {
+            Ok(timestamp) => Ok(ColumnTypeValue::Timestamp(ColumnValue::NotNullable(
+                timestamp,
+            ))),
+            Err(e) => Err(ApiError::generate_error(
+                "INVALID_JSON_TYPE_CONVERSION",
+                format!(
+                    "Value: `{}`. Column type: `{}`. Message: `{}`.",
+                    value, column_type, e
+                ),
+            )),
+        },
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_timestamptz(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_str() {
+        Some(val) => match DateTime::from_str(val) {
+            Ok(timestamptz) => Ok(ColumnTypeValue::TimestampTz(ColumnValue::NotNullable(
+                timestamptz,
+            ))),
+            Err(e) => Err(ApiError::generate_error(
+                "INVALID_JSON_TYPE_CONVERSION",
+                format!(
+                    "Value: `{}`. Column type: `{}`. Message: `{}`.",
+                    value, column_type, e
+                ),
+            )),
+        },
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_uuid(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_str() {
+        Some(val) => match Uuid::parse_str(val) {
+            Ok(uuid_val) => Ok(ColumnTypeValue::Uuid(ColumnValue::NotNullable(uuid_val))),
+            Err(e) => Err(ApiError::generate_error(
+                "INVALID_JSON_TYPE_CONVERSION",
+                format!(
+                    "Value: `{}`. Column type: `{}`. Message: `{}`.",
+                    value, column_type, e
+                ),
+            )),
+        },
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+        )),
+    }
+}
+
+fn convert_json_value_to_varchar(
+    column_type: &str,
+    value: &Value,
+) -> Result<ColumnTypeValue, ApiError> {
+    match value.as_str() {
+        Some(val) => Ok(ColumnTypeValue::VarChar(ColumnValue::NotNullable(
+            val.to_string(),
+        ))),
+        None => Err(ApiError::generate_error(
+            "INVALID_JSON_TYPE_CONVERSION",
+            format!("Value: `{}`. Column type: `{}`.", value, column_type),
         )),
     }
 }
