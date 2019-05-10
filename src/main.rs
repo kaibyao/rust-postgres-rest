@@ -7,10 +7,13 @@ use experiment00::{add_rest_api_scope, AppConfig};
 
 fn main() {
     let actix_system_actor = System::new("experiment00");
+    let ip_address = "127.0.0.1:8000";
 
     // start server
-    server::new(|| {
+    server::new(move || {
         let app = App::new();
+
+        println!("Running server on {}", ip_address);
 
         // appends an actix-web Scope under the "/api" endpoint to app and returns it
         add_rest_api_scope(
@@ -21,7 +24,7 @@ fn main() {
             app,
         )
     })
-    .bind("127.0.0.1:8000")
+    .bind(ip_address)
     .expect("Can not bind to port 8000")
     .run();
 
