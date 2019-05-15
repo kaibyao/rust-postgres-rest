@@ -78,7 +78,9 @@ impl QueryParamsSelect {
 
 /// Represents a single SELECT query
 pub struct QueryParamsInsert {
-    pub is_upsert: bool,
+    pub conflict_action: Option<String>,
+    pub conflict_target: Option<Vec<String>>,
+    pub returning_columns: Option<Vec<String>>,
     pub rows: Vec<Map<String, Value>>,
     pub table: String,
 }
@@ -89,6 +91,67 @@ impl QueryParamsInsert {
         let table = match req.match_info().query("table") {
             Ok(table_name) => table_name,
             Err(_) => unreachable!("Not possible to reach this endpoint without a table name."),
+        };
+
+        // generate ON CONFLICT data
+        let conflict_action = match req.query().get("conflict_action") {
+            Some(action_str) => Some(action_str.to_string().to_lowercase()),
+            None => None,
+        };
+        let conflict_target: Option<Vec<String>> = match req.query().get("conflict_target") {
+            Some(targets_str) => Some(
+                targets_str
+                    .split(',')
+                    .map(|target_str| target_str.to_string().to_lowercase())
+                    .collect(),
+            ),
+            None => None,
+        };
+        if (conflict_action.is_some() && conflict_target.is_none())
+            || (conflict_action.is_none() && conflict_target.is_some())
+        {
+            return Err(ApiError::generate_error("INCORRECT_REQUEST_BODY", "`conflict_action` and `conflict_target` must both be present for the `ON CONFLICT` clause to be generated correctly.".to_string()));
+        }
+
+        if let (Some(conflict_action_str), Some(conflict_target_vec)) =
+            (&conflict_action, &conflict_target)
+        {
+            // Some validation checking of conflict_action and conflict_target
+            if conflict_action_str != "nothing" && conflict_action_str != "update" {
+                return Err(ApiError::generate_error(
+                    "INCORRECT_REQUEST_BODY",
+                    "Valid options for `conflict_action` are: `nothing`, `update`.".to_string(),
+                ));
+            }
+
+            if conflict_target_vec.is_empty() {
+                return Err(ApiError::generate_error(
+                    "INCORRECT_REQUEST_BODY",
+                    "`conflict_target` must be a comma-separated list of column names and include at least one column name.".to_string(),
+                ));
+            }
+
+            if conflict_target_vec
+                .iter()
+                .any(|conflict_target_str| *conflict_target_str == "")
+            {
+                return Err(ApiError::generate_error(
+                    "INCORRECT_REQUEST_BODY",
+                    "<Empty string> is not a valid column name for the parameter`conflict_target`."
+                        .to_string(),
+                ));
+            }
+        }
+
+        // generate RETURNING data
+        let returning_columns = match req.query().get("returning_columns") {
+            Some(column_str) => Some(
+                column_str
+                    .split(',')
+                    .map(std::string::ToString::to_string)
+                    .collect(),
+            ),
+            None => None,
         };
 
         let rows: Vec<Map<String, Value>> = match body.as_array() {
@@ -112,7 +175,9 @@ impl QueryParamsInsert {
         };
 
         Ok(QueryParamsInsert {
-            is_upsert: req.query().get("is_upsert").is_some(),
+            conflict_action,
+            conflict_target,
+            returning_columns,
             rows,
             table,
         })

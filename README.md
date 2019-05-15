@@ -2,7 +2,7 @@
 
 Toy project for exploring Rust. Really, I'm trying to see how easy it is to recreate ServiceNow's Table API in Rust using the PostgreSQL database, as I've found that feature to be useful enough to use in future web projects.
 
-## What about PostgREST?
+## What about PostgREST
 
 Theoretically I could just use that, but I'm doubting its performance. It’s probably worth benchmarking, but there's a good chance that it wouldn’t be very fast.
 
@@ -17,12 +17,13 @@ Theoretically I could just use that, but I'm doubting its performance. It’s pr
 ## To dos
 
 1. Recreate the Table API.
-1. CSV, XML for REST API
-1. MAC Address formatting
+1. CSV, XML for REST API (nix for now?)
 1. Replace r2d2 with tokio-postgres (look at techempower benchmarks code)
 1. Add security, customizability, optimizations, etc.
 1. GraphQL API
-1. gRPC, Flatbuffers
+1. gRPC, Flatbuffers (nix for now?)
+1. Add option to cache table stats for every table on startup.
+1. Add each endpoint as an individual export.
 1. Optimization: Get rid of HashMap usage (convert to tuples or Serde_Json Maps)
 1. Optimization: Convert Strings to &str / statics.
 
@@ -33,9 +34,3 @@ Theoretically I could just use that, but I'm doubting its performance. It’s pr
 - there should probably be an option for users to add custom API endpoint/configuration for `add_rest_api_scope()`
 - there should probably be an option to disable specific endpoints.
 - Need to add a query parser for all endpoints
-
-## How API requests should work
-
-- requesting to `/{table}` without `columns`: number of rows (`count(*)`), relations (references and referenced_by), and column names and their type
-
-- requesting with columns but without `where` returns up to 10000 rows, naiively requesting from DB

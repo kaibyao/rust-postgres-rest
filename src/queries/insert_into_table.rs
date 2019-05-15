@@ -22,17 +22,24 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
 
     // TODO: use a transaction instead of individual executes
 
+    // OK, apparently serde_json::Values can't automatically convert to non-JSON/JSONB columns.
+    // We need to get column types of table so we know what types into which the json values are converted.
+    let mut column_types: HashMap<String, String> = HashMap::new();
+    for stat in get_column_stats(conn, &query_params.table)?.into_iter() {
+        column_types.insert(stat.column_name, stat.column_type);
+    }
+
     let num_rows = query_params.rows.len();
     let mut total_num_rows_affected = 0;
     if num_rows >= INSERT_ROWS_BATCH_COUNT {
         // batch inserts into groups of 100 (see https://www.depesz.com/2007/07/05/how-to-insert-data-to-database-as-fast-as-possible/)
         let mut batch_rows = vec![];
-        for (i, row) in query_params.rows.into_iter().enumerate() {
+        for (i, row) in query_params.rows.iter().enumerate() {
             batch_rows.push(row);
 
             if (i + 1) % INSERT_ROWS_BATCH_COUNT == 0 || i == num_rows - 1 {
                 // do batch inserts on pushed rows
-                match execute_insert(conn, &batch_rows, &query_params.table) {
+                match execute_insert(conn, &query_params, &column_types, &batch_rows) {
                     Ok(num_rows_affected) => total_num_rows_affected += num_rows_affected,
                     Err(e) => return Err(e),
                 };
@@ -43,7 +50,15 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
         }
     } else {
         // insert all rows
-        match execute_insert(conn, &query_params.rows, &query_params.table) {
+        match execute_insert(
+            conn,
+            &query_params,
+            &column_types,
+            &query_params
+                .rows
+                .iter()
+                .collect::<Vec<&Map<String, Value>>>(),
+        ) {
             Ok(num_rows_affected) => total_num_rows_affected = num_rows_affected,
             Err(e) => return Err(e),
         }
@@ -55,32 +70,34 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
 /// Runs the actual setting up + execution of the INSERT query
 fn execute_insert<'a>(
     conn: &Connection,
-    rows: &'a [Map<String, Value>],
-    table: &str,
+    query_params: &QueryParamsInsert,
+    column_types: &HashMap<String, String>,
+    rows: &'a [&'a Map<String, Value>],
 ) -> Result<usize, ApiError> {
-    // TODO: figure out is_upsert
+    // TODO: implement RETURNING
 
     // parse out the columns that have values to assign
     let columns = get_all_columns_to_insert(rows);
+    let (values_params_str, column_values) = get_insert_params(rows, &columns, column_types)?;
 
     dbg!(&columns);
+    dbg!(&values_params_str);
+    dbg!(&column_values);
 
-    // OK, apparently serde_json::Values can't automatically convert to non-JSON/JSONB columns. We need to actually get column types of the table we're inserting into so we know what type to convert each value into.
-    let column_stats = get_column_stats(conn, table)?;
-    let mut column_types: HashMap<String, String> = HashMap::new();
-    for stat in column_stats.into_iter() {
-        column_types.insert(stat.column_name, stat.column_type);
-    }
-
-    let (values_params_str, column_values) = get_insert_params(rows, &columns, column_types)?;
+    // generate the ON CONFLICT string
+    let conflict_string = match generate_conflict_str(query_params, &columns) {
+        Some(conflict_str) => conflict_str,
+        None => "".to_string(),
+    };
 
     // create initial prepared statement
     let insert_query_str = [
         "INSERT INTO ",
-        table,
+        &query_params.table,
         &[" (", &columns.join(", "), ")"].join(""),
         " VALUES ",
         &values_params_str,
+        &conflict_string,
     ]
     .join("");
 
@@ -132,7 +149,50 @@ fn execute_insert<'a>(
     // }
 }
 
-fn get_all_columns_to_insert<'a>(rows: &'a [Map<String, Value>]) -> Vec<&'a str> {
+/// Generates the ON CONFLICT clause. If conflict action is "nothing", then "DO NOTHING" is returned. If conflict action is "update", then sets all columns that aren't conflict target columns to the excluded row's column value.
+fn generate_conflict_str(query_params: &QueryParamsInsert, columns: &[&str]) -> Option<String> {
+    if let (Some(conflict_action_str), Some(conflict_target_vec)) =
+        (&query_params.conflict_action, &query_params.conflict_target)
+    {
+        // filter out any conflict target columns and convert the remaining columns into "SET <col> = EXCLUDED.<col>" clauses
+        let expanded_conflict_action = if conflict_action_str == "update" {
+            [
+                " DO UPDATE SET ",
+                &columns
+                    .iter()
+                    .filter_map(|col| {
+                        match conflict_target_vec
+                            .iter()
+                            .position(|conflict_target| conflict_target == *col)
+                        {
+                            Some(_) => None,
+                            None => Some([*col, "=", "EXCLUDED.", *col].join("")),
+                        }
+                    })
+                    .collect::<Vec<String>>()
+                    .join(", "),
+            ]
+            .join("")
+        } else {
+            " DO NOTHING".to_string()
+        };
+
+        return Some(
+            [
+                " ON CONFLICT (",
+                &conflict_target_vec.join(", "),
+                ") ",
+                &expanded_conflict_action,
+            ]
+            .join(""),
+        );
+    }
+
+    None
+}
+
+/// Searches all rows being inserted and returns a vector containing all of the column names
+fn get_all_columns_to_insert<'a>(rows: &'a [&'a Map<String, Value>]) -> Vec<&'a str> {
     // parse out the columns that have values to assign
     let mut columns: Vec<&str> = vec![];
     for row in rows.iter() {
@@ -147,9 +207,9 @@ fn get_all_columns_to_insert<'a>(rows: &'a [Map<String, Value>]) -> Vec<&'a str>
 
 /// Returns a Result containing the tuple that contains (the VALUES parameter string, the array of parameter values)
 fn get_insert_params(
-    rows: &[Map<String, Value>],
+    rows: &[&Map<String, Value>],
     columns: &[&str],
-    column_types: HashMap<String, String>,
+    column_types: &HashMap<String, String>,
 ) -> Result<(String, Vec<ColumnTypeValue>), ApiError> {
     let mut prep_column_number = 1;
     let mut row_strs = vec![];

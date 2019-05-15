@@ -84,9 +84,20 @@ pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
                     "description": "Inserts new records into the table.",
                     "body": "An array of objects where each object represents a row and whose key-values represent column names and their values.",
                     "query_params": {
-                        "is_upsert": {
-                            "default": false,
-                            "description": "Include this parameter to update records if there is a conflict during the insert operation."
+                        "conflict_action": {
+                            "default": null,
+                            "options": [null, "update", "nothing"],
+                            "description": "The `ON CONFLICT` action to perform (`update` or `nothing`).",
+                        },
+                        "conflict_target": {
+                            "default": null,
+                            "description": "Comma-separated list of columns that determine if a row being inserted conflicts with an existing row.",
+                            "example": "id,name,field_2",
+                        },
+                        "returning_columns": {
+                            "default": null,
+                            "description": "Comma-separated list of columns to return from the INSERT operation.",
+                            "example": "id,name,field_2",
                         }
                     },
                 },
