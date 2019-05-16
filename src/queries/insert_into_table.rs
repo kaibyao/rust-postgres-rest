@@ -1,5 +1,5 @@
 use super::{
-    postgres_types::ColumnTypeValue,
+    postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
     query_types::{Query, QueryParams, QueryParamsInsert, QueryResult},
     table_stats::get_column_stats,
 };
@@ -10,6 +10,11 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 
 static INSERT_ROWS_BATCH_COUNT: usize = 2;
+
+enum InsertResult {
+    Rows(Vec<RowFields>),
+    NumRowsAffected(u64),
+}
 
 /// Runs an INSERT INTO <table> query
 pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiError> {
@@ -31,6 +36,8 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
 
     let num_rows = query_params.rows.len();
     let mut total_num_rows_affected = 0;
+    let mut total_rows_returned = vec![];
+
     if num_rows >= INSERT_ROWS_BATCH_COUNT {
         // batch inserts into groups of 100 (see https://www.depesz.com/2007/07/05/how-to-insert-data-to-database-as-fast-as-possible/)
         let mut batch_rows = vec![];
@@ -39,9 +46,13 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
 
             if (i + 1) % INSERT_ROWS_BATCH_COUNT == 0 || i == num_rows - 1 {
                 // do batch inserts on pushed rows
-                match execute_insert(conn, &query_params, &column_types, &batch_rows) {
-                    Ok(num_rows_affected) => total_num_rows_affected += num_rows_affected,
-                    Err(e) => return Err(e),
+                match execute_insert(conn, &query_params, &column_types, &batch_rows)? {
+                    InsertResult::NumRowsAffected(num_rows_affected) => {
+                        total_num_rows_affected += num_rows_affected
+                    }
+                    InsertResult::Rows(rows) => {
+                        total_rows_returned.extend(rows);
+                    }
                 };
 
                 // reset batch
@@ -58,13 +69,21 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
                 .rows
                 .iter()
                 .collect::<Vec<&Map<String, Value>>>(),
-        ) {
-            Ok(num_rows_affected) => total_num_rows_affected = num_rows_affected,
-            Err(e) => return Err(e),
-        }
+        )? {
+            InsertResult::NumRowsAffected(num_rows_affected) => {
+                total_num_rows_affected += num_rows_affected
+            }
+            InsertResult::Rows(rows) => {
+                total_rows_returned.extend(rows);
+            }
+        };
     }
 
-    Ok(QueryResult::RowsAffected(total_num_rows_affected))
+    if query_params.returning_columns.is_some() {
+        Ok(QueryResult::QueryTableResult(total_rows_returned))
+    } else {
+        Ok(QueryResult::from_num_rows_affected(total_num_rows_affected))
+    }
 }
 
 /// Runs the actual setting up + execution of the INSERT query
@@ -73,22 +92,33 @@ fn execute_insert<'a>(
     query_params: &QueryParamsInsert,
     column_types: &HashMap<String, String>,
     rows: &'a [&'a Map<String, Value>],
-) -> Result<usize, ApiError> {
-    // TODO: implement RETURNING
+) -> Result<InsertResult, ApiError> {
+    let mut is_return_rows = false;
 
     // parse out the columns that have values to assign
     let columns = get_all_columns_to_insert(rows);
     let (values_params_str, column_values) = get_insert_params(rows, &columns, column_types)?;
 
-    dbg!(&columns);
-    dbg!(&values_params_str);
-    dbg!(&column_values);
-
     // generate the ON CONFLICT string
-    let conflict_string = match generate_conflict_str(query_params, &columns) {
+    let conflict_clause = match generate_conflict_str(query_params, &columns) {
         Some(conflict_str) => conflict_str,
         None => "".to_string(),
     };
+
+    // generate the RETURNING string
+    let returning_clause = match generate_returning_clause(query_params) {
+        Some(returning_str) => {
+            is_return_rows = true;
+            returning_str
+        }
+        None => "".to_string(),
+    };
+
+    dbg!(&columns);
+    dbg!(&values_params_str);
+    dbg!(&column_values);
+    dbg!(&conflict_clause);
+    dbg!(&returning_clause);
 
     // create initial prepared statement
     let insert_query_str = [
@@ -97,7 +127,8 @@ fn execute_insert<'a>(
         &[" (", &columns.join(", "), ")"].join(""),
         " VALUES ",
         &values_params_str,
-        &conflict_string,
+        &conflict_clause,
+        &returning_clause,
     ]
     .join("");
 
@@ -135,18 +166,23 @@ fn execute_insert<'a>(
         };
     }
 
+    dbg!(&is_return_rows);
     dbg!(&prep_values);
 
     // execute sql & return results
-    let results = prep_statement.query(&prep_values)?;
-    Ok(results.len())
-    // match prep_statement.query(&prep_values) {
-    //     Ok(results) => Ok(results.len()),
-    //     Err(e) => {
-    //         dbg!(&e);
-    //         Err(ApiError::from(e))
-    //     }
-    // }
+    if is_return_rows {
+        let results: Vec<RowFields> = prep_statement
+            .query(&prep_values)?
+            .iter()
+            .map(|row| convert_row_fields(&row))
+            .collect::<Result<Vec<RowFields>, ApiError>>()?;
+        dbg!(&results);
+        Ok(InsertResult::Rows(results))
+    } else {
+        let results = prep_statement.execute(&prep_values)?;
+        dbg!(&results);
+        Ok(InsertResult::NumRowsAffected(results))
+    }
 }
 
 /// Generates the ON CONFLICT clause. If conflict action is "nothing", then "DO NOTHING" is returned. If conflict action is "update", then sets all columns that aren't conflict target columns to the excluded row's column value.
@@ -157,7 +193,7 @@ fn generate_conflict_str(query_params: &QueryParamsInsert, columns: &[&str]) -> 
         // filter out any conflict target columns and convert the remaining columns into "SET <col> = EXCLUDED.<col>" clauses
         let expanded_conflict_action = if conflict_action_str == "update" {
             [
-                " DO UPDATE SET ",
+                "DO UPDATE SET ",
                 &columns
                     .iter()
                     .filter_map(|col| {
@@ -174,7 +210,7 @@ fn generate_conflict_str(query_params: &QueryParamsInsert, columns: &[&str]) -> 
             ]
             .join("")
         } else {
-            " DO NOTHING".to_string()
+            "DO NOTHING".to_string()
         };
 
         return Some(
@@ -186,6 +222,14 @@ fn generate_conflict_str(query_params: &QueryParamsInsert, columns: &[&str]) -> 
             ]
             .join(""),
         );
+    }
+
+    None
+}
+
+fn generate_returning_clause(query_params: &QueryParamsInsert) -> Option<String> {
+    if let Some(returning_columns) = &query_params.returning_columns {
+        return Some([" RETURNING ", &returning_columns.join(", ")].join(""));
     }
 
     None

@@ -145,12 +145,30 @@ impl QueryParamsInsert {
 
         // generate RETURNING data
         let returning_columns = match req.query().get("returning_columns") {
-            Some(column_str) => Some(
-                column_str
-                    .split(',')
-                    .map(std::string::ToString::to_string)
-                    .collect(),
-            ),
+            Some(columns_str) => {
+                if columns_str == "" {
+                    return Err(ApiError::generate_error(
+                        "INCORRECT_REQUEST_BODY",
+                        "`conflict_target` must be a comma-separated list of column names and include at least one column name.".to_string(),
+                    ));
+                }
+
+                let returning_columns_vec = columns_str
+                        .split(',')
+                        .map(|column_str| -> Result<String, ApiError> {
+                            if column_str == "" {
+                                return Err(ApiError::generate_error(
+                                    "INCORRECT_REQUEST_BODY",
+                                    "`conflict_target` must be a comma-separated list of column names and include at least one column name.".to_string(),
+                                ));
+                            }
+
+                            Ok(column_str.to_string())
+                        })
+                        .collect::<Result<Vec<String>, ApiError>>()?;
+
+                Some(returning_columns_vec)
+            }
             None => None,
         };
 
@@ -211,11 +229,22 @@ pub enum QueryTasks {
 }
 
 #[derive(Serialize)]
+pub struct RowsAffectedQueryResult {
+    num_rows: u64,
+}
+
+#[derive(Serialize)]
 #[serde(untagged)]
 /// Represents the response from sending a QueryTask to DbExecutor
 pub enum QueryResult {
     GetAllTablesResult(Vec<String>),
     QueryTableResult(Vec<RowFields>),
-    RowsAffected(usize),
+    RowsAffected(RowsAffectedQueryResult),
     TableStats(TableStats),
+}
+
+impl QueryResult {
+    pub fn from_num_rows_affected(num_rows: u64) -> Self {
+        QueryResult::RowsAffected(RowsAffectedQueryResult { num_rows })
+    }
 }

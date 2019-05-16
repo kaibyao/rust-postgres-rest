@@ -1,4 +1,4 @@
-use super::postgres_types::convert_row_fields;
+use super::postgres_types::{convert_row_fields, RowFields};
 use super::query_types::{Query, QueryParams, QueryParamsSelect, QueryResult};
 use super::utils::{validate_sql_name, validate_where_column};
 use crate::db::Connection;
@@ -43,16 +43,13 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
 
             // dbg!(&prep_values);
 
-            let results = prep_statement
+            let results: Result<Vec<RowFields>, ApiError> = prep_statement
                 .query(&prep_values)?
                 .iter()
                 .map(|row| convert_row_fields(&row))
                 .collect();
 
-            match results {
-                Ok(result_rows) => Ok(QueryResult::QueryTableResult(result_rows)),
-                Err(e) => Err(e),
-            }
+            Ok(QueryResult::QueryTableResult(results?))
         },
         _ => unreachable!("This function should never be called with params that aren’t shaped as a QueryParamsSelect.")
     }
