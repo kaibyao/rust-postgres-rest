@@ -5,7 +5,7 @@ use super::{
 };
 use crate::db::Connection;
 use crate::errors::ApiError;
-use postgres::types::ToSql;
+use postgres::{transaction::Transaction, types::ToSql};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 
@@ -25,10 +25,9 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
         _ => unreachable!("insert_into_table() should not be called without Insert parameter."),
     };
 
-    // TODO: use a transaction instead of individual executes
-
-    // OK, apparently serde_json::Values can't automatically convert to non-JSON/JSONB columns.
-    // We need to get column types of table so we know what types into which the json values are converted.
+    // serde_json::Values can't automatically convert to non-JSON/JSONB columns.
+    // Therefore, get column types of table so we know what types into which the json values are converted.
+    // apparently rust_postgres already does this in the background, would be nice if there was a way to hook into existing functionality...
     let mut column_types: HashMap<String, String> = HashMap::new();
     for stat in get_column_stats(conn, &query_params.table)?.into_iter() {
         column_types.insert(stat.column_name, stat.column_type);
@@ -38,6 +37,8 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
     let mut total_num_rows_affected = 0;
     let mut total_rows_returned = vec![];
 
+    let transaction = conn.transaction()?;
+
     if num_rows >= INSERT_ROWS_BATCH_COUNT {
         // batch inserts into groups of 100 (see https://www.depesz.com/2007/07/05/how-to-insert-data-to-database-as-fast-as-possible/)
         let mut batch_rows = vec![];
@@ -46,7 +47,7 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
 
             if (i + 1) % INSERT_ROWS_BATCH_COUNT == 0 || i == num_rows - 1 {
                 // do batch inserts on pushed rows
-                match execute_insert(conn, &query_params, &column_types, &batch_rows)? {
+                match execute_insert(&transaction, &query_params, &column_types, &batch_rows)? {
                     InsertResult::NumRowsAffected(num_rows_affected) => {
                         total_num_rows_affected += num_rows_affected
                     }
@@ -62,7 +63,7 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
     } else {
         // insert all rows
         match execute_insert(
-            conn,
+            &transaction,
             &query_params,
             &column_types,
             &query_params
@@ -79,6 +80,8 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
         };
     }
 
+    transaction.commit()?;
+
     if query_params.returning_columns.is_some() {
         Ok(QueryResult::QueryTableResult(total_rows_returned))
     } else {
@@ -88,7 +91,7 @@ pub fn insert_into_table(conn: &Connection, query: Query) -> Result<QueryResult,
 
 /// Runs the actual setting up + execution of the INSERT query
 fn execute_insert<'a>(
-    conn: &Connection,
+    conn: &Transaction,
     query_params: &QueryParamsInsert,
     column_types: &HashMap<String, String>,
     rows: &'a [&'a Map<String, Value>],
@@ -114,12 +117,6 @@ fn execute_insert<'a>(
         None => "".to_string(),
     };
 
-    dbg!(&columns);
-    dbg!(&values_params_str);
-    dbg!(&column_values);
-    dbg!(&conflict_clause);
-    dbg!(&returning_clause);
-
     // create initial prepared statement
     let insert_query_str = [
         "INSERT INTO ",
@@ -131,8 +128,6 @@ fn execute_insert<'a>(
         &returning_clause,
     ]
     .join("");
-
-    dbg!(&insert_query_str);
 
     let prep_statement = conn.prepare(&insert_query_str)?;
 
@@ -166,9 +161,6 @@ fn execute_insert<'a>(
         };
     }
 
-    dbg!(&is_return_rows);
-    dbg!(&prep_values);
-
     // execute sql & return results
     if is_return_rows {
         let results: Vec<RowFields> = prep_statement
@@ -176,11 +168,9 @@ fn execute_insert<'a>(
             .iter()
             .map(|row| convert_row_fields(&row))
             .collect::<Result<Vec<RowFields>, ApiError>>()?;
-        dbg!(&results);
         Ok(InsertResult::Rows(results))
     } else {
         let results = prep_statement.execute(&prep_values)?;
-        dbg!(&results);
         Ok(InsertResult::NumRowsAffected(results))
     }
 }
