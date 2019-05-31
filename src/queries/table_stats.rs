@@ -129,6 +129,7 @@ pub fn get_table_stats(conn: &Connection, table: String) -> Result<QueryResult, 
     Ok(QueryResult::TableStats(stats))
 }
 
+/// Returns a given table’s column stats: column names, column types, length, default values, and foreign keys information.
 pub fn get_column_stats(conn: &Connection, table: &str) -> Result<Vec<TableColumnStat>, ApiError> {
     let statement = &format!("
 WITH foreign_keys as (

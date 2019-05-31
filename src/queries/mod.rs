@@ -4,6 +4,8 @@ pub use self::insert_into_table::insert_into_table;
 mod get_all_tables;
 pub use self::get_all_tables::get_all_tables;
 
+mod foreign_keys;
+
 mod query_table;
 pub use self::query_table::query_table;
 

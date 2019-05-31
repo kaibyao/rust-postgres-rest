@@ -76,7 +76,7 @@ impl QueryParamsSelect {
     }
 }
 
-/// Represents a single SELECT query
+/// Represents a single INSERT query
 pub struct QueryParamsInsert {
     pub conflict_action: Option<String>,
     pub conflict_target: Option<Vec<String>>,

@@ -1,3 +1,4 @@
+use super::foreign_keys::{convert_where_clause_str_to_fk_columns, ForeignKeyReference};
 use super::postgres_types::{convert_row_fields, RowFields};
 use super::query_types::{Query, QueryParams, QueryParamsSelect, QueryResult};
 use super::utils::{validate_sql_name, validate_where_column};
@@ -15,45 +16,73 @@ enum PreparedStatementValue {
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query
 pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiError> {
-    match &query.params {
-        QueryParams::Select(params) => {
-            validate_sql_name(&params.table)?;
+    let params;
 
-            let (statement, prepared_values) = build_select_statement(params)?;
-            // dbg!(&statement);
-            // dbg!(&prepared_values);
-
-            // sending prepared statement to postgres
-            let prep_statement = conn.prepare(&statement)?;
-            let prep_values: Vec<&ToSql> = if prepared_values.is_empty() {
-                vec![]
-            } else {
-                prepared_values
-                    .iter()
-                    .map(|val| {
-                        let val_to_sql: &ToSql = match val {
-                            PreparedStatementValue::Int4(val_i32) => val_i32,
-                            PreparedStatementValue::Int8(val_i64) => val_i64,
-                            PreparedStatementValue::String(val_string) => val_string,
-                        };
-                        val_to_sql
-                    })
-                    .collect()
-            };
-
-            // dbg!(&prep_values);
-
-            let results: Result<Vec<RowFields>, ApiError> = prep_statement
-                .query(&prep_values)?
-                .iter()
-                .map(|row| convert_row_fields(&row))
-                .collect();
-
-            Ok(QueryResult::QueryTableResult(results?))
-        },
-        _ => unreachable!("This function should never be called with params that aren’t shaped as a QueryParamsSelect.")
+    if let QueryParams::Select(query_params) = &query.params {
+        params = query_params;
+    } else {
+        unreachable!("This function should never be called with params that aren’t shaped as a QueryParamsSelect.")
     }
-    // validate_sql_name(&query.params.table)?;
+
+    validate_sql_name(&params.table)?;
+
+    // get list of every column being used in the query params (columns, where, distinct, group_by, order_by)
+    let mut columns = params
+        .columns
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<&str>>();
+
+    if let Some(where_clause_str) = &params.conditions {
+        if let Some(where_fk_columns) = convert_where_clause_str_to_fk_columns(where_clause_str)? {
+            columns.extend(where_fk_columns);
+        }
+    }
+
+    if let Some(s) = &params.distinct {
+        columns.extend(s.split(','));
+    }
+    if let Some(s) = &params.group_by {
+        columns.extend(s.split(','));
+    }
+    if let Some(s) = &params.order_by {
+        columns.extend(s.split(','));
+    }
+
+    // need to parse distinct columns and columns for foreign key usage
+    let fk_columns = ForeignKeyReference::from_query_columns(conn, &params.table, &columns)?;
+
+    let (statement, prepared_values) = build_select_statement(params)?;
+    // dbg!(&statement);
+    // dbg!(&prepared_values);
+
+    // sending prepared statement to postgres
+    let prep_statement = conn.prepare(&statement)?;
+    let prep_values: Vec<&ToSql> = if prepared_values.is_empty() {
+        vec![]
+    } else {
+        prepared_values
+            .iter()
+            .map(|val| {
+                let val_to_sql: &ToSql = match val {
+                    PreparedStatementValue::Int4(val_i32) => val_i32,
+                    PreparedStatementValue::Int8(val_i64) => val_i64,
+                    PreparedStatementValue::String(val_string) => val_string,
+                };
+                val_to_sql
+            })
+            .collect()
+    };
+
+    // dbg!(&prep_values);
+
+    let results: Result<Vec<RowFields>, ApiError> = prep_statement
+        .query(&prep_values)?
+        .iter()
+        .map(|row| convert_row_fields(&row))
+        .collect();
+
+    Ok(QueryResult::QueryTableResult(results?))
 }
 
 fn build_select_statement(

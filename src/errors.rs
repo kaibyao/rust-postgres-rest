@@ -131,17 +131,6 @@ impl From<actix_web::actix::MailboxError> for ApiError {
         }
     }
 }
-impl From<error::PayloadError> for ApiError {
-    fn from(err: error::PayloadError) -> Self {
-        ApiError::InternalError {
-            category: MessageCategory::Error,
-            code: "PAYLOAD_ERROR",
-            details: format!("{}", err),
-            message: "Could not parse request payload.",
-            http_status: 500,
-        }
-    }
-}
 impl From<error::Error> for ApiError {
     fn from(err: error::Error) -> Self {
         ApiError::InternalError {
@@ -149,6 +138,17 @@ impl From<error::Error> for ApiError {
             code: "ACTIX_ERROR",
             details: format!("{}", err),
             message: "Error occurred with Actix.",
+            http_status: 500,
+        }
+    }
+}
+impl From<error::PayloadError> for ApiError {
+    fn from(err: error::PayloadError) -> Self {
+        ApiError::InternalError {
+            category: MessageCategory::Error,
+            code: "PAYLOAD_ERROR",
+            details: format!("{}", err),
+            message: "Could not parse request payload.",
             http_status: 500,
         }
     }
@@ -170,6 +170,23 @@ impl From<serde_json::error::Error> for ApiError {
             category: MessageCategory::Error,
             code: "JSON_ERROR",
             details: format!("{}", err),
+            message: "A message occurred when parsing JSON.",
+            offender: "".to_string(),
+            http_status: 400,
+        }
+    }
+}
+impl From<sqlparser::sqlparser::ParserError> for ApiError {
+    fn from(err: sqlparser::sqlparser::ParserError) -> Self {
+        let details = match err {
+            sqlparser::sqlparser::ParserError::ParserError(err_str) => err_str,
+            sqlparser::sqlparser::ParserError::TokenizerError(err_str) => err_str,
+        };
+
+        ApiError::UserError {
+            category: MessageCategory::Error,
+            code: "SQL_PARSER_ERROR",
+            details,
             message: "A message occurred when parsing JSON.",
             offender: "".to_string(),
             http_status: 400,
