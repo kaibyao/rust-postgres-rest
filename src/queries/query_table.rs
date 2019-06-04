@@ -33,11 +33,13 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
         .map(String::as_str)
         .collect::<Vec<&str>>();
 
+    let mut where_columns = vec![];
     if let Some(where_clause_str) = &params.conditions {
         if let Some(where_fk_columns) = convert_where_clause_str_to_fk_columns(where_clause_str)? {
-            columns.extend(where_fk_columns);
+            where_columns = where_fk_columns;
         }
     }
+    columns.extend(where_columns.iter().map(String::as_str));
 
     if let Some(s) = &params.distinct {
         columns.extend(s.split(','));
