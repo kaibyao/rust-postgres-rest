@@ -17,7 +17,7 @@ path = "src/main.rs"
 # path = "src/test.rs"
 
 [dependencies]
-actix-web = "^0.7"
+actix-web = "^1.0"
 bit-vec = "^0.5"
 chrono = { version = "^0.4", features = ["serde"] }
 eui48 = { version = "^0.4", features = ["serde"] }
