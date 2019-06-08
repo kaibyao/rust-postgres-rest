@@ -54,7 +54,7 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
     // need to parse distinct columns and columns for foreign key usage
     let fk_columns = ForeignKeyReference::from_query_columns(conn, &params.table, &columns)?;
 
-    let (statement, prepared_values) = build_select_statement(params)?;
+    let (statement, prepared_values) = build_select_statement(params, fk_columns)?;
     // dbg!(&statement);
     // dbg!(&prepared_values);
 
@@ -89,39 +89,66 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
 
 fn build_select_statement(
     params: &QueryParamsSelect,
+    fk_opts: Option<Vec<ForeignKeyReference>>,
 ) -> Result<(String, Vec<PreparedStatementValue>), ApiError> {
-    let mut statement = String::from("SELECT");
+    let mut statement = vec!["SELECT"];
+
+    let fks = if let Some(fks_inner) = fk_opts {
+        fks_inner
+    } else {
+        vec![]
+    };
+    let is_fks_exist = !fks.is_empty();
 
     // DISTINCT clause if exists
     if let Some(distinct_str) = &params.distinct {
-        let distinct_columns: Vec<String> = distinct_str
-            .split(',')
-            .map(|column_str_raw| String::from(column_str_raw.trim()))
-            .collect();
+        statement.push(" DISTINCT ON (");
 
-        for column in &distinct_columns {
-            validate_where_column(column)?;
+        let distinct_columns: Vec<&str> = distinct_str.split(',').collect();
+        for (i, column_str_raw) in distinct_columns.iter().enumerate() {
+            let trimmed = column_str_raw.trim();
+            validate_where_column(trimmed)?;
+
+            if let (true, Some(fk_ref)) = (
+                is_fks_exist,
+                ForeignKeyReference::find(&fks, &params.table, trimmed),
+            ) {
+                statement.push(fk_ref.table_referred.as_str());
+                statement.push(".");
+                statement.push(fk_ref.table_column_referred.as_str());
+            } else {
+                statement.push(trimmed);
+            }
+
+            if i < distinct_columns.len() - 1 {
+                statement.push(", ");
+            }
         }
-
-        statement.push_str(&format!(" DISTINCT ON ({})", distinct_columns.join(", ")));
+        statement.push(")");
     }
+
     // dbg!(&params.columns);
+
     // building prepared statement
     for (i, column) in params.columns.iter().enumerate() {
         validate_where_column(&column)?;
 
-        if i == params.columns.len() - 1 {
-            statement.push_str(&format!(" {}", &column));
-        } else {
-            statement.push_str(&format!(" {},", &column));
+        statement.push(" ");
+        statement.push(&column);
+
+        if i < params.columns.len() - 1 {
+            statement.push(", ");
         }
     }
 
-    statement.push_str(&format!(" FROM {}", &params.table));
+    statement.push(" FROM ");
+    statement.push(&params.table);
 
     let mut prepared_values = vec![];
     if let Some(conditions) = &params.conditions {
-        statement.push_str(&format!(" WHERE ({})", conditions));
+        statement.push(" WHERE (");
+        statement.push(conditions);
+        statement.push(")");
 
         if let Some(prepared_values_opt) = &params.prepared_values {
             lazy_static! {
@@ -158,64 +185,79 @@ fn build_select_statement(
         }
     }
 
-    // TODO: add foreign key traversal
-
     // GROUP BY statement
     if let Some(group_by_str) = &params.group_by {
-        let group_bys: Vec<String> = group_by_str
-            .split(',')
-            .map(|group_by_col| String::from(group_by_col.trim()))
-            .collect();
+        statement.push(" GROUP BY ");
 
-        for column in &group_bys {
-            validate_where_column(column)?;
+        let group_by_columns: Vec<&str> = group_by_str.split(',').collect();
+        for (i, column) in group_by_columns.iter().enumerate() {
+            let trimmed = column.trim();
+            validate_where_column(trimmed)?;
+            statement.push(trimmed);
+
+            if i < group_by_columns.len() - 1 {
+                statement.push(", ");
+            }
         }
-
-        statement.push_str(&format!(" GROUP BY {}", group_bys.join(", ")));
     }
 
     // Append ORDER BY if the param exists
-    if let Some(order_by_column_str) = &params.order_by {
-        let columns: Vec<String> = order_by_column_str
+    let order_by_column_str = if let Some(order_by_column_str) = &params.order_by {
+        lazy_static! {
+            // case-insensitive search for ORDER BY direction
+            static ref ORDER_BY_DIRECTION_RE: Regex = Regex::new(r"(?i) ASC| DESC").unwrap();
+        }
+
+        let order_by_columns: Result<Vec<&str>, ApiError> = order_by_column_str
             .split(',')
-            .map(|column_str_raw| String::from(column_str_raw.trim()))
+            .map(|column_str_raw| {
+                let column = column_str_raw.trim();
+
+                // using `is_match` first because it's faster than `find`
+                if ORDER_BY_DIRECTION_RE.is_match(column) {
+                    // we need to account for ASC and DESC directions
+                    match ORDER_BY_DIRECTION_RE.find(column) {
+                        Some(order_direction_match) => {
+                            let order_by_column = &column[..order_direction_match.start()];
+                            validate_where_column(order_by_column)?;
+                        }
+                        None => {
+                            validate_where_column(column)?;
+                        }
+                    }
+                } else {
+                    validate_where_column(column)?;
+                }
+
+
+                Ok(column)
+            })
             .collect();
 
-        lazy_static! {
-            static ref ORDER_DIRECTION_RE: Regex = Regex::new(r" ASC| DESC").unwrap();
-        }
-
-        for column in &columns {
-            if ORDER_DIRECTION_RE.is_match(column) {
-                // we need to account for ASC and DESC directions
-                match ORDER_DIRECTION_RE.find(column) {
-                    Some(order_direction_match) => {
-                        let order_by_column = &column[..order_direction_match.start()];
-                        validate_where_column(order_by_column)?;
-                    }
-                    None => {
-                        validate_where_column(column)?;
-                    }
-                }
-            } else {
-                validate_where_column(column)?;
-            }
-        }
-
-        statement.push_str(&format!(" ORDER BY {}", columns.join(", ")));
+        order_by_columns?.join(", ")
+    } else {
+        "".to_string()
+    };
+    if order_by_column_str != "" {
+        statement.push(" ORDER BY ");
+        statement.push(&order_by_column_str);
     }
 
     // LIMIT
-    statement.push_str(&format!(" LIMIT {}", params.limit));
+    let limit_str = params.limit.to_string();
+    statement.push(" LIMIT ");
+    statement.push(&limit_str);
 
     // OFFSET
+    let offset_str = params.offset.to_string();
     if params.offset > 0 {
-        statement.push_str(&format!(" OFFSET {}", params.offset));
+        statement.push(" OFFSET ");
+        statement.push(&offset_str);
     }
 
-    statement.push_str(";");
+    statement.push(";");
 
-    Ok((statement, prepared_values))
+    Ok((statement.join(""), prepared_values))
 }
 
 #[cfg(test)]
@@ -226,17 +268,20 @@ mod build_select_statement_tests {
 
     #[test]
     fn basic_query() {
-        match build_select_statement(&QueryParamsSelect {
-            columns: vec!["id".to_string()],
-            conditions: None,
-            distinct: None,
-            group_by: None,
-            limit: 100,
-            offset: 0,
-            order_by: None,
-            prepared_values: None,
-            table: "a_table".to_string(),
-        }) {
+        match build_select_statement(
+            &QueryParamsSelect {
+                columns: vec!["id".to_string()],
+                conditions: None,
+                distinct: None,
+                group_by: None,
+                limit: 100,
+                offset: 0,
+                order_by: None,
+                prepared_values: None,
+                table: "a_table".to_string(),
+            },
+            None,
+        ) {
             Ok((sql, _)) => {
                 assert_eq!(&sql, "SELECT id FROM a_table LIMIT 100;");
             }
@@ -248,17 +293,20 @@ mod build_select_statement_tests {
 
     #[test]
     fn multiple_columns() {
-        match build_select_statement(&QueryParamsSelect {
-            columns: vec!["id".to_string(), "name".to_string()],
-            conditions: None,
-            distinct: None,
-            group_by: None,
-            limit: 100,
-            offset: 0,
-            order_by: None,
-            prepared_values: None,
-            table: "a_table".to_string(),
-        }) {
+        match build_select_statement(
+            &QueryParamsSelect {
+                columns: vec!["id".to_string(), "name".to_string()],
+                conditions: None,
+                distinct: None,
+                group_by: None,
+                limit: 100,
+                offset: 0,
+                order_by: None,
+                prepared_values: None,
+                table: "a_table".to_string(),
+            },
+            None,
+        ) {
             Ok((sql, _)) => {
                 assert_eq!(&sql, "SELECT id, name FROM a_table LIMIT 100;");
             }
@@ -270,17 +318,20 @@ mod build_select_statement_tests {
 
     #[test]
     fn distinct() {
-        match build_select_statement(&QueryParamsSelect {
-            columns: vec!["id".to_string()],
-            conditions: None,
-            distinct: Some("name, blah".to_string()),
-            group_by: None,
-            limit: 100,
-            offset: 0,
-            order_by: None,
-            prepared_values: None,
-            table: "a_table".to_string(),
-        }) {
+        match build_select_statement(
+            &QueryParamsSelect {
+                columns: vec!["id".to_string()],
+                conditions: None,
+                distinct: Some("name, blah".to_string()),
+                group_by: None,
+                limit: 100,
+                offset: 0,
+                order_by: None,
+                prepared_values: None,
+                table: "a_table".to_string(),
+            },
+            None,
+        ) {
             Ok((sql, _)) => {
                 assert_eq!(
                     &sql,
@@ -295,17 +346,20 @@ mod build_select_statement_tests {
 
     #[test]
     fn offset() {
-        match build_select_statement(&QueryParamsSelect {
-            columns: vec!["id".to_string()],
-            conditions: None,
-            distinct: None,
-            group_by: None,
-            limit: 1000,
-            offset: 100,
-            order_by: None,
-            prepared_values: None,
-            table: "a_table".to_string(),
-        }) {
+        match build_select_statement(
+            &QueryParamsSelect {
+                columns: vec!["id".to_string()],
+                conditions: None,
+                distinct: None,
+                group_by: None,
+                limit: 1000,
+                offset: 100,
+                order_by: None,
+                prepared_values: None,
+                table: "a_table".to_string(),
+            },
+            None,
+        ) {
             Ok((sql, _)) => {
                 assert_eq!(&sql, "SELECT id FROM a_table LIMIT 1000 OFFSET 100;");
             }
@@ -317,17 +371,20 @@ mod build_select_statement_tests {
 
     #[test]
     fn order_by() {
-        match build_select_statement(&QueryParamsSelect {
-            columns: vec!["id".to_string()],
-            conditions: None,
-            distinct: None,
-            group_by: None,
-            limit: 1000,
-            offset: 0,
-            order_by: Some("name,test".to_string()),
-            prepared_values: None,
-            table: "a_table".to_string(),
-        }) {
+        match build_select_statement(
+            &QueryParamsSelect {
+                columns: vec!["id".to_string()],
+                conditions: None,
+                distinct: None,
+                group_by: None,
+                limit: 1000,
+                offset: 0,
+                order_by: Some("name,test".to_string()),
+                prepared_values: None,
+                table: "a_table".to_string(),
+            },
+            None,
+        ) {
             Ok((sql, _)) => {
                 assert_eq!(
                     &sql,
@@ -342,17 +399,20 @@ mod build_select_statement_tests {
 
     #[test]
     fn conditions() {
-        match build_select_statement(&QueryParamsSelect {
-            columns: vec!["id".to_string()],
-            conditions: Some("(id > 10 OR id < 20) AND name = 'test'".to_string()),
-            distinct: None,
-            group_by: None,
-            limit: 10,
-            offset: 0,
-            order_by: None,
-            prepared_values: None,
-            table: "a_table".to_string(),
-        }) {
+        match build_select_statement(
+            &QueryParamsSelect {
+                columns: vec!["id".to_string()],
+                conditions: Some("(id > 10 OR id < 20) AND name = 'test'".to_string()),
+                distinct: None,
+                group_by: None,
+                limit: 10,
+                offset: 0,
+                order_by: None,
+                prepared_values: None,
+                table: "a_table".to_string(),
+            },
+            None,
+        ) {
             Ok((sql, _)) => {
                 assert_eq!(
                     &sql,
@@ -367,17 +427,20 @@ mod build_select_statement_tests {
 
     #[test]
     fn prepared_values() {
-        match build_select_statement(&QueryParamsSelect {
-            columns: vec!["id".to_string()],
-            conditions: Some("(id > $1 OR id < $2) AND name = $3".to_string()),
-            distinct: None,
-            group_by: None,
-            limit: 10,
-            offset: 0,
-            order_by: None,
-            prepared_values: Some("10,20,'test'".to_string()),
-            table: "a_table".to_string(),
-        }) {
+        match build_select_statement(
+            &QueryParamsSelect {
+                columns: vec!["id".to_string()],
+                conditions: Some("(id > $1 OR id < $2) AND name = $3".to_string()),
+                distinct: None,
+                group_by: None,
+                limit: 10,
+                offset: 0,
+                order_by: None,
+                prepared_values: Some("10,20,'test'".to_string()),
+                table: "a_table".to_string(),
+            },
+            None,
+        ) {
             Ok((sql, prepared_values)) => {
                 assert_eq!(
                     &sql,
@@ -401,21 +464,24 @@ mod build_select_statement_tests {
 
     #[test]
     fn complex_query() {
-        match build_select_statement(&QueryParamsSelect {
-            columns: vec![
-                "id".to_string(),
-                "test_bigint".to_string(),
-                "test_bigserial".to_string(),
-            ],
-            conditions: Some("id = $1 AND test_name = $2".to_string()),
-            distinct: Some("test_date,test_timestamptz".to_string()),
-            group_by: None,
-            limit: 10000,
-            offset: 2000,
-            order_by: Some("due_date DESC".to_string()),
-            prepared_values: Some("46327143679919107,'a name'".to_string()),
-            table: "a_table".to_string(),
-        }) {
+        match build_select_statement(
+            &QueryParamsSelect {
+                columns: vec![
+                    "id".to_string(),
+                    "test_bigint".to_string(),
+                    "test_bigserial".to_string(),
+                ],
+                conditions: Some("id = $1 AND test_name = $2".to_string()),
+                distinct: Some("test_date,test_timestamptz".to_string()),
+                group_by: None,
+                limit: 10000,
+                offset: 2000,
+                order_by: Some("due_date DESC".to_string()),
+                prepared_values: Some("46327143679919107,'a name'".to_string()),
+                table: "a_table".to_string(),
+            },
+            None,
+        ) {
             Ok((sql, prepared_values)) => {
                 assert_eq!(
                     &sql,

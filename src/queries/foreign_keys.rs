@@ -198,6 +198,9 @@ pub struct ForeignKeyReference {
     /// The original column strings referencing a (possibly nested) foreign key value.
     pub original_refs: Vec<String>,
 
+    /// The parent table name that contains the foreign key column.
+    pub referring_table: String,
+
     /// The parent table’s column name that is the foreign key.
     pub referring_column: String,
 
@@ -388,6 +391,7 @@ impl ForeignKeyReference {
                     } else if let Ok(Some(fk_result_vec)) = nested_fk_result {
                         return Some(Ok(ForeignKeyReference {
                             referring_column: stat.column_name,
+                            referring_table: table.to_string(),
                             table_referred: foreign_key_table,
                             table_column_referred: stat
                                 .foreign_key_columns
@@ -401,6 +405,7 @@ impl ForeignKeyReference {
                 // child column is not an FK (is a column) => return a QueriedForeignKeyResult::Reference
                 Some(Ok(ForeignKeyReference {
                     referring_column: stat.column_name,
+                    referring_table: table.to_string(),
                     table_referred: foreign_key_table,
                     table_column_referred: stat.foreign_key_columns.unwrap_or_else(String::new),
                     nested_fks: None,
@@ -412,6 +417,26 @@ impl ForeignKeyReference {
         Ok(Some(filtered_stats_result?))
     }
 
+    /// Given an array of ForeignKeyReference, find the one that matches a given table and column name.
+    pub fn find<'a>(refs: &'a [Self], table: &str, col: &'a str) -> Option<&'a Self> {
+        for fkr in refs {
+            if fkr.referring_table != table {
+                continue;
+            }
+
+            let found_orig_ref = fkr.original_refs.iter().find(|ref_col| col == *ref_col);
+
+            if found_orig_ref.is_some() {
+                return Some(fkr);
+            }
+
+            if let Some(nested_fks) = &fkr.nested_fks {
+                return Self::find(nested_fks, table, col);
+            }
+        }
+
+        None
+    }
 
     // /// Given a table name and list of foreign key references, construct the column and `INNER JOIN` SQL strings to be used in a query.
     // pub fn fk_reference_arr_to_sql(

@@ -30,28 +30,28 @@ impl QueryParamsSelect {
             columns: match query_params.get("columns") {
                 Some(columns_str) => columns_str
                     .split(',')
-                    .map(|column_str_raw| String::from(column_str_raw.trim()))
+                    .map(|column_str_raw| column_str_raw.trim().to_lowercase())
                     .collect(),
                 None => vec![],
             },
             distinct: match query_params.get("distinct") {
-                Some(distinct_string) => Some(distinct_string.clone()),
+                Some(distinct_string) => Some(distinct_string.to_lowercase()),
                 None => None,
             },
             table: match req.match_info().query("table") {
                 Ok(table_name) => table_name,
-                Err(_) => "".to_string(),
+                Err(_) => unreachable!("this function should really only be called with a request that contains table"),
             },
             conditions: match query_params.get("where") {
-                Some(where_string) => Some(where_string.clone()),
+                Some(where_string) => Some(where_string.to_lowercase()),
                 None => None,
             },
             group_by: match query_params.get("group_by") {
-                Some(group_by_str) => Some(group_by_str.clone()),
+                Some(group_by_str) => Some(group_by_str.to_lowercase()),
                 None => None,
             },
             order_by: match query_params.get("order_by") {
-                Some(order_by_str) => Some(order_by_str.clone()),
+                Some(order_by_str) => Some(order_by_str.to_lowercase()),
                 None => None,
             },
             limit: match query_params.get("limit") {
