@@ -27,11 +27,10 @@ pub fn validate_sql_name(name: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Like `validate_sql_name`, but also allows for parentheses (for functions/aggregates like `COUNT()`) as well as " AS " aliases.
+/// Like `validate_sql_name`, but also allows for parentheses (for functions/aggregates like `COUNT()`), and periods (for foreign key traversal).
 pub fn validate_where_column(name: &str) -> Result<(), ApiError> {
     lazy_static! {
-        static ref VALID_REGEX: Regex = Regex::new(r"^[A-Za-z_][A-Za-z0-9_\(\)]*$").unwrap();
-        static ref VALID_AS_REGEX: Regex = Regex::new(r"(?i) AS ").unwrap();
+        static ref VALID_REGEX: Regex = Regex::new(r"^[A-Za-z_][A-Za-z0-9_\(\)\.]*$").unwrap();
     }
 
     if name == "table" {
@@ -41,7 +40,7 @@ pub fn validate_where_column(name: &str) -> Result<(), ApiError> {
         ));
     }
 
-    if !VALID_REGEX.is_match(name) && !VALID_AS_REGEX.is_match(name) {
+    if !VALID_REGEX.is_match(name) {
         return Err(ApiError::generate_error(
             "INVALID_SQL_IDENTIFIER",
             name.to_string(),

@@ -46,8 +46,8 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
         None => ASTNode::SQLIdentifier("".to_string()),
     };
     let where_fk_columns = fk_columns_from_where_ast(&where_ast);
-    columns.extend(where_fk_columns.iter().map(String::as_str));
 
+    columns.extend(where_fk_columns.iter().map(String::as_str));
     if let Some(v) = &params.distinct {
         columns.extend(v.iter().map(String::as_str));
     }
@@ -61,10 +61,12 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
     // parse columns for foreign key usage
     let fk_columns = ForeignKeyReference::from_query_columns(conn, &params.table, &columns)?;
 
+    dbg!(&fk_columns);
+
     let (statement, prepared_values) = build_select_statement(params, fk_columns, where_ast)?;
 
-    // dbg!(&statement);
-    // dbg!(&prepared_values);
+    dbg!(&statement);
+    dbg!(&prepared_values);
 
     // sending prepared statement to postgres
     let prep_statement = conn.prepare(&statement)?;
@@ -187,6 +189,8 @@ fn build_select_statement(
 
     // Append ORDER BY if the param exists
     if let Some(order_by_columns) = &params.order_by {
+        statement.push(" ORDER BY ");
+
         lazy_static! {
             // case-insensitive search for ORDER BY direction
             static ref ORDER_BY_DIRECTION_RE: Regex = Regex::new(r"(?i) asc| desc").unwrap();
@@ -215,16 +219,17 @@ fn build_select_statement(
                     (column, " asc")
                 };
 
-            if let (true, Some(fk_ref)) = (
+            if let (true, Some((fk_ref, fk_column))) = (
                 is_fks_exist,
                 ForeignKeyReference::find(&fks, &params.table, sql_column),
             ) {
                 statement.push(fk_ref.table_referred.as_str());
                 statement.push(".");
-                statement.push(fk_ref.table_column_referred.as_str());
+                statement.push(fk_column);
             } else {
                 statement.push(sql_column);
             }
+
             statement.push(order_by_direction);
 
             if i < order_by_columns.len() - 1 {
@@ -253,23 +258,50 @@ fn build_select_statement(
 /// Generates a string of column names delimited by commas. Foreign keys are correctly accounted for.
 fn get_column_str<'a>(
     columns: &'a [String],
-    table: &str,
+    table: &'a str,
     fks: &'a [ForeignKeyReference],
 ) -> Result<Vec<&'a str>, ApiError> {
-    let mut statement = vec![];
+    let mut statement: Vec<&str> = vec![];
+    let is_fks_exist = !fks.is_empty();
 
+    // no FKs exist, just add columns with commas in between
+    if !is_fks_exist {
+        for (i, column) in columns.iter().enumerate() {
+            statement.push(column);
+
+            if i < columns.len() - 1 {
+                statement.push(", ");
+            }
+        }
+
+        return Ok(statement);
+    }
+
+    // correctly account for FK column references
     for (i, column) in columns.iter().enumerate() {
         validate_where_column(column)?;
 
-        if let (true, Some(fk_ref)) = (
+        if let (true, Some((fk_ref, fk_column))) = (
             !fks.is_empty(),
             ForeignKeyReference::find(fks, table, column),
         ) {
             statement.push(fk_ref.table_referred.as_str());
             statement.push(".");
-            statement.push(fk_ref.table_column_referred.as_str());
-        } else {
+            statement.push(fk_column);
+
+            // AS syntax (to avoid ambiguous columns)
+            statement.push(" AS \"");
             statement.push(column);
+            statement.push("\"");
+        } else {
+            statement.push(table);
+            statement.push(".");
+            statement.push(column);
+
+            // AS syntax (to avoid ambiguous columns)
+            statement.push(" AS \"");
+            statement.push(column);
+            statement.push("\"");
         }
 
         if i < columns.len() - 1 {
@@ -294,7 +326,7 @@ fn get_where_string<'a>(
     }
 
     for (incorrect_column_name, ast_node) in where_fk_ast_nodes {
-        if let (true, Some(fk_ref)) = (
+        if let (true, Some((fk_ref, fk_column))) = (
             !fks.is_empty(),
             ForeignKeyReference::find(fks, table, &incorrect_column_name),
         ) {
@@ -302,13 +334,13 @@ fn get_where_string<'a>(
                 ASTNode::SQLQualifiedWildcard(_wildcard_vec) => {
                     ASTNode::SQLQualifiedWildcard(vec![
                         fk_ref.table_referred.clone(),
-                        fk_ref.table_column_referred.clone(),
+                        fk_column.to_string(),
                     ])
                 }
                 ASTNode::SQLCompoundIdentifier(_nested_fk_column_vec) => {
                     ASTNode::SQLCompoundIdentifier(vec![
                         fk_ref.table_referred.clone(),
-                        fk_ref.table_column_referred.clone(),
+                        fk_column.to_string(),
                     ])
                 }
                 _ => unimplemented!(
