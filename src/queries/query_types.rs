@@ -7,12 +7,12 @@ use serde_json::{Map, Value};
 
 /// Represents a single SELECT query
 pub struct QueryParamsSelect {
-    pub distinct: Option<String>,
+    pub distinct: Option<Vec<String>>,
     pub columns: Vec<String>,
     pub table: String,
     pub conditions: Option<String>,
-    pub group_by: Option<String>,
-    pub order_by: Option<String>,
+    pub group_by: Option<Vec<String>>,
+    pub order_by: Option<Vec<String>>,
     pub limit: i32,
     pub offset: i32,
     pub prepared_values: Option<String>,
@@ -28,30 +28,31 @@ impl QueryParamsSelect {
 
         QueryParamsSelect {
             columns: match query_params.get("columns") {
-                Some(columns_str) => columns_str
-                    .split(',')
-                    .map(|column_str_raw| column_str_raw.trim().to_lowercase())
-                    .collect(),
+                Some(columns_str) => Self::normalize_columns(columns_str),
                 None => vec![],
             },
             distinct: match query_params.get("distinct") {
-                Some(distinct_string) => Some(distinct_string.to_lowercase()),
+                Some(distinct_str) => Some(
+                    Self::normalize_columns(distinct_str),
+                ),
                 None => None,
             },
             table: match req.match_info().query("table") {
                 Ok(table_name) => table_name,
-                Err(_) => unreachable!("this function should really only be called with a request that contains table"),
+                Err(_) => unreachable!(
+                    "this function should really only be called with a request that contains table"
+                ),
             },
             conditions: match query_params.get("where") {
                 Some(where_string) => Some(where_string.to_lowercase()),
                 None => None,
             },
             group_by: match query_params.get("group_by") {
-                Some(group_by_str) => Some(group_by_str.to_lowercase()),
+                Some(group_by_str) => Some(Self::normalize_columns(group_by_str)),
                 None => None,
             },
             order_by: match query_params.get("order_by") {
-                Some(order_by_str) => Some(order_by_str.to_lowercase()),
+                Some(order_by_str) => Some(Self::normalize_columns(order_by_str)),
                 None => None,
             },
             limit: match query_params.get("limit") {
@@ -73,6 +74,13 @@ impl QueryParamsSelect {
                 None => None,
             },
         }
+    }
+
+    fn normalize_columns(columns_str: &str) -> Vec<String> {
+        columns_str
+                    .split(',')
+                    .map(|s| s.trim().to_lowercase())
+                    .collect()
     }
 }
 

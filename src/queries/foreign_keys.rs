@@ -6,164 +6,157 @@ use sqlparser::{
     sqlast::{ASTNode, SQLQuery, SQLSelect, SQLSetExpr, SQLStatement},
     sqlparser::Parser,
 };
+use std::borrow::BorrowMut;
 use std::collections::HashMap;
 
-/// Converts a WHERE clause string into a vector of foreign key column strings.
-pub fn convert_where_clause_str_to_fk_columns(
-    clause: &str,
-) -> Result<Option<Vec<String>>, ApiError> {
+// TODO: write tests for where_clause_str_to_ast
+// TODO: write tests for fk_columns_from_where_ast
+
+/// Converts a WHERE clause string into an ASTNode.
+pub fn where_clause_str_to_ast(clause: &str) -> Result<Option<ASTNode>, ApiError> {
     let full_statement = ["SELECT * FROM a_table WHERE ", clause].join("");
     let dialect = PostgreSqlDialect {};
-    let ast = &Parser::parse_sql(&dialect, full_statement)?[0];
 
-    let fk_columns_opt = match ast {
-        SQLStatement::SQLSelect(SQLQuery {
-            body: query_body, ..
-        }) => {
-            // parse the main body of the SELECT statement
-            let fk_columns = extract_fk_columns_from_sql_query_where(query_body, None);
-            Some(fk_columns)
-        }
-        SQLStatement::SQLInsert { .. } => {
-            // unimplemented!("There is no WHERE clause in an insert statement.")
-            None
-        }
-        SQLStatement::SQLUpdate { .. } => None, // unimplemented!("To be finished later.")
-        SQLStatement::SQLDelete { .. } => None, // unimplemented!("To be finished later.")
-        _ => None,                              // unimplemented!("Functionality not implemented.")
-    };
+    // convert the statement into an AST, and then extract the "WHERE" portion of the AST
+    let mut parsed = Parser::parse_sql(&dialect, full_statement)?;
+    let statement_ast = parsed.remove(0);
 
-    Ok(fk_columns_opt)
+    if let SQLStatement::SQLSelect(SQLQuery {
+        body: query_body, ..
+    }) = statement_ast
+    {
+        return Ok(extract_where_ast_from_sqlsetexpr(query_body));
+    }
+
+    Ok(None)
 }
 
-fn extract_fk_columns_from_sql_query_where(
-    expr: &SQLSetExpr,
-    fk_columns_accumulate: Option<Vec<String>>,
-) -> Vec<String> {
-    let mut fk_columns = if let Some(accumulated_fk_columns) = fk_columns_accumulate {
-        accumulated_fk_columns
-    } else {
-        vec![]
-    };
-
+/// Finds and returns the ASTNode that represents the WHERE clause of a SELECT statement
+fn extract_where_ast_from_sqlsetexpr(expr: SQLSetExpr) -> Option<ASTNode> {
     match expr {
         SQLSetExpr::Query(boxed_sql_query) => {
-            fk_columns = extract_fk_columns_from_sql_query_where(
-                &boxed_sql_query.as_ref().body,
-                Some(fk_columns),
-            );
+            extract_where_ast_from_sqlsetexpr(boxed_sql_query.body)
         }
         SQLSetExpr::Select(SQLSelect {
             selection: where_ast_opt,
             ..
-        }) => {
-            if let Some(where_ast) = where_ast_opt {
-                fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(where_ast)));
-            }
-        }
-        SQLSetExpr::SetOperation { .. } => (), // Set operations not supported
-    };
-
-    fk_columns
+        }) => where_ast_opt,
+        SQLSetExpr::SetOperation { .. } => unimplemented!("Set operations not supported"),
+    }
 }
 
-fn push_nested_ast_fk_columns_to_vec(ast_opt: Option<&ASTNode>) -> Vec<String> {
+/// Extracts the raw/incorrect foreign key column strings from a WHERE ASTNode, as well as a HashMap of column string:&ASTNode.
+pub fn fk_columns_from_where_ast(
+    ast: &mut ASTNode,
+) -> (Vec<String>, HashMap<String, &mut ASTNode>) {
     let mut fk_columns = vec![];
-
-    let ast = if let Some(ast_node) = ast_opt {
-        ast_node
-    } else {
-        return fk_columns;
-    };
+    let mut fk_nodes = HashMap::new();
 
     match ast {
-        ASTNode::SQLIdentifier(_non_nested_column_name) => (),
-        ASTNode::SQLWildcard => (),
         ASTNode::SQLQualifiedWildcard(wildcard_vec) => {
+            let fk_str = wildcard_vec.join(".");
             fk_columns.push(wildcard_vec.join("."));
+            fk_nodes.insert(fk_str.clone(), ast);
         }
         ASTNode::SQLCompoundIdentifier(nested_fk_column_vec) => {
-            fk_columns.push(nested_fk_column_vec.join("."));
+            let fk_str = nested_fk_column_vec.join(".");
+            fk_columns.push(fk_str.clone());
+            fk_nodes.insert(fk_str, ast);
         }
         ASTNode::SQLIsNull(null_ast_box) => {
-            fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                null_ast_box.as_ref(),
-            )));
+            let (sub_fk_columns, sub_fk_nodes) =
+                fk_columns_from_where_ast(null_ast_box.borrow_mut());
+            fk_columns.extend(sub_fk_columns);
+            fk_nodes.extend(sub_fk_nodes);
         }
         ASTNode::SQLIsNotNull(null_ast_box) => {
-            fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                null_ast_box.as_ref(),
-            )));
+            let (sub_fk_columns, sub_fk_nodes) =
+                fk_columns_from_where_ast(null_ast_box.borrow_mut());
+            fk_columns.extend(sub_fk_columns);
+            fk_nodes.extend(sub_fk_nodes);
         }
         ASTNode::SQLInList {
             expr: list_expr_ast_box_ref,
             list: list_ast_vec,
             ..
         } => {
-            fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                list_expr_ast_box_ref.as_ref(),
-            )));
+            let (sub_fk_columns, sub_fk_nodes) =
+                fk_columns_from_where_ast(list_expr_ast_box_ref.borrow_mut());
+            fk_columns.extend(sub_fk_columns);
+            fk_nodes.extend(sub_fk_nodes);
 
             for list_ast in list_ast_vec {
-                fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(list_ast)));
+                let (sub_fk_columns_2, sub_fk_nodes_2) =
+                    fk_columns_from_where_ast(list_ast);
+                fk_columns.extend(sub_fk_columns_2);
+                fk_nodes.extend(sub_fk_nodes_2);
             }
-        }
-        ASTNode::SQLInSubquery { .. } => (), // subqueries in WHERE statement are not supported
-        ASTNode::SQLBetween {
-            expr: between_expr_ast_box_ref,
-            low: between_low_ast_box_ref,
-            high: between_high_ast_box_ref,
-            ..
-        } => {
-            fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                between_expr_ast_box_ref.as_ref(),
-            )));
-            fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                between_low_ast_box_ref.as_ref(),
-            )));
-            fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                between_high_ast_box_ref.as_ref(),
-            )));
         }
         ASTNode::SQLBinaryExpr {
             left: bin_left_ast_box_ref,
             right: bin_right_ast_box_ref,
             ..
         } => {
-            fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                bin_left_ast_box_ref.as_ref(),
-            )));
-            fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                bin_right_ast_box_ref.as_ref(),
-            )));
+            let (sub_fk_columns_l, sub_fk_nodes_l) =
+                fk_columns_from_where_ast(bin_left_ast_box_ref.borrow_mut());
+            fk_columns.extend(sub_fk_columns_l);
+            fk_nodes.extend(sub_fk_nodes_l);
+
+            let (sub_fk_columns_r, sub_fk_nodes_r) =
+                fk_columns_from_where_ast(bin_right_ast_box_ref.borrow_mut());
+            fk_columns.extend(sub_fk_columns_r);
+            fk_nodes.extend(sub_fk_nodes_r);
         }
         ASTNode::SQLCast {
             expr: cast_expr_box_ref,
             ..
         } => {
-            fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                cast_expr_box_ref.as_ref(),
-            )));
+            let (sub_fk_columns, sub_fk_nodes) =
+                fk_columns_from_where_ast(cast_expr_box_ref.borrow_mut());
+            fk_columns.extend(sub_fk_columns);
+            fk_nodes.extend(sub_fk_nodes);
         }
         ASTNode::SQLNested(nested_ast_box_ref) => {
-            fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                nested_ast_box_ref.as_ref(),
-            )));
+            let (sub_fk_columns, sub_fk_nodes) =
+                fk_columns_from_where_ast(nested_ast_box_ref.borrow_mut());
+            fk_columns.extend(sub_fk_columns);
+            fk_nodes.extend(sub_fk_nodes);
         }
         ASTNode::SQLUnary {
             expr: unary_expr_box_ref,
             ..
         } => {
-            fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                unary_expr_box_ref.as_ref(),
-            )));
+            let (sub_fk_columns, sub_fk_nodes) =
+                fk_columns_from_where_ast(unary_expr_box_ref.borrow_mut());
+            fk_columns.extend(sub_fk_columns);
+            fk_nodes.extend(sub_fk_nodes);
         }
-        ASTNode::SQLValue(_val) => (),
+        ASTNode::SQLBetween {
+            expr: between_expr_ast_box_ref,
+            low: between_low_ast_box_ref,
+            high: between_high_ast_box_ref,
+            ..
+        } => {
+            let (sub_fk_columns, sub_fk_nodes) =
+                fk_columns_from_where_ast(between_expr_ast_box_ref.borrow_mut());
+            fk_columns.extend(sub_fk_columns);
+            fk_nodes.extend(sub_fk_nodes);
+            let (sub_fk_columns, sub_fk_nodes) =
+                fk_columns_from_where_ast(between_low_ast_box_ref.borrow_mut());
+            fk_columns.extend(sub_fk_columns);
+            fk_nodes.extend(sub_fk_nodes);
+            let (sub_fk_columns, sub_fk_nodes) =
+                fk_columns_from_where_ast(between_high_ast_box_ref.borrow_mut());
+            fk_columns.extend(sub_fk_columns);
+            fk_nodes.extend(sub_fk_nodes);
+        }
         ASTNode::SQLFunction {
             args: args_ast_vec, ..
         } => {
             for ast_arg in args_ast_vec {
-                fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(ast_arg)));
+                let (sub_fk_columns, sub_fk_nodes) = fk_columns_from_where_ast(ast_arg);
+                fk_columns.extend(sub_fk_columns);
+                fk_nodes.extend(sub_fk_nodes);
             }
         }
         ASTNode::SQLCase {
@@ -172,26 +165,42 @@ fn push_nested_ast_fk_columns_to_vec(ast_opt: Option<&ASTNode>) -> Vec<String> {
             else_result: case_else_results_ast_box_opt,
         } => {
             for case_condition_ast in case_conditions_ast_vec {
-                fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(case_condition_ast)));
+                let (sub_fk_columns, sub_fk_nodes) =
+                    fk_columns_from_where_ast(case_condition_ast);
+                fk_columns.extend(sub_fk_columns);
+                fk_nodes.extend(sub_fk_nodes);
             }
 
             for case_results_ast_vec in case_results_ast_vec {
-                fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                    case_results_ast_vec,
-                )));
+                let (sub_fk_columns, sub_fk_nodes) =
+                    fk_columns_from_where_ast(case_results_ast_vec);
+                fk_columns.extend(sub_fk_columns);
+                fk_nodes.extend(sub_fk_nodes);
             }
 
             if let Some(case_else_results_ast_box) = case_else_results_ast_box_opt {
-                fk_columns.extend(push_nested_ast_fk_columns_to_vec(Some(
-                    case_else_results_ast_box.as_ref(),
-                )));
+                let (sub_fk_columns, sub_fk_nodes) =
+                    fk_columns_from_where_ast(case_else_results_ast_box.borrow_mut());
+                fk_columns.extend(sub_fk_columns);
+                fk_nodes.extend(sub_fk_nodes);
             }
         }
+        // below is unsupported
+        ASTNode::SQLIdentifier(_non_nested_column_name) => (),
+        ASTNode::SQLWildcard => (),
+        ASTNode::SQLInSubquery { .. } => (), // subqueries in WHERE statement are not supported
+        ASTNode::SQLValue(_val) => (),
         ASTNode::SQLSubquery(_query_box) => (), // subqueries in WHERE are not supported
     };
 
-    fk_columns
+    (fk_columns, fk_nodes)
 }
+
+/// Converts the SQL Query’s "selection" ASTNode into a WHERE clause string.
+/// // might be ablet o just use .to_string()
+// pub fn where_clause_ast_to_str(ast: &ASTNode) -> Result<String, ApiError> {
+//     Ok("".to_string())
+// }
 
 /// Represents a single foreign key, usually generated by a queried column using dot-syntax.
 pub struct ForeignKeyReference {
