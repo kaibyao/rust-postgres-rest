@@ -44,8 +44,13 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
         },
         None => (ASTNode::SQLIdentifier("".to_string()), ""),
     };
-    let (where_fk_columns, mut where_fk_column_ast_map) = fk_columns_from_where_ast(&mut where_ast);
-    columns.extend(where_fk_columns.iter().map(String::as_str));
+    let where_fk_columns = fk_columns_from_where_ast(&mut where_ast);
+    columns.extend(
+        where_fk_columns
+            .iter()
+            .map(|(col, _ast)| col.as_str())
+            .collect::<Vec<&str>>(),
+    );
 
     if let Some(v) = &params.distinct {
         columns.extend(v.iter().map(String::as_str));
@@ -61,14 +66,13 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
     let fk_columns = ForeignKeyReference::from_query_columns(conn, &params.table, &columns)?;
 
     // get the correct WHERE clause
-    let where_string = if let (true, Some(fks)) = (!where_fk_column_ast_map.is_empty(), &fk_columns)
-    {
+    let where_string = if let (true, Some(fks)) = (!where_fk_columns.is_empty(), &fk_columns) {
         // replace the AST nodes that represent the incorrect column strings with the correct column strings
         // let mut replacement_nodes = vec![];
-        for (incorrect_column_name, ast_node) in where_fk_column_ast_map.iter_mut() {
+        for (incorrect_column_name, ast_node) in where_fk_columns {
             if let (true, Some(fk_ref)) = (
                 !fks.is_empty(),
-                ForeignKeyReference::find(fks, &params.table, incorrect_column_name),
+                ForeignKeyReference::find(fks, &params.table, &incorrect_column_name),
             ) {
                 // statement.push(fk_ref.table_referred.as_str());
                 // statement.push(".");
@@ -86,7 +90,7 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
                 // *ast_node = &replacement_node;
 
                 // replacement_nodes.push(replacement_node);
-                **ast_node = replacement_node;
+                *ast_node = replacement_node;
             }
         }
 
