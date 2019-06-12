@@ -39,9 +39,17 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
 
     // WHERE clause foreign key references
     let where_ast = match &params.conditions {
-        Some(where_clause_str) => match where_clause_str_to_ast(where_clause_str)? {
-            Some(ast) => ast,
-            None => ASTNode::SQLIdentifier("".to_string()),
+        Some(where_clause_str) => match where_clause_str_to_ast(where_clause_str) {
+            Ok(ast_opt) => match ast_opt {
+                Some(ast) => ast,
+                None => ASTNode::SQLIdentifier("".to_string()),
+            },
+            Err(_) => {
+                return Err(ApiError::generate_error(
+                    "INVALID_SQL_SYNTAX",
+                    ["WHERE", where_clause_str].join(":"),
+                ));
+            }
         },
         None => ASTNode::SQLIdentifier("".to_string()),
     };
@@ -61,12 +69,12 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
     // parse columns for foreign key usage
     let fk_columns = ForeignKeyReference::from_query_columns(conn, &params.table, &columns)?;
 
-    dbg!(&fk_columns);
+    // dbg!(&fk_columns);
 
     let (statement, prepared_values) = build_select_statement(params, fk_columns, where_ast)?;
 
-    dbg!(&statement);
-    dbg!(&prepared_values);
+    // dbg!(&statement);
+    // dbg!(&prepared_values);
 
     // sending prepared statement to postgres
     let prep_statement = conn.prepare(&statement)?;
@@ -114,7 +122,7 @@ fn build_select_statement(
     if let Some(distinct_columns) = &params.distinct {
         statement.push("DISTINCT ON (");
         statement.extend(get_column_str(distinct_columns, &params.table, &fks)?);
-        statement.push(")");
+        statement.push(") ");
     }
 
     // dbg!(&params.columns);
@@ -230,7 +238,11 @@ fn build_select_statement(
                 statement.push(sql_column);
             }
 
-            statement.push(order_by_direction);
+            statement.push(if order_by_direction == " desc" {
+                " DESC"
+            } else {
+                " ASC"
+            });
 
             if i < order_by_columns.len() - 1 {
                 statement.push(", ");
@@ -488,7 +500,7 @@ mod build_select_statement_tests {
             Ok((sql, _)) => {
                 assert_eq!(
                     &sql,
-                    "SELECT id FROM a_table ORDER BY name, test LIMIT 1000;"
+                    "SELECT id FROM a_table ORDER BY name ASC, test ASC LIMIT 1000;"
                 );
             }
             Err(e) => {
@@ -581,7 +593,7 @@ mod build_select_statement_tests {
                 group_by: None,
                 limit: 10000,
                 offset: 2000,
-                order_by: Some(vec!["due_date DESC".to_string()]),
+                order_by: Some(vec!["due_date desc".to_string()]),
                 prepared_values: Some("46327143679919107,'a name'".to_string()),
                 table: "a_table".to_string(),
             },

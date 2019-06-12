@@ -60,6 +60,15 @@ impl ApiError {
                 offender,
             },
 
+            "INVALID_SQL_SYNTAX" => ApiError::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "The SQL expression could not be parsed by PostgreSQL.".to_string(),
+                http_status: 400,
+                message: "Check that the SQL syntax is correct.",
+                offender,
+            },
+
             "SQL_IDENTIFIER_KEYWORD" => ApiError::UserError {
                 category: MessageCategory::Error,
                 code: err_id,

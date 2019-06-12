@@ -32,19 +32,20 @@ impl QueryParamsSelect {
                 None => vec![],
             },
             distinct: match query_params.get("distinct") {
-                Some(distinct_str) => Some(
-                    Self::normalize_columns(distinct_str),
-                ),
+                Some(distinct_str) => Some(Self::normalize_columns(distinct_str)),
                 None => None,
             },
             table: match req.match_info().query("table") {
-                Ok(table_name) => table_name,
+                Ok(table_name) => {
+                    let t: String = table_name;
+                    t.to_lowercase()
+                }
                 Err(_) => unreachable!(
                     "this function should really only be called with a request that contains table"
                 ),
             },
             conditions: match query_params.get("where") {
-                Some(where_string) => Some(where_string.to_lowercase()),
+                Some(where_string) => Some(where_string.trim().to_lowercase()),
                 None => None,
             },
             group_by: match query_params.get("group_by") {
@@ -78,9 +79,9 @@ impl QueryParamsSelect {
 
     fn normalize_columns(columns_str: &str) -> Vec<String> {
         columns_str
-                    .split(',')
-                    .map(|s| s.trim().to_lowercase())
-                    .collect()
+            .split(',')
+            .map(|s| s.trim().to_lowercase())
+            .collect()
     }
 }
 

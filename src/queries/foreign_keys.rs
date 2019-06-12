@@ -9,9 +9,6 @@ use sqlparser::{
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 
-// TODO: write tests for where_clause_str_to_ast
-// TODO: write tests for fk_ast_nodes_from_where_ast
-
 /// Converts a WHERE clause string into an ASTNode.
 pub fn where_clause_str_to_ast(clause: &str) -> Result<Option<ASTNode>, ApiError> {
     let full_statement = ["SELECT * FROM a_table WHERE ", clause].join("");
@@ -282,12 +279,12 @@ impl ForeignKeyReference {
     ///
     /// ## Simple query (1 level deep)
     ///
-    /// ```
+    /// ```ignore
     /// // a_table.a_foreign_key references b_table.id
     /// // a_table.another_foreign_key references c_table.id
     ///
     /// assert_eq!(
-    ///     get_foreign_keys_from_query_columns(
+    ///     ForeignKeyReference::from_query_columns(
     ///         conn,
     ///         "a_table",
     ///         &[
@@ -298,12 +295,16 @@ impl ForeignKeyReference {
     ///     ),
     ///     Ok(Some(vec![
     ///         ForeignKeyReference {
+    ///             original_refs: vec!["a_foreign_key.some_text".to_string()],
+    ///             referring_table: "a_table".to_string(),
     ///             referring_column: "a_foreign_key".to_string(),
     ///             table_referred: "b_table".to_string(),
     ///             foreign_key_column: "id".to_string(),
     ///             nested_fks: None,
     ///         },
     ///         ForeignKeyReference {
+    ///             original_refs: vec!["another_foreign_key.some_str".to_string()],
+    ///             referring_table: "a_table".to_string(),
     ///             referring_column: "another_foreign_key".to_string(),
     ///             table_referred: "c_table".to_string(),
     ///             foreign_key_column: "id".to_string(),
@@ -315,14 +316,14 @@ impl ForeignKeyReference {
     ///
     /// ## Nested foreign keys
     ///
-    /// ```
+    /// ```ignore
     /// // a_foreign_key references b_table.id
     /// // another_foreign_key references c_table.id
     /// // another_foreign_key.nested_fk references d_table.id
     /// // another_foreign_key.different_nested_fk references e_table.id
     ///
     /// assert_eq!(
-    ///     get_foreign_keys_from_query_columns(
+    ///     ForeignKeyReference::from_query_columns(
     ///         conn,
     ///         "a_table",
     ///         &[
@@ -333,31 +334,39 @@ impl ForeignKeyReference {
     ///         ]
     ///     ),
     ///     Ok(Some(vec![
-    ///       ForeignKeyReference {
-    ///           referring_column: "a_foreign_key".to_string(),
-    ///           table_referred: "b_table".to_string(),
-    ///           foreign_key_column: "id".to_string(),
-    ///           nested_fks: None
-    ///       },
-    ///       ForeignKeyReference {
-    ///           referring_column: "another_foreign_key".to_string(),
-    ///           table_referred: "b_table".to_string(),
-    ///           foreign_key_column: "id".to_string(),
-    ///           nested_fks: Some(vec![
-    ///               ForeignKeyReference {
-    ///                   referring_column: "nested_fk".to_string(),
-    ///                   table_referred: "d_table".to_string(),
-    ///                   foreign_key_column: "id".to_string(),
-    ///                   nested_fks: None
-    ///               },
-    ///               ForeignKeyReference {
-    ///                   referring_column: "different_nested_fk".to_string(),
-    ///                   table_referred: "e_table".to_string(),
-    ///                   foreign_key_column: "id".to_string(),
-    ///                   nested_fks: None
-    ///               }
-    ///           ])
-    ///       }
+    ///         ForeignKeyReference {
+    ///             original_refs: vec!["a_foreign_key.some_text".to_string()],
+    ///             referring_table: "a_table".to_string(),
+    ///             referring_column: "a_foreign_key".to_string(),
+    ///             table_referred: "b_table".to_string(),
+    ///             foreign_key_column: "id".to_string(),
+    ///             nested_fks: None
+    ///         },
+    ///         ForeignKeyReference {
+    ///             original_refs: vec!["another_foreign_key.nested_fk.some_str".to_string(), "another_foreign_key.different_nested_fk.some_int".to_string()],
+    ///             referring_table: "a_table".to_string(),
+    ///             referring_column: "another_foreign_key".to_string(),
+    ///             table_referred: "b_table".to_string(),
+    ///             foreign_key_column: "id".to_string(),
+    ///             nested_fks: Some(vec![
+    ///                 ForeignKeyReference {
+    ///                     original_refs: vec!["nested_fk.some_str".to_string()],
+    ///                     referring_table: "c_table".to_string(),
+    ///                     referring_column: "nested_fk".to_string(),
+    ///                     table_referred: "d_table".to_string(),
+    ///                     foreign_key_column: "id".to_string(),
+    ///                     nested_fks: None
+    ///                 },
+    ///                 ForeignKeyReference {
+    ///                     original_refs: vec!["different_nested_fk.some_int".to_string()],
+    ///                     referring_table: "c_table".to_string(),
+    ///                     referring_column: "different_nested_fk".to_string(),
+    ///                     table_referred: "e_table".to_string(),
+    ///                     foreign_key_column: "id".to_string(),
+    ///                     nested_fks: None
+    ///                 }
+    ///             ])
+    ///         }
     ///     ]))
     /// );
     /// ```
@@ -501,14 +510,19 @@ impl ForeignKeyReference {
                 continue;
             }
 
+            // see if any of the `ForeignKeyReference`s have any original references that match the given column name
             let found_orig_ref = fkr.original_refs.iter().find(|ref_col| col == *ref_col);
 
             if found_orig_ref.is_some() {
                 match &fkr.nested_fks {
-                    Some(nested_fks) => return Self::find(nested_fks, table, col),
+                    Some(nested_fks) => {
+                        let first_dot_pos = col.find('.').unwrap();
+                        let sub_column_str = &col[first_dot_pos + 1..];
+                        return Self::find(nested_fks, &fkr.table_referred, sub_column_str);
+                    }
                     None => {
-                        let sub_column_breadcrumbs: Vec<&str> = col.split('.').collect();
                         // by this point, sub_column_breadcrumbs should have a length of 1 or 2 (1 if there's no FK, 2 if there is a FK). If the original column string had more than 1 level for foreign keys, the function would have recursively called itself until it got to this point
+                        let sub_column_breadcrumbs: Vec<&str> = col.split('.').collect();
                         let sub_column_str = if sub_column_breadcrumbs.len() > 1 {
                             sub_column_breadcrumbs[1]
                         } else {
@@ -569,5 +583,199 @@ impl ForeignKeyReference {
         }
 
         join_data
+    }
+}
+
+#[cfg(test)]
+mod where_clause_str_to_ast_tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use sqlparser::sqlast::SQLOperator;
+
+    #[test]
+    fn basic() {
+        let clause = "a > b";
+        let expected = ASTNode::SQLBinaryExpr {
+            left: Box::new(ASTNode::SQLIdentifier("a".to_string())),
+            op: SQLOperator::Gt,
+            right: Box::new(ASTNode::SQLIdentifier("b".to_string())),
+        };
+        assert_eq!(where_clause_str_to_ast(clause).unwrap().unwrap(), expected);
+    }
+
+    #[test]
+    fn foreign_keys() {
+        let clause = "a.b > c";
+        let expected = ASTNode::SQLBinaryExpr {
+            left: Box::new(ASTNode::SQLCompoundIdentifier(vec![
+                "a".to_string(),
+                "b".to_string(),
+            ])),
+            op: SQLOperator::Gt,
+            right: Box::new(ASTNode::SQLIdentifier("c".to_string())),
+        };
+        assert_eq!(where_clause_str_to_ast(clause).unwrap().unwrap(), expected);
+    }
+
+    #[test]
+    fn empty_string_returns_error() {
+        let clause = "";
+        assert!(where_clause_str_to_ast(clause).is_err());
+    }
+
+    #[test]
+    fn empty_parentheses_returns_err() {
+        let clause = "()";
+        assert!(where_clause_str_to_ast(clause).is_err());
+    }
+
+    #[test]
+    fn invalid_clause_returns_err() {
+        let clause = "not valid WHERE syntax";
+        assert!(where_clause_str_to_ast(clause).is_err());
+    }
+}
+
+#[cfg(test)]
+mod fk_ast_nodes_from_where_ast {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use std::rc::Rc;
+
+    #[test]
+    fn basic() {
+        let ast =
+            ASTNode::SQLCompoundIdentifier(vec!["a_column".to_string(), "b_column".to_string()]);
+
+        let mut borrowed = Rc::new(ast);
+        let mut cloned = borrowed.clone();
+
+        let expected = vec![("a_column.b_column".to_string(), Rc::make_mut(&mut borrowed))];
+
+        assert_eq!(
+            fk_ast_nodes_from_where_ast(Rc::make_mut(&mut cloned)),
+            expected
+        );
+    }
+
+    #[test]
+    fn non_fk_nodes_return_empty_vec() {
+        let mut ast = ASTNode::SQLIdentifier("a_column".to_string());
+        let expected = vec![];
+
+        assert_eq!(fk_ast_nodes_from_where_ast(&mut ast), expected);
+    }
+}
+
+#[cfg(test)]
+mod fk_columns_from_where_ast {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn basic() {
+        let ast =
+            ASTNode::SQLCompoundIdentifier(vec!["a_column".to_string(), "b_column".to_string()]);
+
+        let expected = vec!["a_column.b_column".to_string()];
+
+        assert_eq!(fk_columns_from_where_ast(&ast), expected);
+    }
+
+    #[test]
+    fn non_fk_nodes_return_empty_vec() {
+        let mut ast = ASTNode::SQLIdentifier("a_column".to_string());
+        let expected = vec![];
+
+        assert_eq!(fk_ast_nodes_from_where_ast(&mut ast), expected);
+    }
+}
+
+#[cfg(test)]
+mod fkr_find {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn basic() {
+        let refs = vec![ForeignKeyReference {
+            original_refs: vec!["a_foreign_key.some_text".to_string()],
+            referring_table: "a_table".to_string(),
+            referring_column: "a_foreign_key".to_string(),
+            table_referred: "b_table".to_string(),
+            foreign_key_column: "id".to_string(),
+            nested_fks: None,
+        }];
+
+        let (found_fk, fk_table_column) =
+            ForeignKeyReference::find(&refs, "a_table", "a_foreign_key.some_text").unwrap();
+
+        assert_eq!(found_fk as *const _, &refs[0] as *const _); // comparing pointers to see if they both point at the same item
+        assert_eq!(fk_table_column, "some_text");
+    }
+
+    #[test]
+    fn nested_foreign_keys() {
+        let refs = vec![ForeignKeyReference {
+            original_refs: vec!["another_foreign_key.nested_fk.some_str".to_string()],
+            referring_table: "a_table".to_string(),
+            referring_column: "another_foreign_key".to_string(),
+            table_referred: "b_table".to_string(),
+            foreign_key_column: "id".to_string(),
+            nested_fks: Some(vec![ForeignKeyReference {
+                original_refs: vec!["nested_fk.some_str".to_string()],
+                referring_table: "b_table".to_string(),
+                referring_column: "nested_fk".to_string(),
+                table_referred: "c_table".to_string(),
+                foreign_key_column: "id".to_string(),
+                nested_fks: None,
+            }]),
+        }];
+
+        let (found_fk, fk_table_column) =
+            ForeignKeyReference::find(&refs, "a_table", "another_foreign_key.nested_fk.some_str")
+                .unwrap();
+
+        let nested_fk = &refs[0].nested_fks.as_ref().unwrap()[0];
+
+        assert_eq!(found_fk as *const _, nested_fk as *const _); // comparing pointers to see if they both point at the same item
+        assert_eq!(fk_table_column, "some_str");
+    }
+}
+
+#[cfg(test)]
+mod fkr_inner_join_expr {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn nested_foreign_keys() {
+        let refs = vec![
+            ForeignKeyReference {
+                original_refs: vec!["another_foreign_key.nested_fk.some_str".to_string()],
+                referring_table: "a_table".to_string(),
+                referring_column: "another_foreign_key".to_string(),
+                table_referred: "b_table".to_string(),
+                foreign_key_column: "id".to_string(),
+                nested_fks: Some(vec![ForeignKeyReference {
+                    original_refs: vec!["nested_fk.some_str".to_string()],
+                    referring_table: "b_table".to_string(),
+                    referring_column: "nested_fk".to_string(),
+                    table_referred: "d_table".to_string(),
+                    foreign_key_column: "id".to_string(),
+                    nested_fks: None,
+                }]),
+            },
+            ForeignKeyReference {
+                original_refs: vec!["fk.another_field".to_string()],
+                referring_table: "b_table".to_string(),
+                referring_column: "b_table_fk".to_string(),
+                table_referred: "e_table".to_string(),
+                foreign_key_column: "id".to_string(),
+                nested_fks: None,
+            },
+        ];
+
+        assert_eq!(ForeignKeyReference::inner_join_expr(&refs), "b_table ON a_table.another_foreign_key = b_table.id\nINNER JOIN d_table ON b_table.nested_fk = d_table.id\nINNER JOIN e_table ON b_table.b_table_fk = e_table.id".to_string());
     }
 }
