@@ -1,5 +1,6 @@
 use super::foreign_keys::{
-    fk_columns_from_where_ast, where_clause_str_to_ast, ForeignKeyReference,
+    fk_ast_nodes_from_where_ast, fk_columns_from_where_ast, where_clause_str_to_ast,
+    ForeignKeyReference,
 };
 use super::postgres_types::{convert_row_fields, RowFields};
 use super::query_types::{Query, QueryParams, QueryParamsSelect, QueryResult};
@@ -37,20 +38,15 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
         .collect::<Vec<&str>>();
 
     // WHERE clause foreign key references
-    let (mut where_ast, where_clause_str): (ASTNode, &str) = match &params.conditions {
+    let where_ast = match &params.conditions {
         Some(where_clause_str) => match where_clause_str_to_ast(where_clause_str)? {
-            Some(ast) => (ast, where_clause_str),
-            None => (ASTNode::SQLIdentifier("".to_string()), where_clause_str),
+            Some(ast) => ast,
+            None => ASTNode::SQLIdentifier("".to_string()),
         },
-        None => (ASTNode::SQLIdentifier("".to_string()), ""),
+        None => ASTNode::SQLIdentifier("".to_string()),
     };
-    let where_fk_columns = fk_columns_from_where_ast(&mut where_ast);
-    columns.extend(
-        where_fk_columns
-            .iter()
-            .map(|(col, _ast)| col.as_str())
-            .collect::<Vec<&str>>(),
-    );
+    let where_fk_columns = fk_columns_from_where_ast(&where_ast);
+    columns.extend(where_fk_columns.iter().map(String::as_str));
 
     if let Some(v) = &params.distinct {
         columns.extend(v.iter().map(String::as_str));
@@ -65,42 +61,7 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
     // parse columns for foreign key usage
     let fk_columns = ForeignKeyReference::from_query_columns(conn, &params.table, &columns)?;
 
-    // get the correct WHERE clause
-    let where_string = if let (true, Some(fks)) = (!where_fk_columns.is_empty(), &fk_columns) {
-        // replace the AST nodes that represent the incorrect column strings with the correct column strings
-        // let mut replacement_nodes = vec![];
-        for (incorrect_column_name, ast_node) in where_fk_columns {
-            if let (true, Some(fk_ref)) = (
-                !fks.is_empty(),
-                ForeignKeyReference::find(fks, &params.table, &incorrect_column_name),
-            ) {
-                // statement.push(fk_ref.table_referred.as_str());
-                // statement.push(".");
-                // statement.push(fk_ref.table_column_referred.as_str());
-                let replacement_node = match ast_node {
-                    ASTNode::SQLQualifiedWildcard(_wildcard_vec) => {
-                        ASTNode::SQLQualifiedWildcard(vec![fk_ref.table_referred.clone(), fk_ref.table_column_referred.clone()])
-                    },
-                    ASTNode::SQLCompoundIdentifier(_nested_fk_column_vec) => {
-                        ASTNode::SQLCompoundIdentifier(vec![fk_ref.table_referred.clone(), fk_ref.table_column_referred.clone()])
-                    },
-                    _ => unimplemented!("The WHERE clause HashMap only contains wildcards and compound identifiers."),
-                };
-                // where_fk_column_ast_replacements.insert(ast_node, replacement_node);
-                // *ast_node = &replacement_node;
-
-                // replacement_nodes.push(replacement_node);
-                *ast_node = replacement_node;
-            }
-        }
-
-        // convert the AST back into an SQL statement and extract the contents of WHERE expression
-        where_ast.to_string()
-    } else {
-        where_clause_str.to_string()
-    };
-
-    let (statement, prepared_values) = build_select_statement(params, fk_columns, where_string)?;
+    let (statement, prepared_values) = build_select_statement(params, fk_columns, where_ast)?;
 
     // dbg!(&statement);
     // dbg!(&prepared_values);
@@ -137,9 +98,9 @@ pub fn query_table(conn: &Connection, query: Query) -> Result<QueryResult, ApiEr
 fn build_select_statement(
     params: &QueryParamsSelect,
     fk_opts: Option<Vec<ForeignKeyReference>>,
-    where_string: String,
+    mut where_ast: ASTNode,
 ) -> Result<(String, Vec<PreparedStatementValue>), ApiError> {
-    let mut statement = vec!["SELECT"];
+    let mut statement = vec!["SELECT "];
 
     let (is_fks_exist, fks) = if let Some(fks_inner) = fk_opts {
         (true, fks_inner)
@@ -149,59 +110,35 @@ fn build_select_statement(
 
     // DISTINCT clause if exists
     if let Some(distinct_columns) = &params.distinct {
-        statement.push(" DISTINCT ON (");
-
-        // let distinct_columns: Vec<&str> = distinct_str.split(',').collect();
-        for (i, column) in distinct_columns.iter().enumerate() {
-            validate_where_column(column)?;
-
-            if let (true, Some(fk_ref)) = (
-                is_fks_exist,
-                ForeignKeyReference::find(&fks, &params.table, column),
-            ) {
-                statement.push(fk_ref.table_referred.as_str());
-                statement.push(".");
-                statement.push(fk_ref.table_column_referred.as_str());
-            } else {
-                statement.push(column);
-            }
-
-            if i < distinct_columns.len() - 1 {
-                statement.push(", ");
-            }
-        }
+        statement.push("DISTINCT ON (");
+        statement.extend(get_column_str(distinct_columns, &params.table, &fks)?);
         statement.push(")");
     }
 
     // dbg!(&params.columns);
 
-    // building prepared statement
-    for (i, column) in params.columns.iter().enumerate() {
-        validate_where_column(&column)?;
-
-        if let (true, Some(fk_ref)) = (
-            is_fks_exist,
-            ForeignKeyReference::find(&fks, &params.table, column),
-        ) {
-            statement.push(fk_ref.table_referred.as_str());
-            statement.push(".");
-            statement.push(fk_ref.table_column_referred.as_str());
-        } else {
-            statement.push(column);
-        }
-
-        if i < params.columns.len() - 1 {
-            statement.push(", ");
-        }
-    }
+    // building column selection
+    statement.extend(get_column_str(&params.columns, &params.table, &fks)?);
 
     statement.push(" FROM ");
     statement.push(&params.table);
 
-    // TODO: inner join expressions
+    // build inner join expression
+    let inner_join_str = if is_fks_exist {
+        ForeignKeyReference::inner_join_expr(&fks)
+    } else {
+        "".to_string()
+    };
+    if is_fks_exist {
+        statement.push(" INNER JOIN ");
+        statement.push(&inner_join_str);
+    }
+
+    // building WHERE string
+    let where_str = params.conditions.as_ref().map_or("", |s| s.as_str());
+    let where_string = get_where_string(where_str, &mut where_ast, &params.table, &fks);
 
     let mut prepared_values = vec![];
-
     if &where_string != "" {
         statement.push(" WHERE (");
         statement.push(&where_string);
@@ -245,25 +182,7 @@ fn build_select_statement(
     // GROUP BY statement
     if let Some(group_by_columns) = &params.group_by {
         statement.push(" GROUP BY ");
-
-        for (i, column) in group_by_columns.iter().enumerate() {
-            validate_where_column(column)?;
-
-            if let (true, Some(fk_ref)) = (
-                is_fks_exist,
-                ForeignKeyReference::find(&fks, &params.table, column),
-            ) {
-                statement.push(fk_ref.table_referred.as_str());
-                statement.push(".");
-                statement.push(fk_ref.table_column_referred.as_str());
-            } else {
-                statement.push(column);
-            }
-
-            if i < group_by_columns.len() - 1 {
-                statement.push(", ");
-            }
-        }
+        statement.extend(get_column_str(group_by_columns, &params.table, &fks)?);
     }
 
     // Append ORDER BY if the param exists
@@ -331,6 +250,79 @@ fn build_select_statement(
     Ok((statement.join(""), prepared_values))
 }
 
+/// Generates a string of column names delimited by commas. Foreign keys are correctly accounted for.
+fn get_column_str<'a>(
+    columns: &'a [String],
+    table: &str,
+    fks: &'a [ForeignKeyReference],
+) -> Result<Vec<&'a str>, ApiError> {
+    let mut statement = vec![];
+
+    for (i, column) in columns.iter().enumerate() {
+        validate_where_column(column)?;
+
+        if let (true, Some(fk_ref)) = (
+            !fks.is_empty(),
+            ForeignKeyReference::find(fks, table, column),
+        ) {
+            statement.push(fk_ref.table_referred.as_str());
+            statement.push(".");
+            statement.push(fk_ref.table_column_referred.as_str());
+        } else {
+            statement.push(column);
+        }
+
+        if i < columns.len() - 1 {
+            statement.push(", ");
+        }
+    }
+
+    Ok(statement)
+}
+
+/// Generates the WHERE clause after taking foreign keys into account.
+fn get_where_string<'a>(
+    where_str: &str,
+    where_ast: &mut ASTNode,
+    table: &str,
+    fks: &'a [ForeignKeyReference],
+) -> String {
+    let where_fk_ast_nodes = fk_ast_nodes_from_where_ast(where_ast);
+
+    if where_fk_ast_nodes.is_empty() {
+        return where_str.to_string();
+    }
+
+    for (incorrect_column_name, ast_node) in where_fk_ast_nodes {
+        if let (true, Some(fk_ref)) = (
+            !fks.is_empty(),
+            ForeignKeyReference::find(fks, table, &incorrect_column_name),
+        ) {
+            let replacement_node = match ast_node {
+                ASTNode::SQLQualifiedWildcard(_wildcard_vec) => {
+                    ASTNode::SQLQualifiedWildcard(vec![
+                        fk_ref.table_referred.clone(),
+                        fk_ref.table_column_referred.clone(),
+                    ])
+                }
+                ASTNode::SQLCompoundIdentifier(_nested_fk_column_vec) => {
+                    ASTNode::SQLCompoundIdentifier(vec![
+                        fk_ref.table_referred.clone(),
+                        fk_ref.table_column_referred.clone(),
+                    ])
+                }
+                _ => unimplemented!(
+                    "The WHERE clause HashMap only contains wildcards and compound identifiers."
+                ),
+            };
+
+            *ast_node = replacement_node;
+        }
+    }
+
+    where_ast.to_string()
+}
+
 #[cfg(test)]
 mod build_select_statement_tests {
     use super::super::query_types::QueryParamsSelect;
@@ -352,7 +344,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             None,
-            "".to_string(),
+            ASTNode::SQLIdentifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(&sql, "SELECT id FROM a_table LIMIT 100;");
@@ -378,7 +370,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             None,
-            "".to_string(),
+            ASTNode::SQLIdentifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(&sql, "SELECT id, name FROM a_table LIMIT 100;");
@@ -404,7 +396,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             None,
-            "".to_string(),
+            ASTNode::SQLIdentifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(
@@ -433,7 +425,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             None,
-            "".to_string(),
+            ASTNode::SQLIdentifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(&sql, "SELECT id FROM a_table LIMIT 1000 OFFSET 100;");
@@ -459,7 +451,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             None,
-            "".to_string(),
+            ASTNode::SQLIdentifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(
@@ -488,7 +480,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             None,
-            "".to_string(),
+            ASTNode::SQLIdentifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(
@@ -517,7 +509,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             None,
-            "".to_string(),
+            ASTNode::SQLIdentifier("".to_string()),
         ) {
             Ok((sql, prepared_values)) => {
                 assert_eq!(
@@ -562,7 +554,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             None,
-            "".to_string(),
+            ASTNode::SQLIdentifier("".to_string()),
         ) {
             Ok((sql, prepared_values)) => {
                 assert_eq!(
