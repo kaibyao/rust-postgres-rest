@@ -171,6 +171,22 @@ impl From<actix_http::error::Error> for ApiError {
 //         }
 //     }
 // }
+impl From<bb8::RunError<ApiError>> for ApiError {
+    fn from(err: bb8::RunError<ApiError>) -> Self {
+        let details = match err {
+            bb8::RunError::TimedOut => "The database connection timed out.".to_string(),
+            bb8::RunError::User(e) => format!("{}", e)
+        };
+
+        ApiError::InternalError {
+            category: MessageCategory::Error,
+            code: "DB_POOL_ERROR",
+            details,
+            message: "There was an error when making the request with the database pool.",
+            http_status: 500,
+        }
+    }
+}
 impl From<bb8::RunError<tokio_postgres::Error>> for ApiError {
     fn from(err: bb8::RunError<tokio_postgres::Error>) -> Self {
         let details = match err {
@@ -182,7 +198,7 @@ impl From<bb8::RunError<tokio_postgres::Error>> for ApiError {
             category: MessageCategory::Error,
             code: "DB_POOL_ERROR",
             details,
-            message: "Could not parse request payload.",
+            message: "There was an error when making the request with the database pool.",
             http_status: 500,
         }
     }

@@ -11,7 +11,7 @@ extern crate serde;
 #[macro_use]
 extern crate tokio_postgres;
 
-use actix_web::{web, Scope};
+use actix_web::{Scope, web};
 
 // library modules
 mod queries;
@@ -20,7 +20,7 @@ mod db;
 use crate::db::PgConnection;
 
 mod endpoints;
-use endpoints::{get_all_table_names, index /*insert_into_table, query_table*/};
+use endpoints::{get_all_table_names, index/*, insert_into_table*/, query_table};
 
 mod errors;
 
@@ -54,7 +54,8 @@ pub fn generate_rest_api_scope(config: &AppConfig) -> Scope {
         .route("/", web::get().to(index))
         .route("/table", web::get().to_async(get_all_table_names))
         .service(
-            web::resource("/{table}"), // .route(web::get().to(query_table))
+            web::resource("/{table}")
+                .route(web::get().to_async(query_table))
                                        // .route(web::post().to(insert_into_table))
         )
 }

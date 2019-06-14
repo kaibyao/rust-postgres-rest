@@ -1,4 +1,4 @@
-// use super::table_stats::get_column_stats;
+// use super::table_stats::select_column_stats;
 // use crate::db::PgConnection;
 // use crate::errors::ApiError;
 // use sqlparser::{
@@ -415,7 +415,7 @@
 //         }
 
 //         // get column stats for table
-//         let stats = get_column_stats(conn, table)?;
+//         let stats = select_column_stats(conn, table)?;
 
 //         // filter stats to just the ones that match given columns and return the formatted data
 //         let filtered_stats_result: Result<Vec<Self>, ApiError> = stats

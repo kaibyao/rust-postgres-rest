@@ -5,7 +5,7 @@ use futures::stream::Stream;
 use tokio_postgres::{Client, Error};
 
 /// Retrieves all user-created table names
-pub fn get_all_tables(
+pub fn select_all_tables(
     mut client: Client,
 ) -> impl Future<Item = (Vec<String>, Client), Error = (Error, Client)> {
     let statement_str = "SELECT DISTINCT table_name FROM information_schema.columns WHERE table_schema='public' ORDER BY table_name;";

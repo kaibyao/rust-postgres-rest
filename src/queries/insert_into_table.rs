@@ -1,7 +1,7 @@
 // use super::{
 //     postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
 //     query_types::{Query, QueryParams, QueryParamsInsert, QueryResult},
-//     table_stats::get_column_stats,
+//     table_stats::select_column_stats,
 // };
 // use crate::db::PgConnection;
 // use crate::errors::ApiError;
@@ -31,7 +31,7 @@
 //     // Therefore, get column types of table so we know what types into which the json values are converted.
 //     // apparently rust_postgres already does this in the background, would be nice if there was a way to hook into existing functionality...
 //     let mut column_types: HashMap<String, String> = HashMap::new();
-//     for stat in get_column_stats(conn, &query_params.table)?.into_iter() {
+//     for stat in select_column_stats(conn, &query_params.table)?.into_iter() {
 //         column_types.insert(stat.column_name, stat.column_type);
 //     }
 
