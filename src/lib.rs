@@ -91,8 +91,10 @@ impl<'a> AppConfig<'a> {
 
 /// Takes an initialized App and config, and appends the Rest API functionality to the scope’s endpoint.
 pub fn generate_rest_api_scope(config: &AppConfig) -> Scope {
+    let pool = PgConnection::connect(config.database_url).unwrap();
+
     web::scope(config.scope_name)
-        .data(PgConnection::connect(config.database_url))
+        .data(pool)
         .route("", web::get().to(index))
         .route("/", web::get().to(index))
         .route("/table", web::get().to_async(get_all_table_names))
