@@ -1,5 +1,3 @@
-use actix::Addr;
-
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::web::Json;
@@ -17,67 +15,13 @@ use crate::queries::query_types::{
 
 /// Retrieves a list of table names that exist in the DB.
 pub fn get_all_table_names(
-    req: HttpRequest,
     db: web::Data<Pool>,
 ) -> impl Future<Item = HttpResponse, Error = ApiError> {
-    // actors
-    // let query: Query = Query {
-    //     params: QueryParams::Select(QueryParamsSelect::from_http_request(&req)),
-    //     task: QueryTasks::GetAllTables,
-    // };
-
-    // db.send(query)
-    //     .then(|rows_result| {
-    //         match rows_result {
-    //             Ok(rows) => HttpResponseBuilder::new(StatusCode::OK).json(rows),
-    //             Err(e) => {
-    //                 let err = ApiError::from(e);
-    //                 match err {
-    //                     ApiError::UserError { http_status, .. } => HttpResponseBuilder::new(StatusCode::from_u16(http_status).unwrap()).json(err),
-    //                     ApiError::InternalError { http_status, .. } => HttpResponseBuilder::new(StatusCode::from_u16(http_status).unwrap()).json(err),
-    //                 }
-    //             },
-    //         }
-    //     })
-    //     .from_err()
-
-    db.run(
-        |mut client| {
-            client.prepare("SELECT DISTINCT table_name FROM information_schema.columns WHERE table_schema='public' ORDER BY table_name;")
-            .then(|result| match result {
-                Ok(statement) => {
-                    let f = client.query(&statement, &[])
-                        .map(|row| row.get(0))
-                        .collect()
-                        .then(move |result: Result<Vec<String>, Error>| match result {
-                            Ok(rows) => Ok((rows, client)),
-                            Err(e) => Err((e, client)),
-                        });
-
-                    futures::future::Either::A(f)
-                },
-                Err(e) => futures::future::Either::B(futures::future::err((e, client)))
-            })
-            // .map(move |statement| (client, statement))
-            // .and_then(|(mut cl, statement)| cl.query(&statement, &[]).collect().join(futures::future::ok(cl)))
-            // .map(|(rows, cl)| {
-            //     (rows.iter().map(|r| r.get(0)).collect(), cl)
-            // })
-            // .then(|result: Result<(Vec<String>, Client), (tokio_postgres::Error, Client)>| match result {
-            //     Ok((rows, cl)) => Ok((rows, cl)),
-            //     Err((e, cl)) => Err((e, cl))
-            // })
-        })
-        .and_then(|rows| {
-            Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows))
-        })
+    db.run(get_all_tables)
+        .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
         .or_else(|e| {
             let err = ApiError::from(e);
             Err(err)
-            // match err {
-            //     ApiError::UserError { http_status, .. } => Err(HttpResponseBuilder::new(StatusCode::from_u16(http_status).unwrap()).json(err)),
-            //     ApiError::InternalError { http_status, .. } => Err(HttpResponseBuilder::new(StatusCode::from_u16(http_status).unwrap()).json(err)),
-            // }
         })
 }
 
