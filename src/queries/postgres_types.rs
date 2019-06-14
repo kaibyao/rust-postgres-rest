@@ -1,13 +1,13 @@
 use crate::errors::ApiError;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use eui48::MacAddress as Eui48MacAddress;
-use postgres::{
+use tokio_postgres::{
     accepts,
-    rows::Row,
-    types::{FromSql, IsNull, ToSql, Type, MACADDR},
+    row::Row,
+    types::{FromSql, IsNull, ToSql, Type},
 };
 use postgres_protocol::types::{macaddr_from_sql, macaddr_to_sql};
-use rust_decimal::Decimal;
+use lexical;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::error::Error as StdError;
@@ -19,7 +19,7 @@ use uuid::Uuid;
 pub struct MacAddress(Eui48MacAddress);
 
 // mostly copied from the postgres-protocol and postgres-shared libraries
-impl FromSql for MacAddress {
+impl<'a> FromSql<'a> for MacAddress {
     fn from_sql(_: &Type, raw: &[u8]) -> Result<MacAddress, Box<StdError + Sync + Send>> {
         let bytes = macaddr_from_sql(raw)?;
         Ok(MacAddress(Eui48MacAddress::new(bytes)))
@@ -43,17 +43,17 @@ impl ToSql for MacAddress {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 /// Represents a single column value for a returned row. We have to have an Enum describing column data that is non-nullable vs nullable
-pub enum ColumnValue<T: FromSql + ToSql> {
+pub enum ColumnValue<T> {
     Nullable(Option<T>),
     NotNullable(T),
 }
 
-impl<T: FromSql + ToSql> FromSql for ColumnValue<T> {
+impl<'a, T> FromSql<'a> for ColumnValue<T> where T: FromSql<'a> {
     fn accepts(ty: &Type) -> bool {
         <T as FromSql>::accepts(ty)
     }
 
-    fn from_sql(ty: &Type, raw: &[u8]) -> Result<Self, Box<StdError + 'static + Send + Sync>> {
+    fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Box<StdError + 'static + Send + Sync>> {
         <T as FromSql>::from_sql(ty, raw).map(ColumnValue::NotNullable)
     }
 
@@ -63,7 +63,7 @@ impl<T: FromSql + ToSql> FromSql for ColumnValue<T> {
 
     fn from_sql_nullable(
         ty: &Type,
-        raw: Option<&[u8]>,
+        raw: Option<&'a [u8]>,
     ) -> Result<Self, Box<StdError + 'static + Send + Sync>> {
         match raw {
             Some(raw_inner) => Self::from_sql(ty, raw_inner),
@@ -72,7 +72,7 @@ impl<T: FromSql + ToSql> FromSql for ColumnValue<T> {
     }
 }
 
-impl<T: FromSql + ToSql> ToSql for ColumnValue<T> {
+impl<T> ToSql for ColumnValue<T> where T: ToSql {
     fn to_sql(
         &self,
         ty: &Type,
@@ -102,7 +102,7 @@ pub enum ColumnTypeValue {
     Char(ColumnValue<String>), // apparently it's a bad practice to use char(n)
     Citext(ColumnValue<String>),
     Date(ColumnValue<NaiveDate>),
-    Decimal(ColumnValue<Decimal>),
+    Decimal(ColumnValue<String>),
     Float8(ColumnValue<f64>),
     HStore(ColumnValue<HashMap<String, Option<String>>>),
     Int(ColumnValue<i32>),
@@ -249,18 +249,71 @@ impl ColumnTypeValue {
     }
 
     fn convert_json_value_to_decimal(column_type: &str, value: &Value) -> Result<Self, ApiError> {
-        match value.as_str() {
-            Some(val) => match Decimal::from_str(val) {
-                Ok(decimal) => Ok(ColumnTypeValue::Decimal(ColumnValue::NotNullable(decimal))),
-                Err(e) => Err(ApiError::generate_error(
+        match value {
+            Value::Number(v) => {
+                if v.is_f64() {
+                    return match v.as_f64() {
+                        Some(n) => Ok(
+                            ColumnTypeValue::Decimal(
+                                ColumnValue::NotNullable(
+                                    lexical::to_string(n)
+                                )
+                            )
+                        ),
+                        None => Err(ApiError::generate_error(
+                            "INVALID_JSON_TYPE_CONVERSION",
+                            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+                        ))
+                    };
+                }
+
+                if v.is_u64() {
+                    return match v.as_u64() {
+                        Some(n) => Ok(
+                            ColumnTypeValue::Decimal(
+                                ColumnValue::NotNullable(
+                                    lexical::to_string(n)
+                                )
+                            )
+                        ),
+                        None => Err(ApiError::generate_error(
+                            "INVALID_JSON_TYPE_CONVERSION",
+                            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+                        ))
+                    };
+                }
+
+                if v.is_i64() {
+                    return match v.as_i64() {
+                        Some(n) => Ok(
+                            ColumnTypeValue::Decimal(
+                                ColumnValue::NotNullable(
+                                    lexical::to_string(n)
+                                )
+                            )
+                        ),
+                        None => Err(ApiError::generate_error(
+                            "INVALID_JSON_TYPE_CONVERSION",
+                            format!("Value: `{}`. Column type: `{}`.", value, column_type),
+                        ))
+                    };
+                }
+
+                Err(ApiError::generate_error(
                     "INVALID_JSON_TYPE_CONVERSION",
-                    format!(
-                        "Value: `{}`. Column type: `{}`. Message: `{}`.",
-                        value, column_type, e
-                    ),
-                )),
+                    format!("Value: `{}`. Column type: `{}`.", value, column_type),
+                ))
             },
-            None => Err(ApiError::generate_error(
+            Value::String(v) => {
+                Ok(
+                    ColumnTypeValue::Decimal(
+                        ColumnValue::NotNullable(
+                            v.clone()
+                        )
+                    )
+                )
+            },
+            _ => Err(ApiError::generate_error(
                 "INVALID_JSON_TYPE_CONVERSION",
                 format!("Value: `{}`. Column type: `{}`.", value, column_type),
             )),

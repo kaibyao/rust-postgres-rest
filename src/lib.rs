@@ -9,19 +9,23 @@ extern crate lazy_static;
 #[macro_use]
 extern crate serde;
 #[macro_use]
-extern crate postgres;
+extern crate tokio_postgres;
 
-use actix::{Addr, SyncArbiter};
-use actix_web::{actix, http::Method, App};
+use actix_http::{Error, HttpService, Request, Response};
+use actix_server::{Server, ServerConfig};
+use actix_service::{NewService};
+use actix_web::{App, FromRequest, HttpRequest, HttpResponse, Scope, web};
+use actix_web::dev::{MessageBody, Service};
+use futures::{Async, Future, Poll};
 
 // library modules
 mod queries;
 
 mod db;
-use crate::db::{init_connection_pool, DbExecutor};
+use crate::db::PgConnection;
 
 mod endpoints;
-use endpoints::{get_all_table_names, index, insert_into_table, query_table};
+use endpoints::{get_all_table_names, index, /*insert_into_table, query_table*/};
 
 mod errors;
 
@@ -30,36 +34,71 @@ pub struct AppConfig<'a> {
     pub scope_name: &'a str,
 }
 
-pub struct AppState {
-    db: Addr<DbExecutor>,
+impl<'a> Default for AppConfig<'a> {
+    fn default() -> Self {
+        AppConfig {
+            database_url: "",
+            scope_name: "/api"
+        }
+    }
 }
 
+impl<'a> AppConfig<'a> {
+    pub fn new() -> Self {
+        AppConfig::default()
+    }
+}
+
+
+// struct AppService {
+//     db: PgConnection
+// }
+// impl Service for AppService {
+//     type Error = Error;
+//     type Future = Box<Future<Item = HttpResponse, Error = Error>>;
+//     type Request = HttpRequest;
+//     type Response = HttpResponse;
+
+//     #[inline]
+//     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+//         Ok(Async::Ready(()))
+//     }
+
+//     fn call(&mut self, req: HttpRequest) -> Self::Future {
+//         let path = req.match_info();
+//     }
+// }
+
+// #[derive(Clone)]
+// struct AppFactory;
+
+// impl<'a> NewService for AppFactory {
+//     type Config = AppConfig<'a>;
+//     type Request = Request;
+//     type Response = Response;
+//     type Error = Error;
+//     type Service = AppService;
+//     type InitError = ();
+//     type Future = Box<Future<Item = Self::Service, Error = Self::InitError>>;
+
+//     fn new_service(&self, config: &AppConfig) -> Self::Future {
+//         // create database connection pool
+//         Box::new(PgConnection::connect(config.database_url).map(|db| App {
+//             db,
+//         }))
+//     }
+// }
+
 /// Takes an initialized App and config, and appends the Rest API functionality to the scope’s endpoint.
-pub fn add_rest_api_scope(config: &AppConfig, app: App) -> App {
-    // create database connection pool
-    let pool = init_connection_pool(config.database_url);
-
-    // create a SyncArbiter (Event Loop Controller) with a DbExecutor actor with worker threads == cpu thread
-    let db_addr = SyncArbiter::start(num_cpus::get(), move || DbExecutor(pool.clone()));
-
-    app.scope(config.scope_name, |scope| {
-        scope.with_state(
-            "",
-            AppState {
-                db: db_addr.clone(),
-            },
-            |nested_scope| {
-                nested_scope
-                    .resource("", |r| r.method(Method::GET).f(index))
-                    .resource("/", |r| r.method(Method::GET).f(index))
-                    .resource("/table", |r| {
-                        r.method(Method::GET).a(get_all_table_names);
-                    })
-                    .resource("/{table}", |r| {
-                        r.method(Method::GET).a(query_table);
-                        r.method(Method::POST).with_async(insert_into_table);
-                    })
-            },
+pub fn generate_rest_api_scope(config: &AppConfig) -> Scope {
+    web::scope(config.scope_name)
+        .data(PgConnection::connect(config.database_url))
+        .route("", web::get().to(index))
+        .route("/", web::get().to(index))
+        .route("/table", web::get().to_async(get_all_table_names))
+        .service(
+            web::resource("/{table}")
+                // .route(web::get().to(query_table))
+                // .route(web::post().to(insert_into_table))
         )
-    })
 }

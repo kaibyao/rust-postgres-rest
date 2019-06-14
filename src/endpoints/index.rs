@@ -1,9 +1,7 @@
-use actix_web::{HttpRequest, HttpResponse};
+use actix_web::HttpResponse;
 use serde_json::{json, Value};
 
-use crate::AppState;
-
-pub fn index(_req: &HttpRequest<AppState>) -> HttpResponse {
+pub fn index() -> HttpResponse {
     lazy_static! {
         // static ref TABLE_COLUMN_STAT_HELP: Value = json!({
         //     "column_name": "column_name_string",

@@ -1,4 +1,4 @@
-use actix_web::{error, http, HttpResponse};
+use actix_web::{http, HttpResponse};
 use failure::Fail;
 
 #[derive(Debug, Serialize)]
@@ -51,6 +51,15 @@ impl ApiError {
                 offender,
             },
 
+            "INVALID_JSON_TYPE_CONVERSION" => ApiError::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "The type of the JSON data does not match the type of the database column.".to_string(),
+                http_status: 400,
+                message: "Failed conversion of data from JSON to database column.",
+                offender
+            },
+
             "INVALID_SQL_IDENTIFIER" => ApiError::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
@@ -69,12 +78,12 @@ impl ApiError {
                 offender,
             },
 
-            "SQL_IDENTIFIER_KEYWORD" => ApiError::UserError {
+            "NO_DATABASE_CONNECTION" => ApiError::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
-                details: "`table` is a reserved keyword and cannot be used to name SQL identifiers".to_string(),
-                http_status: 400,
-                message: "There was an identifier (such as table or column name) that used a reserved keyword.",
+                details: "A database client does not exist.".to_string(),
+                http_status: 500,
+                message: "Something went wrong during server startup. Message the admin.",
                 offender,
             },
 
@@ -87,13 +96,13 @@ impl ApiError {
                 offender,
             },
 
-            "INVALID_JSON_TYPE_CONVERSION" => ApiError::UserError {
+            "SQL_IDENTIFIER_KEYWORD" => ApiError::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
-                details: "The type of the JSON data does not match the type of the database column.".to_string(),
+                details: "`table` is a reserved keyword and cannot be used to name SQL identifiers".to_string(),
                 http_status: 400,
-                message: "Failed conversion of data from JSON to database column.",
-                offender
+                message: "There was an identifier (such as table or column name) that used a reserved keyword.",
+                offender,
             },
 
             "UNSUPPORTED_DATA_TYPE" => ApiError::UserError {
@@ -118,19 +127,19 @@ impl ApiError {
     }
 }
 
-impl From<r2d2::Error> for ApiError {
-    fn from(err: r2d2::Error) -> Self {
-        ApiError::InternalError {
-            category: MessageCategory::Error,
-            code: "DATABASE_ERROR_R2D2",
-            details: format!("{}", err),
-            message: "A database error occurred (r2d2).",
-            http_status: 500,
-        }
-    }
-}
-impl From<actix_web::actix::MailboxError> for ApiError {
-    fn from(err: actix_web::actix::MailboxError) -> Self {
+// impl From<r2d2::Error> for ApiError {
+//     fn from(err: r2d2::Error) -> Self {
+//         ApiError::InternalError {
+//             category: MessageCategory::Error,
+//             code: "DATABASE_ERROR_R2D2",
+//             details: format!("{}", err),
+//             message: "A database error occurred (r2d2).",
+//             http_status: 500,
+//         }
+//     }
+// }
+impl From<actix::MailboxError> for ApiError {
+    fn from(err: actix::MailboxError) -> Self {
         ApiError::InternalError {
             category: MessageCategory::Error,
             code: "SEND_MESSAGE_ERROR",
@@ -140,8 +149,8 @@ impl From<actix_web::actix::MailboxError> for ApiError {
         }
     }
 }
-impl From<error::Error> for ApiError {
-    fn from(err: error::Error) -> Self {
+impl From<actix_http::error::Error> for ApiError {
+    fn from(err: actix_http::error::Error) -> Self {
         ApiError::InternalError {
             category: MessageCategory::Error,
             code: "ACTIX_ERROR",
@@ -151,24 +160,24 @@ impl From<error::Error> for ApiError {
         }
     }
 }
-impl From<error::PayloadError> for ApiError {
-    fn from(err: error::PayloadError) -> Self {
+// impl From<actix_web::error::Error> for ApiError {
+//     fn from(err: actix_web::error::Error) -> Self {
+//         ApiError::InternalError {
+//             category: MessageCategory::Error,
+//             code: "ACTIX_ERROR",
+//             details: format!("{}", err),
+//             message: "Error occurred with Actix.",
+//             http_status: 500,
+//         }
+//     }
+// }
+impl From<actix_web::error::PayloadError> for ApiError {
+    fn from(err: actix_web::error::PayloadError) -> Self {
         ApiError::InternalError {
             category: MessageCategory::Error,
             code: "PAYLOAD_ERROR",
             details: format!("{}", err),
             message: "Could not parse request payload.",
-            http_status: 500,
-        }
-    }
-}
-impl From<postgres::Error> for ApiError {
-    fn from(err: postgres::Error) -> Self {
-        ApiError::InternalError {
-            category: MessageCategory::Error,
-            code: "DATABASE_ERROR_POSTGRES",
-            details: format!("{}", err),
-            message: "A database error occurred (postgres).",
             http_status: 500,
         }
     }
@@ -202,9 +211,29 @@ impl From<sqlparser::sqlparser::ParserError> for ApiError {
         }
     }
 }
+impl From<tokio_postgres::Error> for ApiError {
+    fn from(err: tokio_postgres::Error) -> Self {
+        ApiError::InternalError {
+            category: MessageCategory::Error,
+            code: "DATABASE_ERROR_POSTGRES",
+            details: format!("{}", err),
+            message: "A database error occurred (postgres).",
+            http_status: 500,
+        }
+    }
+}
+
+impl futures::future::Future for ApiError {
+    type Item = ();
+    type Error = Self;
+
+    fn poll(&mut self) -> futures::Poll<(), Self::Error> {
+        Ok(futures::Async::Ready(()))
+    }
+}
 
 // How ApiErrors are formatted for an http response
-impl error::ResponseError for ApiError {
+impl actix_web::error::ResponseError for ApiError {
     fn error_response(&self) -> HttpResponse {
         // Used for formatting the ApiErrors that occur to display in an http response.
         #[derive(Debug, Serialize)]

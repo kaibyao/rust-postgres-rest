@@ -1,8 +1,10 @@
 use super::postgres_types::RowFields;
-use super::table_stats::TableStats;
+// use super::table_stats::TableStats;
 use crate::errors::ApiError;
-use crate::AppState;
-use actix_web::{actix::Message, HttpRequest};
+use actix::Message;
+use actix_web::{HttpRequest};
+use futures::{Async, Poll};
+use futures::future::Future;
 use serde_json::{Map, Value};
 
 /// Represents a single SELECT query
@@ -20,58 +22,50 @@ pub struct QueryParamsSelect {
 
 impl QueryParamsSelect {
     /// Fills the struct’s values based on the HttpRequest data.
-    pub fn from_http_request(req: &HttpRequest<AppState>) -> Self {
+    pub fn from_http_request(req: &HttpRequest) -> Self {
         let default_limit = 10000;
         let default_offset = 0;
 
-        let query_params = req.query();
+        let path = req.match_info();
 
         QueryParamsSelect {
-            columns: match query_params.get("columns") {
+            columns: match path.get("columns") {
                 Some(columns_str) => Self::normalize_columns(columns_str),
                 None => vec![],
             },
-            distinct: match query_params.get("distinct") {
+            distinct: match path.get("distinct") {
                 Some(distinct_str) => Some(Self::normalize_columns(distinct_str)),
                 None => None,
             },
-            table: match req.match_info().query("table") {
-                Ok(table_name) => {
-                    let t: String = table_name;
-                    t.to_lowercase()
-                }
-                Err(_) => unreachable!(
-                    "this function should really only be called with a request that contains table"
-                ),
-            },
-            conditions: match query_params.get("where") {
+            table: path.query("table").to_lowercase(),
+            conditions: match path.get("where") {
                 Some(where_string) => Some(where_string.trim().to_lowercase()),
                 None => None,
             },
-            group_by: match query_params.get("group_by") {
+            group_by: match path.get("group_by") {
                 Some(group_by_str) => Some(Self::normalize_columns(group_by_str)),
                 None => None,
             },
-            order_by: match query_params.get("order_by") {
+            order_by: match path.get("order_by") {
                 Some(order_by_str) => Some(Self::normalize_columns(order_by_str)),
                 None => None,
             },
-            limit: match query_params.get("limit") {
+            limit: match path.get("limit") {
                 Some(limit_string) => match limit_string.parse() {
                     Ok(limit_i32) => limit_i32,
                     Err(_) => default_limit,
                 },
                 None => default_limit,
             },
-            offset: match query_params.get("offset") {
+            offset: match path.get("offset") {
                 Some(offset_string) => match offset_string.parse() {
                     Ok(offset_i32) => offset_i32,
                     Err(_) => default_offset,
                 },
                 None => default_offset,
             },
-            prepared_values: match query_params.get("prepared_values") {
-                Some(prepared_values) => Some(prepared_values.clone()),
+            prepared_values: match path.get("prepared_values") {
+                Some(prepared_values) => Some(prepared_values.to_string()),
                 None => None,
             },
         }
@@ -96,18 +90,16 @@ pub struct QueryParamsInsert {
 
 impl QueryParamsInsert {
     /// Fills the struct’s values based on the HttpRequest data.
-    pub fn from_http_request(req: &HttpRequest<AppState>, body: Value) -> Result<Self, ApiError> {
-        let table = match req.match_info().query("table") {
-            Ok(table_name) => table_name,
-            Err(_) => unreachable!("Not possible to reach this endpoint without a table name."),
-        };
+    pub fn from_http_request(req: &HttpRequest, body: Value) -> Result<Self, ApiError> {
+        let path = req.match_info();
+        let table = path.query("table");
 
         // generate ON CONFLICT data
-        let conflict_action = match req.query().get("conflict_action") {
+        let conflict_action = match path.get("conflict_action") {
             Some(action_str) => Some(action_str.to_string().to_lowercase()),
             None => None,
         };
-        let conflict_target: Option<Vec<String>> = match req.query().get("conflict_target") {
+        let conflict_target: Option<Vec<String>> = match path.get("conflict_target") {
             Some(targets_str) => Some(
                 targets_str
                     .split(',')
@@ -153,7 +145,7 @@ impl QueryParamsInsert {
         }
 
         // generate RETURNING data
-        let returning_columns = match req.query().get("returning_columns") {
+        let returning_columns = match path.get("returning_columns") {
             Some(columns_str) => {
                 if columns_str == "" {
                     return Err(ApiError::generate_error(
@@ -206,7 +198,7 @@ impl QueryParamsInsert {
             conflict_target,
             returning_columns,
             rows,
-            table,
+            table: table.to_string(),
         })
     }
 }
@@ -229,12 +221,12 @@ impl Message for Query {
 /// Represents the different query tasks that is performed by this library
 pub enum QueryTasks {
     GetAllTables,
-    InsertIntoTable,
-    // UpsertIntoTable,
-    // DeleteTableRows,
-    // UpdateTableRows,
-    QueryTable,
-    QueryTableStats,
+    // InsertIntoTable,
+    // // UpsertIntoTable,
+    // // DeleteTableRows,
+    // // UpdateTableRows,
+    // QueryTable,
+    // QueryTableStats,
 }
 
 #[derive(Serialize)]
@@ -249,7 +241,21 @@ pub enum QueryResult {
     GetAllTablesResult(Vec<String>),
     QueryTableResult(Vec<RowFields>),
     RowsAffected(RowsAffectedQueryResult),
-    TableStats(TableStats),
+    // TableStats(TableStats),
+    Empty(()),
+}
+
+impl Future for QueryResult {
+    type Item = Self;
+    type Error = ApiError;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        Ok(
+            Async::Ready(
+                QueryResult::Empty(())
+            )
+        )
+    }
 }
 
 impl QueryResult {

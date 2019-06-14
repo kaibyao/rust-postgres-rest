@@ -2,25 +2,24 @@
 
 #![deny(clippy::complexity, clippy::correctness, clippy::perf, clippy::style)]
 
-use actix_web::{actix::System, server, App};
+use actix::System;
+use actix_web::{HttpServer, App};
 use experiment00::{add_rest_api_scope, AppConfig};
 
 fn main() {
-    let actix_system_actor = System::new("experiment00");
+    let sys = System::new("experiment00"); // create Actix runtime
     let ip_address = "127.0.0.1:8000";
 
-    // start server
-    server::new(move || {
+    // start 1 server on each cpu thread
+    HttpServer::new(move || {
         let app = App::new();
 
-        println!("Running server on {}", ip_address);
+        let mut config = AppConfig::new();
+        config.database_url = "postgresql://kaiby@localhost:5432/crossroads";
 
         // appends an actix-web Scope under the "/api" endpoint to app and returns it
         add_rest_api_scope(
-            &AppConfig {
-                database_url: "postgresql://kaiby@localhost:5432/crossroads",
-                scope_name: "/api",
-            },
+            &config,
             app,
         )
     })
@@ -28,5 +27,7 @@ fn main() {
     .expect("Can not bind to port 8000")
     .run();
 
-    actix_system_actor.run();
+    println!("Running server on {}", ip_address);
+
+    sys.run();
 }
