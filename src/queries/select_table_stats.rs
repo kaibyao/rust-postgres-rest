@@ -165,7 +165,7 @@ pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>,
     })
 }
 
-fn select_column_stats_statement(client: &mut Client, table: &str) -> Prepare {
+pub fn select_column_stats_statement(client: &mut Client, table: &str) -> Prepare {
     let statement_str = &format!("
 WITH foreign_keys as (
     SELECT

@@ -14,14 +14,6 @@ pub struct PgConnection;
 //     //     query_table(self.client, msg)
 //     // }
 
-//     // pub fn get_table_stats(&self, msg: Query) -> impl Future<Item = QueryResult, Error = ApiError> {
-//     //     match msg.params {
-//     //         QueryParams::Select(params) => get_table_stats(self.client, params.table),
-//     //         _ => unreachable!("QueryTableStats should never be reached unless QueryParams is of the Select variant.")
-//     //     }
-//     // }
-// }
-
 pub type Pool = bb8::Pool<PostgresConnectionManager<NoTls>>;
 
 impl PgConnection {

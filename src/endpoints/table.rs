@@ -2,13 +2,14 @@ use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::web::Json;
 use actix_web::{web, HttpRequest, HttpResponse};
+use futures::future::Either;
 use futures::stream::Stream;
-use futures::{future, Future};
+use futures::Future;
 use tokio_postgres::{Client, Error};
 
 use crate::db::Pool;
 use crate::errors::ApiError;
-use crate::queries::{select_all_tables, select_table_stats};
+use crate::queries::{select_all_tables, /*select_table_rows, */select_table_stats};
 use crate::queries::query_types::{
     Query, QueryParams, QueryParamsInsert, QueryParamsSelect, QueryTasks,
 };
@@ -61,35 +62,22 @@ pub fn get_all_table_names(
 pub fn query_table(req: HttpRequest, db: web::Data<Pool>) -> impl Future<Item = HttpResponse, Error = ApiError> {
     let params = QueryParamsSelect::from_http_request(&req);
 
-    // let task = if params.columns.is_empty() {
-    //     QueryTasks::QueryTableStats
-    // } else {
-    //     QueryTasks::QueryTable
-    // };
-
-    // let query = Query {
-    //     params: QueryParams::Select(params),
-    //     task,
-    // };
-
     // if params.columns.is_empty() {
-        get_table_stats(db, params.table)
+    //     Either::A(get_table_stats(db, params.table))
     // } else {
-    //     get_table_rows(db)
+    //     Either::B(get_table_rows(db, params))
     // }
-
-    // req.state()
-    //     .db
-    //     .send(query)
-    //     .from_err()
-    //     .and_then(|res| match res {
-    //         Ok(rows) => Ok(HttpResponse::Ok().json(rows)),
-    //         Err(err) => Err(err),
-    //     })
-    //     .responder()
+    get_table_stats(db, params.table)
 }
 
-// fn get_table_rows(db: web::Data<Pool>) -> impl Future<Item = HttpResponse, Error = ApiError> {}
+// fn get_table_rows(db: web::Data<Pool>, params: QueryParamsSelect) -> impl Future<Item = HttpResponse, Error = ApiError> {
+//     db.run(|client| select_table_rows(client, params))
+//         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
+//         .or_else(|e| {
+//             let err = ApiError::from(e);
+//             Err(err)
+//         })
+// }
 
 fn get_table_stats(db: web::Data<Pool>, table: String) -> impl Future<Item = HttpResponse, Error = ApiError> {
     db.run(|client| select_table_stats(client, table))
