@@ -1,11 +1,10 @@
-use futures::future::{err, join_all, lazy, ok, Either, Future, FutureResult};
+use futures::future::Future;
 use sqlparser::{
     dialect::PostgreSqlDialect,
     sqlast::{ASTNode, SQLQuery, SQLSelect, SQLSetExpr, SQLStatement},
     sqlparser::Parser,
 };
 use std::borrow::BorrowMut;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use tokio_postgres::Client;
 
