@@ -10,7 +10,7 @@ pub fn index() -> HttpResponse {
         //     "is_nullable": "whether NULL can be a column value (default true)",
         //     "is_foreign_key": "whether this column references another table column (default false)",
         //     "foreign_key_table": "table being referenced (if is_foreign_key). Default null",
-        //     "foreign_key_columns": "table column being referenced (if is_foreign_key). Default null",
+        //     "foreign_key_column": "table column being referenced (if is_foreign_key). Default null",
         //     "char_max_length": "If data_type identifies a character or bit string type, the declared maximum length; null for all other data types or if no maximum length was declared.",
         //     "char_octet_length": "If data_type identifies a character type, the maximum possible length in octets (bytes) of a datum; null for all other data types. The maximum octet length depends on the declared character maximum length (see above) and the server encoding.",
         // });

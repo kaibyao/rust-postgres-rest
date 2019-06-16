@@ -22,7 +22,7 @@ pub struct TableColumnStat {
     /// table being referenced (if is_foreign_key)
     pub foreign_key_table: Option<String>,
     /// table column being referenced (if is_foreign_key)
-    pub foreign_key_columns: Option<String>,
+    pub foreign_key_column: Option<String>,
     /// If data_type identifies a character or bit string type, the declared maximum length; null for all other data types or if no maximum length was declared.
     pub char_max_length: Option<i32>,
     /// If data_type identifies a character type, the maximum possible length in octets (bytes) of a datum; null for all other data types. The maximum octet length depends on the declared character maximum length (see above) and the server encoding.
@@ -153,7 +153,7 @@ pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>,
             },
             is_foreign_key: row.get(6),
             foreign_key_table: row.get(7),
-            foreign_key_columns: row.get(8),
+            foreign_key_column: row.get(8),
             char_max_length: row.get(3),
             char_octet_length: row.get(4),
         }

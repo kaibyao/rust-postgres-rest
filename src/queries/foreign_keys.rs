@@ -1,4 +1,4 @@
-use futures::future::{lazy, Either, Future, FutureResult, join_all, ok};
+use futures::future::{lazy, Either, err, Future, FutureResult, join_all, ok};
 use sqlparser::{
     dialect::PostgreSqlDialect,
     sqlast::{ASTNode, SQLQuery, SQLSelect, SQLSetExpr, SQLStatement},
@@ -396,20 +396,20 @@ impl ForeignKeyReference {
         }
 
         // group child columns & original column references by the parent column being referenced
-        let mut fk_columns_grouped: HashMap<&str, (Vec<&str>, Vec<String>)> = HashMap::new();
+        let mut fk_columns_grouped: HashMap<String, (Vec<String>, Vec<String>)> = HashMap::new();
         for col in fk_columns.into_iter() {
             if let Some(dot_index) = col.find('.') {
                 if let (Some(parent_col_name), Some(child_column)) =
                     (col.get(0..dot_index), col.get(dot_index..))
                 {
                     if !fk_columns_grouped.contains_key(parent_col_name) {
-                        fk_columns_grouped.insert(parent_col_name, (vec![child_column], vec![col]));
+                        fk_columns_grouped.insert(parent_col_name.to_string(), (vec![child_column.to_string()], vec![col]));
                     } else {
                         let (child_columns, original_refs) =
                             fk_columns_grouped.get_mut(parent_col_name).unwrap();
 
-                        child_columns.push(child_column);
-                        original_refs.push(col);
+                        child_columns.push(child_column.to_string());
+                        original_refs.push(col.clone());
                     }
                 }
             }
@@ -422,7 +422,7 @@ impl ForeignKeyReference {
                 Ok(statement) => Ok((client.query(&statement, &[]), client)),
                 Err(e) => Err((e, client)),
             })
-            .map(|(mut query, client)| {
+            .map(|(query, client)| {
                 select_column_stats(query)
                     .then(move |result| match result {
                         Ok(stats) => { Ok((stats, client)) },
@@ -439,16 +439,16 @@ impl ForeignKeyReference {
                 let filtered_stats: Vec<TableColumnStat> = stats.into_iter().filter(|stat| {
                     if !stat.is_foreign_key { return false; }
 
-                    match fk_columns_grouped
-                        .into_iter()
+                    match &fk_columns_grouped
+                        .iter()
                         .find(|(parent_col, _child_col_vec)| *parent_col == &stat.column_name) {
                             Some((
                                 matched_parent_fk_column,
                                 (matched_child_col_vec, matched_orig_refs),
                             )) => {
                                 matched_columns.push((
-                                    matched_parent_fk_column.to_string(),
-                                    matched_child_col_vec.iter().map(|s| s.to_string()).collect(),
+                                    matched_parent_fk_column,
+                                    matched_child_col_vec,
                                     matched_orig_refs,
                                 ));
                                 true
@@ -458,76 +458,83 @@ impl ForeignKeyReference {
                 }).collect();
 
                 // stats and matched_columns should have the same length and their indexes should match
-                join_all(ForeignKeyReference::stats_to_fkr_futures(table_string, filtered_stats, matched_columns, client))
-                    .then(move |result| match result {
-                        Ok(fkrs) => Ok((fkrs, client)),
-                        Err(e) => Err((e, client))
-                    })
-            })
-            .flatten();
+
+                // Map the Vec of `TableColumnStat`s to a Vec of `ForeignKeyReference`
+                let fkrs_result: Result<Vec<Self>, ApiError> = filtered_stats.iter().enumerate().map(move |(i, stat)| -> Result<Self, ApiError> {
+                    let (_parent_col_match, child_columns_match, original_refs_match) = &matched_columns[i];
+
+                    let original_refs = original_refs_match.iter().map(|col| col.to_string()).collect();
+                    let foreign_key_table = if let Some(t) = &stat.foreign_key_table { t.clone() } else { "".to_string() };
+
+                    // filter child columns to just the foreign keys
+                    let child_fk_columns: Vec<&str> = child_columns_match
+                        .iter()
+                        .filter_map(|child_col| {
+                            if !child_col.contains('.') {
+                                return None;
+                            }
+
+                            let first_dot_pos = child_col.find('.').unwrap();
+                            Some(&child_col[first_dot_pos + 1..])
+                        })
+                        .collect();
+
+                    // child column is not a foreign key, return future with ForeignKeyReference
+                    if child_fk_columns.is_empty() {
+                        return Ok(ForeignKeyReference {
+                            referring_column: stat.column_name.clone(),
+                            referring_table: table_string,
+                            table_referred: foreign_key_table,
+                            foreign_key_column: if let Some(t) = &stat.foreign_key_column { t.clone() } else { "".to_string() },
+                            nested_fks: vec![],
+                            original_refs,
+                        });
+                    }
+
+                    // child columns are all FKs, so we need to recursively call this function
+                    // TODO: [Kai@2019-06-15]: I'm not really happy that we have to block the async (otherwise rust throws E0720 at me), we should look at this again after async/await syntax changes come out
+                    match Self::from_query_columns(client, &foreign_key_table, &child_fk_columns).wait() {
+                        Ok((nested_fks, client)) => Ok(ForeignKeyReference {
+                            referring_column: stat.column_name,
+                            referring_table: table_string,
+                            table_referred: foreign_key_table,
+                            foreign_key_column: stat
+                                .foreign_key_column
+                                .unwrap_or_else(String::new),
+                            nested_fks,
+                            original_refs,
+                        }),
+                        Err((e, client)) => Err(e)
+                    }
+                }).collect();
+
+                match fkrs_result {
+                    Ok(fkrs) => ok((fkrs, client)),
+                    Err(e) => err((e, client))
+                }
+                // match ForeignKeyReference::stats_to_fkrs(table_string, filtered_stats, matched_columns, client) {
+                //     Ok(fkrs) => ok((fkrs, client)),
+                //     Err(e) => err((e, client))
+                // }
+                // join_all(ForeignKeyReference::stats_to_fkrs(table_string, filtered_stats, matched_columns, client))
+                //     .then(move |result| match result {
+                //         Ok((fkrs, client)) => Ok((fkrs, client)),
+                //         Err((e, client)) => Err((e, client))
+                //     })
+            }).flatten();
 
         Either::B(process_column_stats_future)
     }
 
-    /// Maps a Vec of `TableColumnStat`s to a Future wrapping a Vec of `ForeignKeyReference`s. Used by from_query_columns.
-    fn stats_to_fkr_futures(
-        table: String,
-        stats: Vec<TableColumnStat>,
-        matched_columns: Vec<(String, Vec<String>, Vec<String>)>,
-        client: Client,
-    ) -> Vec<impl Future<Item = Self, Error = ApiError>> {
-        stats.iter().enumerate().map(|(i, stat)| {
-            let (_parent_col_match, child_columns_match, original_refs_match) = matched_columns[i];
+    /// Maps a Vec of `TableColumnStat`s to a Vec of `ForeignKeyReference`. Used by from_query_columns.
+    // fn stats_to_fkrs(
+    //     table: String,
+    //     stats: Vec<TableColumnStat>,
+    //     matched_columns: Vec<(String, Vec<String>, Vec<String>)>,
+    //     client: Client,
+    // ) -> Result<Vec<Self>, ApiError> {
 
-            let original_refs = original_refs_match.iter().map(|col| col.to_string()).collect();
-            let foreign_key_table = stat.foreign_key_table.unwrap();
-
-            // filter child columns to just the foreign keys
-            let child_fk_columns: Vec<&str> = child_columns_match
-                .iter()
-                .filter_map(|&child_col| {
-                    if !child_col.contains('.') {
-                        return None;
-                    }
-
-                    let first_dot_pos = child_col.find('.').unwrap();
-                    Some(&child_col[first_dot_pos + 1..])
-                })
-                .collect();
-
-            // child column is not a foreign key, return future with ForeignKeyReference
-            if child_fk_columns.is_empty() {
-                let no_child_columns_fut = ok::<ForeignKeyReference, ApiError>(ForeignKeyReference {
-                    referring_column: stat.column_name,
-                    referring_table: table,
-                    table_referred: foreign_key_table,
-                    foreign_key_column: stat.foreign_key_columns.unwrap_or_else(String::new),
-                    nested_fks: vec![],
-                    original_refs,
-                });
-
-                return Either::A(no_child_columns_fut);
-            }
-
-            // child columns are all FKs, so we need to recursively call this function
-            let child_columns_future = Self::from_query_columns(client, &foreign_key_table, &child_fk_columns)
-                .then(|result| match result {
-                    Ok((nested_fks, client)) => Ok(ForeignKeyReference {
-                        referring_column: stat.column_name,
-                        referring_table: table,
-                        table_referred: foreign_key_table,
-                        foreign_key_column: stat
-                            .foreign_key_columns
-                            .unwrap_or_else(String::new),
-                        nested_fks,
-                        original_refs,
-                    }),
-                    Err((e, client)) => Err(e)
-                });
-
-            Either::B(child_columns_future)
-        }).collect()
-    }
+    // }
 
     /// Given an array of ForeignKeyReference, find the one that matches a given table and column name, as well as the matching foreign key table column.
     pub fn find<'a>(refs: &'a [Self], table: &str, col: &'a str) -> Option<(&'a Self, &'a str)> {
