@@ -10,8 +10,8 @@ pub struct PgConnection;
 //     //     insert_into_table(self.client, msg)
 //     // }
 
-//     // pub fn query_table(&self, msg: Query) -> impl Future<Item = QueryResult, Error = ApiError> {
-//     //     query_table(self.client, msg)
+//     // pub fn get_table(&self, msg: Query) -> impl Future<Item = QueryResult, Error = ApiError> {
+//     //     get_table(self.client, msg)
 //     // }
 
 pub type Pool = bb8::Pool<PostgresConnectionManager<NoTls>>;

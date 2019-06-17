@@ -20,7 +20,7 @@ mod db;
 use crate::db::PgConnection;
 
 mod endpoints;
-use endpoints::{get_all_table_names, index/*, insert_into_table*/, query_table};
+use endpoints::{get_all_table_names, index, post_table, get_table};
 
 mod errors;
 
@@ -55,7 +55,7 @@ pub fn generate_rest_api_scope(config: &AppConfig) -> Scope {
         .route("/table", web::get().to_async(get_all_table_names))
         .service(
             web::resource("/{table}")
-                .route(web::get().to_async(query_table))
-                                       // .route(web::post().to(insert_into_table))
+                .route(web::get().to_async(get_table))
+                .route(web::post().to_async(post_table))
         )
 }

@@ -1,5 +1,5 @@
-// mod insert_into_table;
-// pub use self::insert_into_table::insert_into_table;
+mod insert_into_table;
+pub use self::insert_into_table::insert_into_table;
 
 mod select_all_tables;
 pub use select_all_tables::select_all_tables;

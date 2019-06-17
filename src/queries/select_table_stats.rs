@@ -105,32 +105,27 @@ pub fn select_table_stats(
         }
         Err(e) => Err((e, client)),
     })
-    .then(move |result| match result {
+    .and_then(|(mut queries, client)| {
         // compile the results of the sub-operations into final stats
-        Ok((mut queries, client)) => {
-            let column_stats_q = queries.pop().unwrap();
-            let indexes_q = queries.pop().unwrap();
-            let constraints_q = queries.pop().unwrap();
-            let count_q = queries.pop().unwrap();
+        let column_stats_q = queries.pop().unwrap();
+        let indexes_q = queries.pop().unwrap();
+        let constraints_q = queries.pop().unwrap();
+        let count_q = queries.pop().unwrap();
 
-            let count_f = select_row_count(count_q);
-            let constraints_f = select_constraints(constraints_q);
-            let indexes_f = select_indexes(indexes_q);
-            let column_stats_f = select_column_stats(column_stats_q);
+        let count_f = select_row_count(count_q);
+        let constraints_f = select_constraints(constraints_q);
+        let indexes_f = select_indexes(indexes_q);
+        let column_stats_f = select_column_stats(column_stats_q);
 
-            let compile_f = count_f
-                .join4(constraints_f, indexes_f, column_stats_f)
-                .then(move |result| match result {
-                    Ok((row_count, constraints, indexes, column_stats)) => Ok((
-                        compile_table_stats(&table, row_count, constraints, indexes, column_stats),
-                        client,
-                    )),
-                    Err(e) => Err((e, client)),
-                });
-
-            Either::A(compile_f)
-        }
-        Err((e, client)) => Either::B(err((e, client))),
+        count_f
+            .join4(constraints_f, indexes_f, column_stats_f)
+            .then(move |result| match result {
+                Ok((row_count, constraints, indexes, column_stats)) => Ok((
+                    compile_table_stats(&table, row_count, constraints, indexes, column_stats),
+                    client,
+                )),
+                Err(e) => Err((e, client)),
+            })
     })
     .map_err(|(e, client)| (ApiError::from(e), client));
 

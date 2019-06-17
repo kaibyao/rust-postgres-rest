@@ -1,11 +1,37 @@
+
 use super::postgres_types::RowFields;
-// use super::table_stats::TableStats;
 use crate::errors::ApiError;
-use actix::Message;
-use actix_web::{HttpRequest};
-use futures::{Async, Poll};
-use futures::future::Future;
+use actix_web::HttpRequest;
 use serde_json::{Map, Value};
+
+#[derive(Debug, Deserialize)]
+/// All possible query string parameters in an API request
+pub struct RequestQueryStringParams {
+    /// Comma-separated list of column names for which values are retrieved.
+    pub columns: Option<String>,
+    /// This param is required in order for DELETE operation to process.
+    pub confirm_delete: Option<String>,
+    /// The `ON CONFLICT` action to perform (`update` or `nothing`) for POSTing to the table endpoint (to insert new rows).
+    pub conflict_action: Option<String>,
+    /// Used in conjunction with `conflict_action`. Comma-separated list of columns that determine if a row being inserted conflicts with an existing row.
+    pub conflict_target: Option<String>,
+    /// A comma-separated list of column names for which rows that have duplicate values are excluded (in a GET/SELECT statement).
+    pub distinct: Option<String>,
+    /// The WHERE clause of the SQL statement. Remember to URI-encode the final result. NOTE: $1, $2, etc. can be used in combination with `prepared_values` to create prepared statements (see https://www.postgresql.org/docs/current/sql-prepare.html).
+    pub r#where: Option<String>,
+    /// Comma-separated list representing the field(s) on which to group the resulting rows (in a GET/SELECT statement).
+    pub group_by: Option<String>,
+    /// Comma-separated list representing the field(s) on which to sort the resulting rows (in a GET/SELECT statement).
+    pub order_by: Option<String>,
+    /// The maximum number of rows that can be returned (in a GET/SELECT statement).
+    pub limit: Option<usize>,
+    /// The number of rows to exclude (in a GET/SELECT statement).
+    pub offset: Option<usize>,
+    /// If the WHERE clause contains ${number}, this comma-separated list of values is used to substitute the numbered parameters.
+    pub prepared_values: Option<String>,
+    /// Comma-separated list of columns to return from the POST/INSERT operation.
+    pub returning_columns: Option<String>,
+}
 
 /// Represents a single SELECT query
 pub struct QueryParamsSelect {
@@ -15,56 +41,51 @@ pub struct QueryParamsSelect {
     pub conditions: Option<String>,
     pub group_by: Option<Vec<String>>,
     pub order_by: Option<Vec<String>>,
-    pub limit: i32,
-    pub offset: i32,
+    pub limit: usize,
+    pub offset: usize,
     pub prepared_values: Option<String>,
 }
 
 impl QueryParamsSelect {
     /// Fills the struct’s values based on the HttpRequest data.
-    pub fn from_http_request(req: &HttpRequest) -> Self {
+    pub fn from_http_request(
+        req: &HttpRequest,
+        query_string_params: RequestQueryStringParams,
+    ) -> Self {
         let default_limit = 10000;
         let default_offset = 0;
 
-        let path = req.match_info();
-
         QueryParamsSelect {
-            columns: match path.get("columns") {
-                Some(columns_str) => Self::normalize_columns(columns_str),
+            columns: match query_string_params.columns {
+                Some(columns_str) => Self::normalize_columns(&columns_str),
                 None => vec![],
             },
-            distinct: match path.get("distinct") {
-                Some(distinct_str) => Some(Self::normalize_columns(distinct_str)),
+            distinct: match query_string_params.distinct {
+                Some(distinct_str) => Some(Self::normalize_columns(&distinct_str)),
                 None => None,
             },
-            table: path.query("table").to_lowercase(),
-            conditions: match path.get("where") {
+            table: req.match_info().query("table").to_lowercase(),
+            conditions: match query_string_params.r#where {
                 Some(where_string) => Some(where_string.trim().to_lowercase()),
                 None => None,
             },
-            group_by: match path.get("group_by") {
-                Some(group_by_str) => Some(Self::normalize_columns(group_by_str)),
+            group_by: match query_string_params.group_by {
+                Some(group_by_str) => Some(Self::normalize_columns(&group_by_str)),
                 None => None,
             },
-            order_by: match path.get("order_by") {
-                Some(order_by_str) => Some(Self::normalize_columns(order_by_str)),
+            order_by: match query_string_params.order_by {
+                Some(order_by_str) => Some(Self::normalize_columns(&order_by_str)),
                 None => None,
             },
-            limit: match path.get("limit") {
-                Some(limit_string) => match limit_string.parse() {
-                    Ok(limit_i32) => limit_i32,
-                    Err(_) => default_limit,
-                },
+            limit: match query_string_params.limit {
+                Some(limit) => limit,
                 None => default_limit,
             },
-            offset: match path.get("offset") {
-                Some(offset_string) => match offset_string.parse() {
-                    Ok(offset_i32) => offset_i32,
-                    Err(_) => default_offset,
-                },
+            offset: match query_string_params.offset {
+                Some(offset) => offset,
                 None => default_offset,
             },
-            prepared_values: match path.get("prepared_values") {
+            prepared_values: match query_string_params.prepared_values {
                 Some(prepared_values) => Some(prepared_values.to_string()),
                 None => None,
             },
@@ -79,6 +100,7 @@ impl QueryParamsSelect {
     }
 }
 
+#[derive(Debug)]
 /// Represents a single INSERT query
 pub struct QueryParamsInsert {
     pub conflict_action: Option<String>,
@@ -90,16 +112,17 @@ pub struct QueryParamsInsert {
 
 impl QueryParamsInsert {
     /// Fills the struct’s values based on the HttpRequest data.
-    pub fn from_http_request(req: &HttpRequest, body: Value) -> Result<Self, ApiError> {
-        let path = req.match_info();
-        let table = path.query("table");
-
+    pub fn from_http_request(
+        req: &HttpRequest,
+        body: Value,
+        query_string_params: RequestQueryStringParams,
+    ) -> Result<Self, ApiError> {
         // generate ON CONFLICT data
-        let conflict_action = match path.get("conflict_action") {
+        let conflict_action = match query_string_params.conflict_action {
             Some(action_str) => Some(action_str.to_string().to_lowercase()),
             None => None,
         };
-        let conflict_target: Option<Vec<String>> = match path.get("conflict_target") {
+        let conflict_target: Option<Vec<String>> = match query_string_params.conflict_target {
             Some(targets_str) => Some(
                 targets_str
                     .split(',')
@@ -145,7 +168,7 @@ impl QueryParamsInsert {
         }
 
         // generate RETURNING data
-        let returning_columns = match path.get("returning_columns") {
+        let returning_columns = match query_string_params.returning_columns {
             Some(columns_str) => {
                 if columns_str == "" {
                     return Err(ApiError::generate_error(
@@ -198,35 +221,9 @@ impl QueryParamsInsert {
             conflict_target,
             returning_columns,
             rows,
-            table: table.to_string(),
+            table: req.match_info().query("table").to_lowercase(),
         })
     }
-}
-
-pub enum QueryParams {
-    Select(QueryParamsSelect),
-    Insert(QueryParamsInsert),
-}
-
-/// Represents a database task (w/ included query) to be performed by DbExecutor
-pub struct Query {
-    pub params: QueryParams,
-    pub task: QueryTasks,
-}
-
-impl Message for Query {
-    type Result = Result<QueryResult, ApiError>;
-}
-
-/// Represents the different query tasks that is performed by this library
-pub enum QueryTasks {
-    GetAllTables,
-    // InsertIntoTable,
-    // // UpsertIntoTable,
-    // // DeleteTableRows,
-    // // UpdateTableRows,
-    // QueryTable,
-    // QueryTableStats,
 }
 
 #[derive(Serialize)]
@@ -238,24 +235,8 @@ pub struct RowsAffectedQueryResult {
 #[serde(untagged)]
 /// Represents the response from sending a QueryTask to DbExecutor
 pub enum QueryResult {
-    GetAllTablesResult(Vec<String>),
     QueryTableResult(Vec<RowFields>),
     RowsAffected(RowsAffectedQueryResult),
-    // TableStats(TableStats),
-    Empty(()),
-}
-
-impl Future for QueryResult {
-    type Item = Self;
-    type Error = ApiError;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        Ok(
-            Async::Ready(
-                QueryResult::Empty(())
-            )
-        )
-    }
 }
 
 impl QueryResult {

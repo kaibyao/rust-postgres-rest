@@ -1,17 +1,19 @@
 use crate::errors::ApiError;
+
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use eui48::MacAddress as Eui48MacAddress;
+
+use postgres_protocol::types::{macaddr_from_sql, macaddr_to_sql};
+use rust_decimal::Decimal;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::error::Error as StdError;
+use std::str::FromStr;
 use tokio_postgres::{
     accepts,
     row::Row,
     types::{FromSql, IsNull, ToSql, Type},
 };
-use postgres_protocol::types::{macaddr_from_sql, macaddr_to_sql};
-use lexical;
-use serde_json::Value;
-use std::collections::HashMap;
-use std::error::Error as StdError;
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// we have to define our own MacAddress type in order for Serde to serialize it properly.
@@ -48,7 +50,10 @@ pub enum ColumnValue<T> {
     NotNullable(T),
 }
 
-impl<'a, T> FromSql<'a> for ColumnValue<T> where T: FromSql<'a> {
+impl<'a, T> FromSql<'a> for ColumnValue<T>
+where
+    T: FromSql<'a>,
+{
     fn accepts(ty: &Type) -> bool {
         <T as FromSql>::accepts(ty)
     }
@@ -72,7 +77,10 @@ impl<'a, T> FromSql<'a> for ColumnValue<T> where T: FromSql<'a> {
     }
 }
 
-impl<T> ToSql for ColumnValue<T> where T: ToSql {
+impl<T> ToSql for ColumnValue<T>
+where
+    T: ToSql,
+{
     fn to_sql(
         &self,
         ty: &Type,
@@ -102,7 +110,7 @@ pub enum ColumnTypeValue {
     Char(ColumnValue<String>), // apparently it's a bad practice to use char(n)
     Citext(ColumnValue<String>),
     Date(ColumnValue<NaiveDate>),
-    Decimal(ColumnValue<String>),
+    Decimal(ColumnValue<Decimal>),
     Float8(ColumnValue<f64>),
     HStore(ColumnValue<HashMap<String, Option<String>>>),
     Int(ColumnValue<i32>),
@@ -249,71 +257,18 @@ impl ColumnTypeValue {
     }
 
     fn convert_json_value_to_decimal(column_type: &str, value: &Value) -> Result<Self, ApiError> {
-        match value {
-            Value::Number(v) => {
-                if v.is_f64() {
-                    return match v.as_f64() {
-                        Some(n) => Ok(
-                            ColumnTypeValue::Decimal(
-                                ColumnValue::NotNullable(
-                                    lexical::to_string(n)
-                                )
-                            )
-                        ),
-                        None => Err(ApiError::generate_error(
-                            "INVALID_JSON_TYPE_CONVERSION",
-                            format!("Value: `{}`. Column type: `{}`.", value, column_type),
-                        ))
-                    };
-                }
-
-                if v.is_u64() {
-                    return match v.as_u64() {
-                        Some(n) => Ok(
-                            ColumnTypeValue::Decimal(
-                                ColumnValue::NotNullable(
-                                    lexical::to_string(n)
-                                )
-                            )
-                        ),
-                        None => Err(ApiError::generate_error(
-                            "INVALID_JSON_TYPE_CONVERSION",
-                            format!("Value: `{}`. Column type: `{}`.", value, column_type),
-                        ))
-                    };
-                }
-
-                if v.is_i64() {
-                    return match v.as_i64() {
-                        Some(n) => Ok(
-                            ColumnTypeValue::Decimal(
-                                ColumnValue::NotNullable(
-                                    lexical::to_string(n)
-                                )
-                            )
-                        ),
-                        None => Err(ApiError::generate_error(
-                            "INVALID_JSON_TYPE_CONVERSION",
-                            format!("Value: `{}`. Column type: `{}`.", value, column_type),
-                        ))
-                    };
-                }
-
-                Err(ApiError::generate_error(
+        match value.as_str() {
+            Some(val) => match Decimal::from_str(val) {
+                Ok(decimal) => Ok(ColumnTypeValue::Decimal(ColumnValue::NotNullable(decimal))),
+                Err(e) => Err(ApiError::generate_error(
                     "INVALID_JSON_TYPE_CONVERSION",
-                    format!("Value: `{}`. Column type: `{}`.", value, column_type),
-                ))
+                    format!(
+                        "Value: `{}`. Column type: `{}`. Message: `{}`.",
+                        value, column_type, e
+                    ),
+                )),
             },
-            Value::String(v) => {
-                Ok(
-                    ColumnTypeValue::Decimal(
-                        ColumnValue::NotNullable(
-                            v.clone()
-                        )
-                    )
-                )
-            },
-            _ => Err(ApiError::generate_error(
+            None => Err(ApiError::generate_error(
                 "INVALID_JSON_TYPE_CONVERSION",
                 format!("Value: `{}`. Column type: `{}`.", value, column_type),
             )),
