@@ -1,3 +1,5 @@
+// async/await
+// #![feature(async_await, await_macro, futures_api)]
 // used for dev/tests
 #![deny(clippy::complexity, clippy::correctness, clippy::perf, clippy::style)]
 // to serialize large json (like the index)
@@ -11,9 +13,8 @@ extern crate serde;
 #[macro_use]
 extern crate tokio_postgres;
 
-use actix_web::{Scope, web};
-
 // library modules
+use actix_web::{Scope, web};
 mod queries;
 
 mod db;

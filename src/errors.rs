@@ -252,7 +252,7 @@ struct DisplayUserError<'a> {
 }
 
 /// Used for formatting the ApiErrors that occur to display in an http response.
-/// Not sure why ResponseError::error_response() isn't working for ApiError.
+/// Not sure why ResponseError::error_response() isn't working for ApiError with actix 1.0.2, it was working in 0.7.
 pub fn error_response<E>(e: E) -> HttpResponse
 where
     ApiError: From<E>,

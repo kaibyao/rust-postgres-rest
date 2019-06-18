@@ -422,17 +422,23 @@ impl ForeignKeyReference {
 
         // get column stats for table
 
-        // let fk_columns_grouped_borrow = RefCell::new(fk_columns_grouped);
-        // let table_borrow = RefCell::new(table.to_string());
-
+        dbg!(&fk_columns_grouped);
         let (stats, mut client) = select_column_stats_statement(&mut client, table)
             .then(move |result| match result {
-                Ok(statement) => Ok((client.query(&statement, &[]), client)),
+                Ok(statement) => {
+                    let query = client.query(&statement, &[]);
+                    drop(statement);
+                    dbg!("query happened");
+                    Ok((query, client))
+                },
                 Err(e) => Err((e, client)),
             })
             .map(|(query, client)| {
                 select_column_stats(query).then(move |result| match result {
-                    Ok(stats) => Ok((stats, client)),
+                    Ok(stats) => {
+                        dbg!(&stats);
+                        Ok((stats, client))
+                    },
                     Err(e) => Err((e, client)),
                 })
             })
@@ -441,6 +447,21 @@ impl ForeignKeyReference {
             // TODO: [Kai@2019-06-15]: I'm not really happy that we have to block the async (otherwise rust throws E0720 at me), we should look at this again after async/await syntax changes come out
             .wait()?;
 
+
+
+        // let statement = match select_column_stats_statement(&mut client, table).wait() {
+        //     Ok(statement) => statement,
+        //     Err(e) => return Err((ApiError::from(e), client))
+        // };
+        // dbg!("got statement");
+        // let query = client.query(&statement, &[]);
+        // dbg!("got query");
+        // let stats = match select_column_stats(query).wait() {
+        //     Ok(stats) => stats,
+        //     Err(e) => return Err((ApiError::from(e), client))
+        // };
+
+        dbg!(&stats);
         // contains a (&str, &Vec<&str>, &Vec<&str>) tuple representing the matched parent column name, child columns, and original column strings
         let mut matched_columns = vec![];
 
