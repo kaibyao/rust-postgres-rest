@@ -83,7 +83,7 @@ pub fn select_table_rows(
             }
         };
 
-    // dbg!(&fk_columns);
+    dbg!(&fk_columns);
 
     let (statement_str, prepared_values) =
         match build_select_statement(&params, fk_columns, where_ast) {
@@ -95,8 +95,8 @@ pub fn select_table_rows(
             }
         };
 
-    // dbg!(&statement);
-    // dbg!(&prepared_values);
+    dbg!(&statement_str);
+    dbg!(&prepared_values);
 
     // sending prepared statement to postgres
     let f = client
@@ -119,6 +119,8 @@ pub fn select_table_rows(
                         .collect()
                 };
 
+                dbg!(&prep_values);
+
                 let f = client
                     .query(&statement, &prep_values)
                     .then(|result| match result {
@@ -129,9 +131,12 @@ pub fn select_table_rows(
                         Err(e) => Err(ApiError::from(e)),
                     })
                     .collect()
-                    .then(|result| match result {
-                        Ok(row_fields) => Ok((row_fields, client)),
-                        Err(e) => Err((e, client)),
+                    .then(|result| {
+                        dbg!(&result);
+                        match result {
+                            Ok(row_fields) => Ok((row_fields, client)),
+                            Err(e) => Err((e, client)),
+                        }
                     });
 
                 Either::B(f)

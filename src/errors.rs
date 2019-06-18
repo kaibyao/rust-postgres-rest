@@ -127,17 +127,6 @@ impl ApiError {
     }
 }
 
-// impl From<r2d2::Error> for ApiError {
-//     fn from(err: r2d2::Error) -> Self {
-//         ApiError::InternalError {
-//             category: MessageCategory::Error,
-//             code: "DATABASE_ERROR_R2D2",
-//             details: format!("{}", err),
-//             message: "A database error occurred (r2d2).",
-//             http_status: 500,
-//         }
-//     }
-// }
 impl From<actix::MailboxError> for ApiError {
     fn from(err: actix::MailboxError) -> Self {
         ApiError::InternalError {
@@ -160,30 +149,20 @@ impl From<actix_http::error::Error> for ApiError {
         }
     }
 }
-// impl From<actix_web::error::Error> for ApiError {
-//     fn from(err: actix_web::error::Error) -> Self {
-//         ApiError::InternalError {
-//             category: MessageCategory::Error,
-//             code: "ACTIX_ERROR",
-//             details: format!("{}", err),
-//             message: "Error occurred with Actix.",
-//             http_status: 500,
-//         }
-//     }
-// }
 impl From<bb8::RunError<ApiError>> for ApiError {
     fn from(err: bb8::RunError<ApiError>) -> Self {
-        let details = match err {
-            bb8::RunError::TimedOut => "The database connection timed out.".to_string(),
-            bb8::RunError::User(e) => format!("{}", e)
-        };
-
-        ApiError::InternalError {
-            category: MessageCategory::Error,
-            code: "DB_POOL_ERROR",
-            details,
-            message: "There was an error when making the request with the database pool.",
-            http_status: 500,
+        match err {
+            bb8::RunError::TimedOut => {
+                let details = "The database connection timed out.".to_string();
+                ApiError::InternalError {
+                    category: MessageCategory::Error,
+                    code: "DATABASE_ERROR_TIMEOUT",
+                    details,
+                    message: "There was an error when making the request with the database pool.",
+                    http_status: 500,
+                }
+            }
+            bb8::RunError::User(e) => e,
         }
     }
 }
@@ -191,12 +170,12 @@ impl From<bb8::RunError<tokio_postgres::Error>> for ApiError {
     fn from(err: bb8::RunError<tokio_postgres::Error>) -> Self {
         let details = match err {
             bb8::RunError::TimedOut => "The database connection timed out.".to_string(),
-            bb8::RunError::User(e) => format!("{}", e)
+            bb8::RunError::User(e) => format!("{}", e),
         };
 
         ApiError::InternalError {
             category: MessageCategory::Error,
-            code: "DB_POOL_ERROR",
+            code: "DATABASE_ERROR",
             details,
             message: "There was an error when making the request with the database pool.",
             http_status: 500,
@@ -247,7 +226,7 @@ impl From<tokio_postgres::Error> for ApiError {
     fn from(err: tokio_postgres::Error) -> Self {
         ApiError::InternalError {
             category: MessageCategory::Error,
-            code: "DATABASE_ERROR_POSTGRES",
+            code: "DATABASE_ERROR",
             details: format!("{}", err),
             message: "A database error occurred (postgres).",
             http_status: 500,
@@ -264,49 +243,108 @@ impl futures::future::Future for ApiError {
     }
 }
 
-// How ApiErrors are formatted for an http response
-impl actix_web::error::ResponseError for ApiError {
-    fn error_response(&self) -> HttpResponse {
-        // Used for formatting the ApiErrors that occur to display in an http response.
-        #[derive(Debug, Serialize)]
-        struct DisplayUserError<'a> {
-            code: &'static str,
-            details: String,
-            message: &'static str,
-            offender: Option<&'a str>,
-        }
+#[derive(Debug, Serialize)]
+struct DisplayUserError<'a> {
+    code: &'static str,
+    details: String,
+    message: &'static str,
+    offender: Option<&'a str>,
+}
 
-        match self {
-            ApiError::UserError {
-                code,
-                details,
-                http_status,
-                message,
-                offender,
-                ..
-            } => HttpResponse::build(http::StatusCode::from_u16(*http_status).unwrap()).json(
-                DisplayUserError {
-                    code,
-                    details: details.to_string(),
-                    message,
-                    offender: Some(offender),
-                },
-            ),
+/// Used for formatting the ApiErrors that occur to display in an http response.
+/// Not sure why ResponseError::error_response() isn't working for ApiError.
+pub fn error_response<E>(e: E) -> HttpResponse
+where
+    ApiError: From<E>,
+{
+    let e = ApiError::from(e);
 
-            ApiError::InternalError {
+    match e {
+        ApiError::UserError {
+            code,
+            details,
+            http_status,
+            message,
+            offender,
+            ..
+        } => HttpResponse::build(http::StatusCode::from_u16(http_status).unwrap()).json(
+            DisplayUserError {
                 code,
-                details,
-                http_status,
+                details: details.to_string(),
                 message,
-                ..
-            } => HttpResponse::build(http::StatusCode::from_u16(*http_status).unwrap()).json(
-                DisplayUserError {
-                    code,
-                    details: details.to_string(),
-                    message,
-                    offender: None,
-                },
-            ),
-        }
+                offender: Some(&offender),
+            },
+        ),
+
+        ApiError::InternalError {
+            code,
+            details,
+            http_status,
+            message,
+            ..
+        } => HttpResponse::build(http::StatusCode::from_u16(http_status).unwrap()).json(
+            DisplayUserError {
+                code,
+                details: details.to_string(),
+                message,
+                offender: None,
+            },
+        ),
     }
 }
+
+// How ApiErrors are formatted for an http response
+// impl actix_web::ResponseError for ApiError {
+//     fn error_response(&self) -> HttpResponse {
+//         // Used for formatting the ApiErrors that occur to display in an http response.
+//         #[derive(Debug, Serialize)]
+//         struct DisplayUserError<'a> {
+//             code: &'static str,
+//             details: String,
+//             message: &'static str,
+//             offender: Option<&'a str>,
+//         }
+
+//         match self {
+//             ApiError::UserError {
+//                 code,
+//                 details,
+//                 http_status,
+//                 message,
+//                 offender,
+//                 ..
+//             } => HttpResponse::build(http::StatusCode::from_u16(*http_status).unwrap()).json(
+//                 DisplayUserError {
+//                     code,
+//                     details: details.to_string(),
+//                     message,
+//                     offender: Some(offender),
+//                 },
+//             ),
+
+//             ApiError::InternalError {
+//                 code,
+//                 details,
+//                 http_status,
+//                 message,
+//                 ..
+//             } => HttpResponse::build(http::StatusCode::from_u16(*http_status).unwrap()).json(
+//                 DisplayUserError {
+//                     code,
+//                     details: details.to_string(),
+//                     message,
+//                     offender: None,
+//                 },
+//             ),
+//         }
+//     }
+// }
+
+// impl actix_web::Responder for ApiError {
+//     type Error = Self;
+//     type Future = FutureResult<Response, Self>;
+
+//     fn respond_to(self, _: &HttpRequest) -> Self::Future {
+//         err(self)
+//     }
+// }
