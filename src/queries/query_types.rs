@@ -1,4 +1,3 @@
-
 use super::postgres_types::RowFields;
 use crate::errors::ApiError;
 use actix_web::HttpRequest;
@@ -49,7 +48,7 @@ pub struct QueryParamsSelect {
 impl QueryParamsSelect {
     /// Fills the struct’s values based on the HttpRequest data.
     pub fn from_http_request(
-        req: &HttpRequest,
+        req: HttpRequest,
         query_string_params: RequestQueryStringParams,
     ) -> Self {
         let default_limit = 10000;

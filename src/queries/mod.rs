@@ -10,9 +10,7 @@ mod select_table_rows;
 pub use self::select_table_rows::select_table_rows;
 
 mod select_table_stats;
-pub use self::select_table_stats::{
-    select_column_stats, select_column_stats_statement, select_table_stats, TableColumnStat,
-};
+pub use self::select_table_stats::{select_column_stats, select_table_stats, TableColumnStat};
 
 pub mod postgres_types;
 pub mod query_types;

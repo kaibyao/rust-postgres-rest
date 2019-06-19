@@ -1,6 +1,6 @@
 use bb8;
 use bb8_postgres::PostgresConnectionManager;
-use futures::Future;
+use futures01::Future;
 use tokio_postgres::{Error, NoTls};
 
 pub struct PgConnection;
@@ -12,8 +12,6 @@ impl PgConnection {
     pub fn connect(db_url: &str) -> Result<Pool, Error> {
         let pg_mgr = PostgresConnectionManager::new(db_url, NoTls);
 
-        bb8::Pool::builder()
-            .build(pg_mgr)
-            .wait()
+        bb8::Pool::builder().build(pg_mgr).wait()
     }
 }

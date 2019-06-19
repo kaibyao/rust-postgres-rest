@@ -1,4 +1,4 @@
-use futures::future::Future;
+use futures01::stream::Stream;
 use sqlparser::{
     dialect::PostgreSqlDialect,
     sqlast::{ASTNode, SQLQuery, SQLSelect, SQLSetExpr, SQLStatement},
@@ -8,9 +8,7 @@ use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use tokio_postgres::Client;
 
-use super::select_table_stats::{
-    select_column_stats, select_column_stats_statement, TableColumnStat,
-};
+use super::select_table_stats::{select_column_stats, TableColumnStat};
 use crate::errors::ApiError;
 
 /// Converts a WHERE clause string into an ASTNode.
@@ -374,10 +372,10 @@ impl ForeignKeyReference {
     ///     ]))
     /// );
     /// ```
-    pub fn from_query_columns(
+    pub async fn from_query_columns(
         mut client: Client,
-        table: &str,
-        columns: &[&str],
+        table: String,
+        columns: Vec<String>,
     ) -> Result<(Vec<Self>, Client), (ApiError, Client)> {
         let mut fk_columns: Vec<String> = columns
             .iter()
@@ -420,48 +418,16 @@ impl ForeignKeyReference {
             }
         }
 
-        // get column stats for table
-
         dbg!(&fk_columns_grouped);
-        let (stats, mut client) = select_column_stats_statement(&mut client, table)
-            .then(move |result| match result {
-                Ok(statement) => {
-                    let query = client.query(&statement, &[]);
-                    drop(statement);
-                    dbg!("query happened");
-                    Ok((query, client))
-                },
-                Err(e) => Err((e, client)),
-            })
-            .map(|(query, client)| {
-                select_column_stats(query).then(move |result| match result {
-                    Ok(stats) => {
-                        dbg!(&stats);
-                        Ok((stats, client))
-                    },
-                    Err(e) => Err((e, client)),
-                })
-            })
-            .flatten()
-            .map_err(|(e, client)| (ApiError::from(e), client))
-            // TODO: [Kai@2019-06-15]: I'm not really happy that we have to block the async (otherwise rust throws E0720 at me), we should look at this again after async/await syntax changes come out
-            .wait()?;
 
-
-
-        // let statement = match select_column_stats_statement(&mut client, table).wait() {
-        //     Ok(statement) => statement,
-        //     Err(e) => return Err((ApiError::from(e), client))
-        // };
-        // dbg!("got statement");
-        // let query = client.query(&statement, &[]);
-        // dbg!("got query");
-        // let stats = match select_column_stats(query).wait() {
-        //     Ok(stats) => stats,
-        //     Err(e) => return Err((ApiError::from(e), client))
-        // };
+        // get column stats for table
+        let (stats, mut client) = match select_column_stats(client, &table).await {
+            Ok((stats, client)) => (stats, client),
+            Err((e, client)) => return Err((ApiError::from(e), client)),
+        };
 
         dbg!(&stats);
+
         // contains a (&str, &Vec<&str>, &Vec<&str>) tuple representing the matched parent column name, child columns, and original column strings
         let mut matched_columns = vec![];
 
@@ -512,7 +478,7 @@ impl ForeignKeyReference {
             };
 
             // filter child columns to just the foreign keys
-            let child_fk_columns: Vec<&str> = child_columns_match
+            let child_fk_columns: Vec<String> = child_columns_match
                 .iter()
                 .filter_map(|child_col| {
                     if !child_col.contains('.') {
@@ -520,7 +486,7 @@ impl ForeignKeyReference {
                     }
 
                     let first_dot_pos = child_col.find('.').unwrap();
-                    Some(&child_col[first_dot_pos + 1..])
+                    Some(child_col[first_dot_pos + 1..].to_string())
                 })
                 .collect();
 
@@ -547,7 +513,12 @@ impl ForeignKeyReference {
                 };
 
                 let (nested_fks, client_reuse) =
-                    Self::from_query_columns(client, &foreign_key_table, &child_fk_columns)?;
+                    match Self::from_query_columns(client, foreign_key_table, child_fk_columns)
+                        .await
+                    {
+                        Ok((nested_fks, client)) => (nested_fks, client),
+                        Err((e, client)) => return Err((e, client)),
+                    };
                 client = client_reuse;
 
                 fkrs.push(ForeignKeyReference {

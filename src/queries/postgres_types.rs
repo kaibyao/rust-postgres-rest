@@ -22,7 +22,7 @@ pub struct MacAddress(Eui48MacAddress);
 
 // mostly copied from the postgres-protocol and postgres-shared libraries
 impl<'a> FromSql<'a> for MacAddress {
-    fn from_sql(_: &Type, raw: &[u8]) -> Result<MacAddress, Box<StdError + Sync + Send>> {
+    fn from_sql(_: &Type, raw: &[u8]) -> Result<MacAddress, Box<dyn StdError + Sync + Send>> {
         let bytes = macaddr_from_sql(raw)?;
         Ok(MacAddress(Eui48MacAddress::new(bytes)))
     }
@@ -58,18 +58,21 @@ where
         <T as FromSql>::accepts(ty)
     }
 
-    fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Box<StdError + 'static + Send + Sync>> {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn StdError + 'static + Send + Sync>> {
         <T as FromSql>::from_sql(ty, raw).map(ColumnValue::NotNullable)
     }
 
-    fn from_sql_null(_: &Type) -> Result<Self, Box<StdError + Sync + Send>> {
+    fn from_sql_null(_: &Type) -> Result<Self, Box<dyn StdError + Sync + Send>> {
         Ok(ColumnValue::Nullable(None))
     }
 
     fn from_sql_nullable(
         ty: &Type,
         raw: Option<&'a [u8]>,
-    ) -> Result<Self, Box<StdError + 'static + Send + Sync>> {
+    ) -> Result<Self, Box<dyn StdError + 'static + Send + Sync>> {
         match raw {
             Some(raw_inner) => Self::from_sql(ty, raw_inner),
             None => Self::from_sql_null(ty),
@@ -130,6 +133,8 @@ pub enum ColumnTypeValue {
     // VarBit(ColumnValue<bit_vec::BitVec>),
     VarChar(ColumnValue<String>),
 }
+
+impl Sync for ColumnTypeValue {}
 
 impl ColumnTypeValue {
     /// Parses a serde_json::Value and returns the Rust-Typed version.
