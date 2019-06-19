@@ -1,4 +1,4 @@
-use super::postgres_types::{convert_row_fields, ColumnTypeValue, ColumnValue, RowFields};
+use super::postgres_types::{convert_row_fields, ColumnTypeValue, RowFields};
 use super::query_types::{QueryParamsInsert, QueryResult};
 use super::select_table_stats::select_column_stats;
 use crate::errors::ApiError;
@@ -148,7 +148,7 @@ async fn execute_insert<'a>(
     };
 
     // convert the column values into the actual values we will use for the INSERT statement execution
-    let mut prep_values: Vec<&(dyn ToSql + Sync)> = vec![];
+    let mut prep_values: Vec<&dyn ToSql> = vec![];
     for column_value in column_values.iter() {
         match column_value {
             ColumnTypeValue::BigInt(col_val) => prep_values.push(col_val),

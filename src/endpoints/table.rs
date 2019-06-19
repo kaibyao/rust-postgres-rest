@@ -1,9 +1,9 @@
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::web::Json;
-use actix_web::{web, HttpRequest, HttpResponse};
+use actix_web::{HttpRequest, HttpResponse, web};
 use futures::compat::Future01CompatExt;
-use futures::future::FutureExt;
+use futures::future::{Future as StdFuture, FutureExt};
 use futures::TryFutureExt;
 use futures01::Future;
 use serde_json::Value;

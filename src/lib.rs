@@ -29,7 +29,7 @@ use endpoints::{get_all_table_names, get_table, index, post_table};
 
 mod errors;
 
-use queries::query_types::{QueryParamsInsert, QueryParamsSelect, RequestQueryStringParams};
+use queries::query_types::{RequestQueryStringParams};
 
 pub struct AppConfig<'a> {
     pub database_url: &'a str,
