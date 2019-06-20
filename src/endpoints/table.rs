@@ -2,7 +2,7 @@ use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::web::Json;
 use actix_web::{web, HttpRequest, HttpResponse};
-use futures::future::{Either, err, ok};
+use futures::future::{Either, err};
 use futures::Future;
 use serde_json::Value;
 
