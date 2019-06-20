@@ -15,11 +15,13 @@ extern crate tokio_postgres;
 
 // library modules
 use actix_web::{web, HttpRequest, Scope};
-// use actix_web_async_await::{compat};
-use futures::compat::Future01CompatExt;
-use futures::future::FutureExt;
-use futures::TryFutureExt;
+use futures03::compat::Future01CompatExt;
+use futures03::future::FutureExt;
+use futures03::TryFutureExt;
+use futures01::future::{Either, err};
 mod queries;
+
+mod compat;
 
 mod db;
 use crate::db::{PgConnection, Pool};
@@ -29,7 +31,8 @@ use endpoints::{get_all_table_names, get_table, index, post_table};
 
 mod errors;
 
-use queries::query_types::{RequestQueryStringParams};
+use queries::query_types::{QueryParamsInsert, QueryParamsSelect, RequestQueryStringParams};
+use serde_json::Value;
 
 pub struct AppConfig<'a> {
     pub database_url: &'a str,
@@ -67,9 +70,30 @@ pub fn generate_rest_api_scope(config: &AppConfig) -> Scope {
                         req: HttpRequest,
                         db: web::Data<Pool>,
                         query_string_params: web::Query<RequestQueryStringParams>
-                    |
-                    get_table(req, db, query_string_params).boxed().compat()
+                    | {
+                        let params = QueryParamsSelect::from_http_request(req, query_string_params.into_inner());
+                        get_table(db, params).boxed().compat()
+                    }
                 ))
-                .route(web::post().to_async(post_table))
+                .route(web::post().to_async(
+                    |
+                        req: HttpRequest,
+                        db: web::Data<Pool>,
+                        body: web::Json<Value>,
+                        query_string_params: web::Query<RequestQueryStringParams>,
+                    | {
+                        let actual_body = body.into_inner();
+                        let params = match QueryParamsInsert::from_http_request(
+                            &req,
+                            actual_body,
+                            query_string_params.into_inner(),
+                        ) {
+                            Ok(insert_params) => insert_params,
+                            Err(e) => return Either::A(err(e)),
+                        };
+
+                        Either::B(post_table(db, params).boxed().compat())
+                    }
+                ))
         )
 }

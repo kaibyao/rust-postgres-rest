@@ -1,11 +1,12 @@
-use futures::compat::Future01CompatExt;
+use futures03::compat::Future01CompatExt;
 use futures01::stream::Stream;
 
 use regex::Regex;
 use sqlparser::sqlast::ASTNode;
-use tokio_postgres::types::ToSql;
 use tokio_postgres::Client;
-
+use tokio_postgres::types::ToSql;
+// use crate::compat::ToSqlSyncSend;
+use crate::errors::ApiError;
 use super::foreign_keys::{
     fk_ast_nodes_from_where_ast, fk_columns_from_where_ast, where_clause_str_to_ast,
     ForeignKeyReference,
@@ -13,7 +14,6 @@ use super::foreign_keys::{
 use super::postgres_types::{convert_row_fields, RowFields};
 use super::query_types::QueryParamsSelect;
 use super::utils::{validate_sql_name, validate_where_column};
-use crate::errors::ApiError;
 
 #[derive(Debug, PartialEq)]
 enum PreparedStatementValue {

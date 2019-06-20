@@ -1,6 +1,6 @@
 use super::utils::validate_sql_name;
 use crate::errors::ApiError;
-use futures::compat::Future01CompatExt;
+use futures03::compat::Future01CompatExt;
 use futures01::stream::Stream;
 use std::collections::HashMap;
 use tokio_postgres::{Client, Error};

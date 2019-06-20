@@ -1,15 +1,16 @@
 use super::postgres_types::{convert_row_fields, ColumnTypeValue, RowFields};
 use super::query_types::{QueryParamsInsert, QueryResult};
-use super::select_table_stats::select_column_stats;
-use crate::errors::ApiError;
-use futures::compat::Future01CompatExt;
+use futures03::compat::Future01CompatExt;
 use futures01::future::Future;
 use futures01::stream::Stream;
-
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use tokio_postgres::types::ToSql;
 use tokio_postgres::Client;
+// use crate::compat::ToSqlSyncSend;
+use crate::errors::ApiError;
+use super::select_table_stats::select_column_stats;
+
 static INSERT_ROWS_BATCH_COUNT: usize = 2;
 
 enum InsertResult {

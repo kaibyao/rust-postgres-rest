@@ -1,8 +1,5 @@
-use crate::errors::ApiError;
-
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use eui48::MacAddress as Eui48MacAddress;
-
 use postgres_protocol::types::{macaddr_from_sql, macaddr_to_sql};
 use rust_decimal::Decimal;
 use serde_json::Value;
@@ -15,6 +12,8 @@ use tokio_postgres::{
     types::{FromSql, IsNull, ToSql, Type},
 };
 use uuid::Uuid;
+use crate::compat::ToSqlSyncSend;
+use crate::errors::ApiError;
 
 /// we have to define our own MacAddress type in order for Serde to serialize it properly.
 #[derive(Debug, Serialize)]
@@ -41,6 +40,8 @@ impl ToSql for MacAddress {
     accepts!(MACADDR);
     to_sql_checked!();
 }
+
+impl ToSqlSyncSend for MacAddress {}
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
@@ -101,6 +102,8 @@ where
 
     to_sql_checked!();
 }
+
+impl<T> ToSqlSyncSend for ColumnValue<T> where T: ToSqlSyncSend {}
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]

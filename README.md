@@ -36,6 +36,11 @@ Theoretically I could just use that, but I'm doubting its performance. It’s pr
 - there should probably be an option to disable specific endpoints.
 - Need to add a query parser for all endpoints
 
+## Thank yous
+
+- Nikolay Kim (creator of actix) for answering my questions.
+- Talchas (in the Discord channel) for offering suggestions on making &dyn ToSql multithreaded
+
 ## Endpoints
 
 ### `GET /{table}`

@@ -1,4 +1,4 @@
-use futures::compat::Future01CompatExt;
+use futures03::compat::Future01CompatExt;
 use futures01::stream::Stream;
 
 use tokio_postgres::{Client, Error};

@@ -1,19 +1,33 @@
 use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
-use actix_web::web::Json;
-use actix_web::{HttpRequest, HttpResponse, web};
-use futures::compat::Future01CompatExt;
-use futures::future::{Future as StdFuture, FutureExt};
-use futures::TryFutureExt;
-use futures01::Future;
-use serde_json::Value;
+use actix_web::{HttpResponse, web};
+use futures03::compat::Future01CompatExt;
+use futures03::future::{FutureExt};
+use futures03::{TryFutureExt};
+use futures01::Future as Future01;
 
 use crate::db::Pool;
 use crate::errors::ApiError;
 use crate::queries::{
     insert_into_table, query_types, select_all_tables, select_table_rows, select_table_stats,
 };
-use query_types::{QueryParamsInsert, QueryParamsSelect, RequestQueryStringParams};
+use query_types::{QueryParamsInsert, QueryParamsSelect};
+
+// fn wrap_async_func<F, U, T, Ok, Error>(
+//     f: F,
+// ) -> impl Fn(U) -> Box<dyn Future01<Item = Ok, Error = Error>> + Clone + 'static
+// where
+//     Ok: 'static,
+//     Error: 'static,
+//     F: Fn(U) -> T + Clone + 'static,
+//     T: Future3<Output = Result<Ok, Error>> + 'static,
+// {
+//     move |u| {
+//         // Turn a future3 Future into futures1 Future
+//         let fut1 = f(u).boxed_local().compat();
+//         Box::new(fut1)
+//     }
+// }
 
 /// Retrieves a list of table names that exist in the DB.
 pub async fn get_all_table_names(db: web::Data<Pool>) -> Result<HttpResponse, ApiError> {
@@ -31,12 +45,9 @@ pub async fn get_all_table_names(db: web::Data<Pool>) -> Result<HttpResponse, Ap
 
 /// Queries a table using SELECT.
 pub async fn get_table(
-    req: HttpRequest,
     db: web::Data<Pool>,
-    query_string_params: web::Query<RequestQueryStringParams>,
+    params: QueryParamsSelect,
 ) -> Result<HttpResponse, ApiError> {
-    let params = QueryParamsSelect::from_http_request(req, query_string_params.into_inner());
-
     if params.columns.is_empty() {
         get_table_stats(db, params.table).await
     } else {
@@ -71,21 +82,9 @@ async fn get_table_stats(db: web::Data<Pool>, table: String) -> Result<HttpRespo
 
 /// Inserts new rows into a table
 pub async fn post_table(
-    req: HttpRequest,
     db: web::Data<Pool>,
-    body: Json<Value>,
-    query_string_params: web::Query<RequestQueryStringParams>,
+    params: QueryParamsInsert,
 ) -> Result<HttpResponse, ApiError> {
-    let actual_body = body.into_inner();
-    let params = match QueryParamsInsert::from_http_request(
-        &req,
-        actual_body,
-        query_string_params.into_inner(),
-    ) {
-        Ok(insert_params) => insert_params,
-        Err(e) => return Err(e),
-    };
-
     let insert_query_result = db
         .run(|client| insert_into_table(client, params).boxed().compat())
         .compat()
