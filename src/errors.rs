@@ -251,100 +251,49 @@ struct DisplayUserError<'a> {
     offender: Option<&'a str>,
 }
 
-/// Used for formatting the ApiErrors that occur to display in an http response.
-/// Not sure why ResponseError::error_response() isn't working for ApiError.
-pub fn error_response<E>(e: E) -> HttpResponse
-where
-    ApiError: From<E>,
-{
-    let e = ApiError::from(e);
+// How ApiErrors are formatted for an http response
+impl actix_web::ResponseError for ApiError {
+    fn render_response(&self) -> HttpResponse {
+        // Used for formatting the ApiErrors that occur to display in an http response.
+        #[derive(Debug, Serialize)]
+        struct DisplayUserError<'a> {
+            code: &'static str,
+            details: String,
+            message: &'static str,
+            offender: Option<&'a str>,
+        }
 
-    match e {
-        ApiError::UserError {
-            code,
-            details,
-            http_status,
-            message,
-            offender,
-            ..
-        } => HttpResponse::build(http::StatusCode::from_u16(http_status).unwrap()).json(
-            DisplayUserError {
+        match self {
+            ApiError::UserError {
                 code,
-                details: details.to_string(),
+                details,
+                http_status,
                 message,
-                offender: Some(&offender),
-            },
-        ),
+                offender,
+                ..
+            } => HttpResponse::build(http::StatusCode::from_u16(*http_status).unwrap()).json(
+                DisplayUserError {
+                    code,
+                    details: details.to_string(),
+                    message,
+                    offender: Some(offender),
+                },
+            ),
 
-        ApiError::InternalError {
-            code,
-            details,
-            http_status,
-            message,
-            ..
-        } => HttpResponse::build(http::StatusCode::from_u16(http_status).unwrap()).json(
-            DisplayUserError {
+            ApiError::InternalError {
                 code,
-                details: details.to_string(),
+                details,
+                http_status,
                 message,
-                offender: None,
-            },
-        ),
+                ..
+            } => HttpResponse::build(http::StatusCode::from_u16(*http_status).unwrap()).json(
+                DisplayUserError {
+                    code,
+                    details: details.to_string(),
+                    message,
+                    offender: None,
+                },
+            ),
+        }
     }
 }
-
-// How ApiErrors are formatted for an http response
-// impl actix_web::ResponseError for ApiError {
-//     fn error_response(&self) -> HttpResponse {
-//         // Used for formatting the ApiErrors that occur to display in an http response.
-//         #[derive(Debug, Serialize)]
-//         struct DisplayUserError<'a> {
-//             code: &'static str,
-//             details: String,
-//             message: &'static str,
-//             offender: Option<&'a str>,
-//         }
-
-//         match self {
-//             ApiError::UserError {
-//                 code,
-//                 details,
-//                 http_status,
-//                 message,
-//                 offender,
-//                 ..
-//             } => HttpResponse::build(http::StatusCode::from_u16(*http_status).unwrap()).json(
-//                 DisplayUserError {
-//                     code,
-//                     details: details.to_string(),
-//                     message,
-//                     offender: Some(offender),
-//                 },
-//             ),
-
-//             ApiError::InternalError {
-//                 code,
-//                 details,
-//                 http_status,
-//                 message,
-//                 ..
-//             } => HttpResponse::build(http::StatusCode::from_u16(*http_status).unwrap()).json(
-//                 DisplayUserError {
-//                     code,
-//                     details: details.to_string(),
-//                     message,
-//                     offender: None,
-//                 },
-//             ),
-//         }
-//     }
-// }
-
-// impl actix_web::Responder for ApiError {
-//     type Error = Self;
-//     type Future = FutureResult<Response, Self>;
-
-//     fn respond_to(self, _: &HttpRequest) -> Self::Future {
-//         err(self)
-//     }
-// }

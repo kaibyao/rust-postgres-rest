@@ -195,7 +195,7 @@ fn execute_insert<'a>(
             })
             .and_then(move |(statement, mut client)| {
                 // convert the column values into the actual values we will use for the INSERT statement execution
-                let mut prep_values: Vec<&ToSql> = vec![];
+                let mut prep_values: Vec<&dyn ToSql> = vec![];
                 for column_value in column_values.iter() {
                     match column_value {
                         ColumnTypeValue::BigInt(col_val) => prep_values.push(col_val),

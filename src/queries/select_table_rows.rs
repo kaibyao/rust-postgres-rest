@@ -36,9 +36,7 @@ pub fn select_table_rows(
     // get list of every column being used in the query params (columns, where, distinct, group_by, order_by). Used for finding all foreign key references
     let mut columns = params
         .columns
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<&str>>();
+        .clone();
 
     // WHERE clause foreign key references
     let where_ast = match &params.conditions {
@@ -61,55 +59,49 @@ pub fn select_table_rows(
     };
     let where_fk_columns = fk_columns_from_where_ast(&where_ast);
 
-    columns.extend(where_fk_columns.iter().map(String::as_str));
+    columns.extend(where_fk_columns);
     if let Some(v) = &params.distinct {
-        columns.extend(v.iter().map(String::as_str));
+        columns.extend(v.clone());
     }
     if let Some(v) = &params.group_by {
-        columns.extend(v.iter().map(String::as_str));
+        columns.extend(v.clone());
     }
     if let Some(v) = &params.order_by {
-        columns.extend(v.iter().map(String::as_str));
+        columns.extend(v.clone());
     }
 
     // parse columns for foreign key usage
-    let (fk_columns, mut client) =
-        match ForeignKeyReference::from_query_columns(client, &params.table, &columns) {
-            Ok((fkrs, client)) => (fkrs, client),
-            Err((e, client)) => {
-                return Either::A(err::<(Vec<RowFields>, Client), (ApiError, Client)>((
-                    e, client,
-                )))
-            }
-        };
+    let fk_future = ForeignKeyReference::from_query_columns(client, &params.table, columns).and_then(|(fk_columns, mut client)| {
+        dbg!(&fk_columns);
 
-    dbg!(&fk_columns);
+        let (statement_str, prepared_values) =
+            match build_select_statement(&params, fk_columns, where_ast) {
+                Ok((stmt, prep_vals)) => (stmt, prep_vals),
+                Err(e) => {
+                    return Either::A(err::<(Vec<RowFields>, Client), (ApiError, Client)>((
+                        e, client,
+                    )))
+                }
+            };
 
-    let (statement_str, prepared_values) =
-        match build_select_statement(&params, fk_columns, where_ast) {
-            Ok((stmt, prep_vals)) => (stmt, prep_vals),
-            Err(e) => {
-                return Either::A(err::<(Vec<RowFields>, Client), (ApiError, Client)>((
-                    e, client,
-                )))
-            }
-        };
+        dbg!(&statement_str);
+        dbg!(&prepared_values);
 
-    dbg!(&statement_str);
-    dbg!(&prepared_values);
-
-    // sending prepared statement to postgres
-    let f = client
-        .prepare(&statement_str)
-        .then(move |result| match result {
-            Ok(statement) => {
-                let prep_values: Vec<&ToSql> = if prepared_values.is_empty() {
+        // sending prepared statement to postgres
+        let select_rows_future = client
+            .prepare(&statement_str)
+            .map_err(|e| (
+                ApiError::from(e),
+                client,
+            ))
+            .and_then(move |statement| {
+                let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
                     vec![]
                 } else {
                     prepared_values
                         .iter()
                         .map(|val| {
-                            let val_to_sql: &ToSql = match val {
+                            let val_to_sql: &dyn ToSql = match val {
                                 PreparedStatementValue::Int4(val_i32) => val_i32,
                                 PreparedStatementValue::Int8(val_i64) => val_i64,
                                 PreparedStatementValue::String(val_string) => val_string,
@@ -121,7 +113,7 @@ pub fn select_table_rows(
 
                 dbg!(&prep_values);
 
-                let f = client
+                client
                     .query(&statement, &prep_values)
                     .then(|result| match result {
                         Ok(row) => match convert_row_fields(&row) {
@@ -137,17 +129,13 @@ pub fn select_table_rows(
                             Ok(row_fields) => Ok((row_fields, client)),
                             Err(e) => Err((e, client)),
                         }
-                    });
+                    })
+            });
 
-                Either::B(f)
-            }
-            Err(e) => Either::A(err::<(Vec<RowFields>, Client), (ApiError, Client)>((
-                ApiError::from(e),
-                client,
-            ))),
-        });
+        Either::B(select_rows_future)
+    });
 
-    Either::B(f)
+    Either::B(fk_future)
 }
 
 fn build_select_statement(
