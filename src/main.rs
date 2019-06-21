@@ -6,8 +6,9 @@ use actix::System;
 use actix_web::{App, HttpServer};
 use experiment00::{generate_rest_api_scope, AppConfig};
 
-fn main() -> std::io::Result<()> {
+fn main() {
     let sys = System::new("experiment00"); // create Actix runtime
+
     let ip_address = "127.0.0.1:8000";
 
     // start 1 server on each cpu thread
@@ -25,6 +26,5 @@ fn main() -> std::io::Result<()> {
     .start();
 
     println!("Running server on {}", ip_address);
-
-    sys.run()
+    let _s = sys.run().unwrap();
 }

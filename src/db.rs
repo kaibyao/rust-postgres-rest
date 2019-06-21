@@ -12,5 +12,8 @@ pub fn connect(db_url: &str) -> Result<Pool, L337Error<PgError>> {
     let manager = PostgresConnectionManager::new(db_url.parse().unwrap(), NoTls);
 
     let config: Config = Config::default();
-    Pool::new(manager, config).wait()
+    dbg!();
+    let pool = Pool::new(manager, config).wait();
+    dbg!();
+    pool
 }

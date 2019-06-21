@@ -12,7 +12,7 @@ use super::foreign_keys::{
 use super::postgres_types::{convert_row_fields, RowFields};
 use super::query_types::QueryParamsSelect;
 use super::utils::{validate_sql_name, validate_where_column};
-use crate::db::{Pool};
+use crate::db::Pool;
 use crate::errors::ApiError;
 
 #[derive(Debug, PartialEq)]
@@ -66,62 +66,70 @@ pub fn select_table_rows(
     let pool = pool.clone();
 
     // parse columns for foreign key usage
-    let fk_future = ForeignKeyReference::from_query_columns(pool.clone(), params.table.clone(), columns)
-        .map_err(ApiError::from)
-        .and_then(move |fk_columns| {
-            dbg!(&fk_columns);
+    let fk_future =
+        ForeignKeyReference::from_query_columns(pool.clone(), params.table.clone(), columns)
+            .map_err(ApiError::from)
+            .and_then(move |fk_columns| {
+                dbg!(&fk_columns);
 
-            let (statement_str, prepared_values) =
-                match build_select_statement(&params, fk_columns, where_ast) {
-                    Ok((stmt, prep_vals)) => (stmt, prep_vals),
-                    Err(e) => return Either::A(err::<Vec<RowFields>, ApiError>(e)),
-                };
+                let (statement_str, prepared_values) =
+                    match build_select_statement(&params, fk_columns, where_ast) {
+                        Ok((stmt, prep_vals)) => (stmt, prep_vals),
+                        Err(e) => return Either::A(err::<Vec<RowFields>, ApiError>(e)),
+                    };
 
-            dbg!(&statement_str);
-            dbg!(&prepared_values);
+                dbg!(&statement_str);
+                dbg!(&prepared_values);
 
-            // sending prepared statement to postgres
-            let select_rows_future = pool
-                .connection()
-                .map_err(ApiError::from)
-                .and_then(|mut conn|
-                    conn.client
-                    .prepare(&statement_str)
-                    .map_err(ApiError::from)
-                    .and_then(move |statement| {
-                        let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
-                            vec![]
-                        } else {
-                            prepared_values
-                                .iter()
-                                .map(|val| {
-                                    let val_to_sql: &dyn ToSql = match val {
-                                        PreparedStatementValue::Int4(val_i32) => val_i32,
-                                        PreparedStatementValue::Int8(val_i64) => val_i64,
-                                        PreparedStatementValue::String(val_string) => val_string,
+                // sending prepared statement to postgres
+                let select_rows_future =
+                    pool.connection()
+                        .map_err(ApiError::from)
+                        .and_then(move |mut conn| {
+                            conn.client
+                                .prepare(&statement_str)
+                                .map_err(ApiError::from)
+                                .and_then(move |statement| {
+                                    let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty()
+                                    {
+                                        vec![]
+                                    } else {
+                                        prepared_values
+                                            .iter()
+                                            .map(|val| {
+                                                let val_to_sql: &dyn ToSql = match val {
+                                                    PreparedStatementValue::Int4(val_i32) => {
+                                                        val_i32
+                                                    }
+                                                    PreparedStatementValue::Int8(val_i64) => {
+                                                        val_i64
+                                                    }
+                                                    PreparedStatementValue::String(val_string) => {
+                                                        val_string
+                                                    }
+                                                };
+                                                val_to_sql
+                                            })
+                                            .collect()
                                     };
-                                    val_to_sql
+
+                                    dbg!(&prep_values);
+
+                                    conn.client
+                                        .query(&statement, &prep_values)
+                                        .then(|result| match result {
+                                            Ok(row) => match convert_row_fields(&row) {
+                                                Ok(row_fields) => Ok(row_fields),
+                                                Err(e) => Err(e),
+                                            },
+                                            Err(e) => Err(ApiError::from(e)),
+                                        })
+                                        .collect()
                                 })
-                                .collect()
-                        };
+                        });
 
-                        dbg!(&prep_values);
-
-                        conn.client
-                            .query(&statement, &prep_values)
-                            .then(|result| match result {
-                                Ok(row) => match convert_row_fields(&row) {
-                                    Ok(row_fields) => Ok(row_fields),
-                                    Err(e) => Err(e),
-                                },
-                                Err(e) => Err(ApiError::from(e)),
-                            })
-                            .collect()
-                    })
-                );
-
-            Either::B(select_rows_future)
-        });
+                Either::B(select_rows_future)
+            });
 
     Either::B(fk_future)
 }

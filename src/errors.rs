@@ -243,6 +243,7 @@ impl futures::future::Future for ApiError {
     }
 }
 
+/// Used for formatting the ApiErrors that occur to display in an http response.
 #[derive(Debug, Serialize)]
 struct DisplayUserError<'a> {
     code: &'static str,
@@ -254,15 +255,6 @@ struct DisplayUserError<'a> {
 // How ApiErrors are formatted for an http response
 impl actix_web::ResponseError for ApiError {
     fn render_response(&self) -> HttpResponse {
-        // Used for formatting the ApiErrors that occur to display in an http response.
-        #[derive(Debug, Serialize)]
-        struct DisplayUserError<'a> {
-            code: &'static str,
-            details: String,
-            message: &'static str,
-            offender: Option<&'a str>,
-        }
-
         match self {
             ApiError::UserError {
                 code,

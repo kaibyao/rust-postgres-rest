@@ -7,7 +7,7 @@ use tokio_postgres::types::ToSql;
 use super::postgres_types::{convert_row_fields, ColumnTypeValue, RowFields};
 use super::query_types::{QueryParamsInsert, QueryResult};
 use super::select_table_stats::{select_column_stats, select_column_stats_statement};
-use crate::db::Connection;
+use crate::db::{Connection, Pool};
 use crate::errors::ApiError;
 
 static INSERT_ROWS_BATCH_COUNT: usize = 2;
@@ -19,127 +19,131 @@ enum InsertResult {
 
 /// Runs an INSERT INTO <table> query
 pub fn insert_into_table(
-    mut conn: Connection,
+    pool: &Pool,
     params: QueryParamsInsert,
 ) -> impl Future<Item = QueryResult, Error = ApiError> {
     // serde_json::Values can't automatically convert to non-JSON/JSONB columns.
     // Therefore, get column types of table so we know what types into which the json values are converted.
     // apparently rust_postgres already does this in the background, would be nice if there was a way to hook into existing functionality...
 
-    // dbg!(&params);
+    // used in futures later
+    let pool_clone = pool.clone();
+    let table = params.table.clone();
 
-    select_column_stats_statement(&mut conn, &params.table)
-        .then(move |result| match result {
-            Ok(statement) => Ok(conn.client.query(&statement, &[])),
-            Err(e) => Err(ApiError::from(e)),
-        })
-        .and_then(|query| {
-            select_column_stats(query).then(move |result| match result {
-                Ok(stats) => Ok((stats, params)),
-                Err(e) => Err(ApiError::from(e)),
+    pool.connection().map_err(ApiError::from).and_then(move |mut conn|
+        select_column_stats_statement(&mut conn, &table)
+            .map_err(ApiError::from)
+            .and_then(move |statement| {
+                let q = conn.client.query(&statement, &[]);
+                select_column_stats(q).map_err(ApiError::from)
             })
-        })
-        .map(|(stats, qparams)| {
-            let mut column_types: HashMap<String, String> = HashMap::new();
+    )
+    .map(move |stats| {
+        let mut column_types: HashMap<String, String> = HashMap::new();
 
-            for stat in stats.into_iter() {
-                column_types.insert(stat.column_name, stat.column_type);
+        for stat in stats.into_iter() {
+            column_types.insert(stat.column_name, stat.column_type);
+        }
+
+        let num_rows = params.rows.len();
+        if num_rows > INSERT_ROWS_BATCH_COUNT {
+            // batch inserts into groups of 100 (see https://www.depesz.com/2007/07/05/how-to-insert-data-to-database-as-fast-as-possible/)
+            let mut batch_rows = vec![];
+            let mut insert_batches = vec![];
+            for (i, row) in params.rows.iter().enumerate() {
+                batch_rows.push(row.clone());
+
+                if (i + 1) % INSERT_ROWS_BATCH_COUNT == 0 || i == num_rows - 1 {
+                    // do batch inserts on pushed rows
+                    insert_batches.push(batch_rows);
+                    batch_rows = vec![];
+                }
             }
 
-            let num_rows = qparams.rows.len();
-            if num_rows > INSERT_ROWS_BATCH_COUNT {
-                // batch inserts into groups of 100 (see https://www.depesz.com/2007/07/05/how-to-insert-data-to-database-as-fast-as-possible/)
-                let mut batch_rows = vec![];
-                let mut insert_batches = vec![];
-                for (i, row) in qparams.rows.iter().enumerate() {
-                    batch_rows.push(row.clone());
+            let batch_insert_future = pool_clone.connection().map_err(ApiError::from).and_then(|conn| loop_fn(
+                (0, 0, vec![], column_types, insert_batches, params, conn),
+                |(
+                    i,
+                    mut total_num_rows_affected,
+                    mut total_rows_returned,
+                    column_types,
+                    insert_batches,
+                    params,
+                    conn
+                )| {
+                    // dbg!(&insert_batches);
 
-                    if (i + 1) % INSERT_ROWS_BATCH_COUNT == 0 || i == num_rows - 1 {
-                        // do batch inserts on pushed rows
-                        insert_batches.push(batch_rows);
-                        batch_rows = vec![];
-                    }
-                }
-
-                let batch_insert_future = loop_fn(
-                    (0, 0, vec![], column_types, insert_batches, qparams),
-                    |(
-                        i,
-                        mut total_num_rows_affected,
-                        mut total_rows_returned,
-                        column_types,
-                        insert_batches,
-                        qparams,
-                    )| {
-                        // dbg!(&insert_batches);
-
-                        execute_insert(conn, &qparams, column_types, &insert_batches[i]).and_then(
-                            move |(insert_result, column_types)| {
-                                match insert_result {
-                                    InsertResult::NumRowsAffected(num_rows_affected) => {
-                                        total_num_rows_affected += num_rows_affected;
-                                    }
-                                    InsertResult::Rows(rows) => {
-                                        total_rows_returned.extend(rows);
-                                    }
-                                };
-
-                                if i == insert_batches.len() - 1 {
-                                    Ok(Loop::Break((
-                                        total_num_rows_affected,
-                                        total_rows_returned,
-                                        qparams,
-                                    )))
-                                } else {
-                                    Ok(Loop::Continue((
-                                        i + 1,
-                                        total_num_rows_affected,
-                                        total_rows_returned,
-                                        column_types,
-                                        insert_batches,
-                                        qparams,
-                                    )))
+                    execute_insert(conn, params, column_types, &insert_batches[i]).and_then(
+                        move |(conn, params, column_types, insert_result)| {
+                            match insert_result {
+                                InsertResult::NumRowsAffected(num_rows_affected) => {
+                                    total_num_rows_affected += num_rows_affected;
                                 }
-                            },
-                        )
-                    },
-                )
-                .and_then(
-                    |(total_num_rows_affected, total_rows_returned, qparams)| {
-                        if qparams.returning_columns.is_some() {
-                            Ok(QueryResult::QueryTableResult(total_rows_returned))
-                        } else {
-                            Ok(QueryResult::from_num_rows_affected(total_num_rows_affected))
-                        }
-                    },
-                );
+                                InsertResult::Rows(rows) => {
+                                    total_rows_returned.extend(rows);
+                                }
+                            };
 
-                Either::A(batch_insert_future)
-            } else {
-                // insert all rows
-                let simple_insert_future =
-                    execute_insert(conn, &qparams, column_types, &qparams.rows).and_then(
-                        |(insert_result, _column_types)| match insert_result {
+                            if i == insert_batches.len() - 1 {
+                                Ok(Loop::Break((
+                                    total_num_rows_affected,
+                                    total_rows_returned,
+                                    params,
+                                )))
+                            } else {
+                                Ok(Loop::Continue((
+                                    i + 1,
+                                    total_num_rows_affected,
+                                    total_rows_returned,
+                                    column_types,
+                                    insert_batches,
+                                    params,
+                                    conn
+                                )))
+                            }
+                        },
+                    )
+                },
+            ))
+            .and_then(
+                |(total_num_rows_affected, total_rows_returned, params)| {
+                    if params.returning_columns.is_some() {
+                        Ok(QueryResult::QueryTableResult(total_rows_returned))
+                    } else {
+                        Ok(QueryResult::from_num_rows_affected(total_num_rows_affected))
+                    }
+                },
+            );
+
+            Either::A(batch_insert_future)
+        } else {
+            // insert all rows
+            let simple_insert_future =
+                pool_clone.connection().map_err(ApiError::from).and_then(move |conn| {
+                    let rows = params.rows.clone();
+                    execute_insert(conn, params, column_types, &rows).and_then(
+                        |(_conn, _params, _column_types, insert_result)| match insert_result {
                             InsertResult::NumRowsAffected(num_rows_affected) => {
                                 Ok(QueryResult::from_num_rows_affected(num_rows_affected))
                             }
                             InsertResult::Rows(rows) => Ok(QueryResult::QueryTableResult(rows)),
                         },
-                    );
+                    )
+                });
 
-                Either::B(simple_insert_future)
-            }
-        })
-        .flatten()
+            Either::B(simple_insert_future)
+        }
+    })
+    .flatten()
 }
 
 /// Runs the actual setting up + execution of the INSERT query
 fn execute_insert<'a>(
     mut conn: Connection,
-    params: &QueryParamsInsert,
+    params: QueryParamsInsert,
     column_types: HashMap<String, String>,
     rows: &'a [Map<String, Value>],
-) -> impl Future<Item = (InsertResult, HashMap<String, String>), Error = ApiError> {
+) -> impl Future<Item = (Connection, QueryParamsInsert, HashMap<String, String>, InsertResult), Error = ApiError> {
     let mut is_return_rows = false;
 
     // parse out the columns that have values to assign
@@ -151,13 +155,13 @@ fn execute_insert<'a>(
     };
 
     // generate the ON CONFLICT string
-    let conflict_clause = match generate_conflict_str(params, &columns) {
+    let conflict_clause = match generate_conflict_str(&params, &columns) {
         Some(conflict_str) => conflict_str,
         None => "".to_string(),
     };
 
     // generate the RETURNING string
-    let returning_clause = match generate_returning_clause(params) {
+    let returning_clause = match generate_returning_clause(&params) {
         Some(returning_str) => {
             is_return_rows = true;
             returning_str
@@ -181,10 +185,10 @@ fn execute_insert<'a>(
         .client
         .prepare(&insert_query_str)
         .then(move |result| match result {
-            Ok(statement) => Ok(statement),
+            Ok(statement) => Ok((statement, conn)),
             Err(e) => Err(ApiError::from(e)),
         })
-        .and_then(move |statement| {
+        .and_then(move |(statement, mut conn)| {
             // convert the column values into the actual values we will use for the INSERT statement execution
             let mut prep_values: Vec<&dyn ToSql> = vec![];
             for column_value in column_values.iter() {
@@ -218,7 +222,7 @@ fn execute_insert<'a>(
             if is_return_rows {
                 let return_rows_future =
                     conn.client.query(&statement, &prep_values).collect().then(
-                        |result| match result {
+                        move |result| match result {
                             Ok(rows) => {
                                 match rows
                                     .iter()
@@ -226,7 +230,12 @@ fn execute_insert<'a>(
                                     .collect::<Result<Vec<RowFields>, ApiError>>()
                                 {
                                     Ok(row_fields) => {
-                                        Ok((InsertResult::Rows(row_fields), column_types))
+                                        Ok((
+                                            conn,
+                                            params,
+                                            column_types,
+                                            InsertResult::Rows(row_fields),
+                                        ))
                                     }
                                     Err(e) => Err(e),
                                 }
@@ -239,7 +248,7 @@ fn execute_insert<'a>(
             } else {
                 let return_row_count_future = conn.client.execute(&statement, &prep_values).then(
                     move |result| match result {
-                        Ok(num_rows) => Ok((InsertResult::NumRowsAffected(num_rows), column_types)),
+                        Ok(num_rows) => Ok((conn, params, column_types, InsertResult::NumRowsAffected(num_rows))),
                         Err(e) => Err(ApiError::from(e)),
                     },
                 );

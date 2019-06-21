@@ -42,10 +42,7 @@ pub fn post_table(
         }
     };
 
-    let insert_response = db
-        .connection()
-        .map_err(ApiError::from)
-        .and_then(|conn| insert_into_table(conn, params))
+    let insert_response = insert_into_table(db.get_ref(), params)
         .and_then(|num_rows_affected| {
             Ok(HttpResponseBuilder::new(StatusCode::OK).json(num_rows_affected))
         })

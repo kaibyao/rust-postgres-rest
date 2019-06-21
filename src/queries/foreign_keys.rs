@@ -1,5 +1,4 @@
 use futures::future::{join_all, ok, Either, Future};
-use futures::stream::Stream;
 use l337_postgres::l337::Error as PoolError;
 use sqlparser::{
     dialect::PostgreSqlDialect,
@@ -436,88 +435,19 @@ impl ForeignKeyReference {
         table: String,
         fk_columns_grouped: HashMap<String, (Vec<String>, Vec<String>)>,
     ) -> impl Future<Item = Vec<Self>, Error = PoolError<PgError>> + Send {
+        // used later in futures
+        let table_str = &table;
+        let table_clone_2 = table_str.to_string();
+        let pool_clone = pool.clone();
+
         pool.connection().and_then(move |mut conn| {
-            let statement_str = &format!("
-                WITH foreign_keys as (
-                    SELECT
-                        col.attname AS column_name,
-
-                        substring(
-                            pg_get_constraintdef(c.oid), position(' REFERENCES ' in pg_get_constraintdef(c.oid))+12, position('(' in substring(pg_get_constraintdef(c.oid), 14))-position(' REFERENCES ' in pg_get_constraintdef(c.oid))+1
-                        ) AS fk_table,
-
-                        substring(
-                            pg_get_constraintdef(c.oid), position('(' in substring(pg_get_constraintdef(c.oid), 14))+14, position(')' in substring(pg_get_constraintdef(c.oid), position('(' in substring(pg_get_constraintdef(c.oid), 14))+14))-1
-                        ) AS fk_column
-                    FROM
-                        pg_constraint c
-                        JOIN LATERAL UNNEST(c.conkey) WITH ORDINALITY AS u(attnum, attposition) ON TRUE
-                        JOIN pg_class tbl ON tbl.oid = c.conrelid
-                        JOIN pg_namespace sch ON sch.oid = tbl.relnamespace
-                        JOIN pg_attribute col ON (col.attrelid = tbl.oid AND col.attnum = u.attnum)
-                    WHERE (
-                        sch.nspname = 'public' AND
-                        c.contype = 'f' AND
-                        (tbl.relname = '{0}')
-                    )
-                    GROUP BY c.oid, col.attname
-                    ORDER BY column_name
-                )
-                SELECT
-                    c.column_name,
-                    c.udt_name as column_type,
-                    c.column_default as default_value,
-                    c.character_maximum_length,
-                    c.character_octet_length,
-                    c.is_nullable,
-                    EXISTS(SELECT column_name from foreign_keys WHERE column_name = c.column_name) AS is_foreign_key,
-                    f.fk_table,
-                    f.fk_column
-                FROM
-                    information_schema.columns c
-                    LEFT JOIN foreign_keys f ON c.column_name = f.column_name
-                WHERE
-                    table_schema = 'public' AND
-                    table_name = '{0}'
-                ORDER BY table_name, column_name;", table.clone());
-
-            conn.client.prepare(&statement_str)
+            select_column_stats_statement(&mut conn, &table_clone_2)
                 .map_err(PoolError::External)
                 .and_then(move |statement| {
-                    conn.client.query(&statement, &[])
-                        .map_err(PoolError::External)
-                        .map(|row| {
-                            let is_nullable_string: String = row.get(5);
-
-                            TableColumnStat {
-                                column_name: row.get(0),
-                                column_type: row.get(1),
-                                default_value: row.get(2),
-                                is_nullable: match is_nullable_string.as_str() {
-                                    "YES" => true,
-                                    "NO" => false,
-                                    _ => false,
-                                },
-                                is_foreign_key: row.get(6),
-                                foreign_key_table: row.get(7),
-                                foreign_key_column: row.get(8),
-                                char_max_length: row.get(3),
-                                char_octet_length: row.get(4),
-                            }
-                        })
-                        .collect()
+                    let q = conn.client.query(&statement, &[]);
+                    select_column_stats(q).map_err(PoolError::External)
                 })
                 .map(move |stats| (stats, fk_columns_grouped))
-
-
-
-            // select_column_stats_statement(&mut conn, table)
-            //     .map_err(PoolError::External)
-            //     .and_then(move |statement| {
-            //         let q = conn.client.query(&statement, &[]);
-            //         select_column_stats(q).map_err(PoolError::External)
-            //     })
-            //     .map(move |stats| (stats, fk_columns_grouped))
         })
         .map(|(stats, fk_columns_grouped)| {
             // contains a tuple representing the (matched parent column name, child columns, and original column strings)
@@ -557,8 +487,8 @@ impl ForeignKeyReference {
             (filtered_stats, matched_columns)
         })
         // stats and matched_columns should have the same length and their indexes should match
-        .and_then(|(filtered_stats, matched_columns)| ForeignKeyReference::stats_to_fkr_futures(
-            pool.clone(),
+        .and_then(move |(filtered_stats, matched_columns)| ForeignKeyReference::stats_to_fkr_futures(
+            pool_clone,
             table,
             filtered_stats,
             matched_columns,
@@ -567,7 +497,7 @@ impl ForeignKeyReference {
 
     /// Maps a Vec of `TableColumnStat`s to a Future wrapping a Vec of `ForeignKeyReference`s. Used by from_query_columns.
     fn stats_to_fkr_futures(
-        mut pool: Pool,
+        pool: Pool,
         table: String,
         stats: Vec<TableColumnStat>,
         matched_columns: Vec<(String, Vec<String>, Vec<String>)>,
@@ -618,7 +548,7 @@ impl ForeignKeyReference {
 
             // child columns are all FKs, so we need to recursively call this function
             let child_columns_future =
-                Self::from_query_columns(pool.clone(), foreign_key_table, child_fk_columns).then(
+                Self::from_query_columns(pool.clone(), foreign_key_table.clone(), child_fk_columns).then(
                     move |result| match result {
                         Ok(nested_fks) => Ok(ForeignKeyReference {
                             referring_column: stat_column_name_clone,
