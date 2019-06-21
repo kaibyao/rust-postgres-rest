@@ -1,4 +1,3 @@
-
 use super::postgres_types::RowFields;
 use crate::errors::ApiError;
 use actix_web::HttpRequest;

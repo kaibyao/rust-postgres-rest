@@ -1,14 +1,15 @@
-use super::postgres_types::{convert_row_fields, ColumnTypeValue, RowFields};
-use super::query_types::{QueryParamsInsert, QueryResult};
-use super::select_table_stats::{select_column_stats, select_column_stats_statement};
-use crate::errors::ApiError;
 use futures::future::{err, loop_fn, Either, Future, Loop};
 use futures::stream::Stream;
-
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use tokio_postgres::types::ToSql;
-use tokio_postgres::Client;
+
+use super::postgres_types::{convert_row_fields, ColumnTypeValue, RowFields};
+use super::query_types::{QueryParamsInsert, QueryResult};
+use super::select_table_stats::{select_column_stats, select_column_stats_statement};
+use crate::db::Connection;
+use crate::errors::ApiError;
+
 static INSERT_ROWS_BATCH_COUNT: usize = 2;
 
 enum InsertResult {
@@ -18,27 +19,27 @@ enum InsertResult {
 
 /// Runs an INSERT INTO <table> query
 pub fn insert_into_table(
-    mut client: Client,
+    mut conn: Connection,
     params: QueryParamsInsert,
-) -> impl Future<Item = (QueryResult, Client), Error = (ApiError, Client)> {
+) -> impl Future<Item = QueryResult, Error = ApiError> {
     // serde_json::Values can't automatically convert to non-JSON/JSONB columns.
     // Therefore, get column types of table so we know what types into which the json values are converted.
     // apparently rust_postgres already does this in the background, would be nice if there was a way to hook into existing functionality...
 
     // dbg!(&params);
 
-    select_column_stats_statement(&mut client, &params.table)
+    select_column_stats_statement(&mut conn, &params.table)
         .then(move |result| match result {
-            Ok(statement) => Ok((client.query(&statement, &[]), client)),
-            Err(e) => Err((ApiError::from(e), client)),
+            Ok(statement) => Ok(conn.client.query(&statement, &[])),
+            Err(e) => Err(ApiError::from(e)),
         })
-        .and_then(|(query, client)| {
+        .and_then(|query| {
             select_column_stats(query).then(move |result| match result {
-                Ok(stats) => Ok((stats, client, params)),
-                Err(e) => Err((ApiError::from(e), client)),
+                Ok(stats) => Ok((stats, params)),
+                Err(e) => Err(ApiError::from(e)),
             })
         })
-        .map(|(stats, client, qparams)| {
+        .map(|(stats, qparams)| {
             let mut column_types: HashMap<String, String> = HashMap::new();
 
             for stat in stats.into_iter() {
@@ -61,9 +62,8 @@ pub fn insert_into_table(
                 }
 
                 let batch_insert_future = loop_fn(
-                    (client, 0, 0, vec![], column_types, insert_batches, qparams),
+                    (0, 0, vec![], column_types, insert_batches, qparams),
                     |(
-                        client,
                         i,
                         mut total_num_rows_affected,
                         mut total_rows_returned,
@@ -73,8 +73,8 @@ pub fn insert_into_table(
                     )| {
                         // dbg!(&insert_batches);
 
-                        execute_insert(client, &qparams, column_types, &insert_batches[i]).and_then(
-                            move |(insert_result, client, column_types)| {
+                        execute_insert(conn, &qparams, column_types, &insert_batches[i]).and_then(
+                            move |(insert_result, column_types)| {
                                 match insert_result {
                                     InsertResult::NumRowsAffected(num_rows_affected) => {
                                         total_num_rows_affected += num_rows_affected;
@@ -86,14 +86,12 @@ pub fn insert_into_table(
 
                                 if i == insert_batches.len() - 1 {
                                     Ok(Loop::Break((
-                                        client,
                                         total_num_rows_affected,
                                         total_rows_returned,
                                         qparams,
                                     )))
                                 } else {
                                     Ok(Loop::Continue((
-                                        client,
                                         i + 1,
                                         total_num_rows_affected,
                                         total_rows_returned,
@@ -107,14 +105,11 @@ pub fn insert_into_table(
                     },
                 )
                 .and_then(
-                    |(client, total_num_rows_affected, total_rows_returned, qparams)| {
+                    |(total_num_rows_affected, total_rows_returned, qparams)| {
                         if qparams.returning_columns.is_some() {
-                            Ok((QueryResult::QueryTableResult(total_rows_returned), client))
+                            Ok(QueryResult::QueryTableResult(total_rows_returned))
                         } else {
-                            Ok((
-                                QueryResult::from_num_rows_affected(total_num_rows_affected),
-                                client,
-                            ))
+                            Ok(QueryResult::from_num_rows_affected(total_num_rows_affected))
                         }
                     },
                 );
@@ -123,15 +118,12 @@ pub fn insert_into_table(
             } else {
                 // insert all rows
                 let simple_insert_future =
-                    execute_insert(client, &qparams, column_types, &qparams.rows).and_then(
-                        |(insert_result, client, _column_types)| match insert_result {
-                            InsertResult::NumRowsAffected(num_rows_affected) => Ok((
-                                QueryResult::from_num_rows_affected(num_rows_affected),
-                                client,
-                            )),
-                            InsertResult::Rows(rows) => {
-                                Ok((QueryResult::QueryTableResult(rows), client))
+                    execute_insert(conn, &qparams, column_types, &qparams.rows).and_then(
+                        |(insert_result, _column_types)| match insert_result {
+                            InsertResult::NumRowsAffected(num_rows_affected) => {
+                                Ok(QueryResult::from_num_rows_affected(num_rows_affected))
                             }
+                            InsertResult::Rows(rows) => Ok(QueryResult::QueryTableResult(rows)),
                         },
                     );
 
@@ -143,12 +135,11 @@ pub fn insert_into_table(
 
 /// Runs the actual setting up + execution of the INSERT query
 fn execute_insert<'a>(
-    mut client: Client,
+    mut conn: Connection,
     params: &QueryParamsInsert,
     column_types: HashMap<String, String>,
     rows: &'a [Map<String, Value>],
-) -> impl Future<Item = (InsertResult, Client, HashMap<String, String>), Error = (ApiError, Client)>
-{
+) -> impl Future<Item = (InsertResult, HashMap<String, String>), Error = ApiError> {
     let mut is_return_rows = false;
 
     // parse out the columns that have values to assign
@@ -156,7 +147,7 @@ fn execute_insert<'a>(
     let (values_params_str, column_values) = match get_insert_params(rows, &columns, &column_types)
     {
         Ok((values_params_str, column_values)) => (values_params_str, column_values),
-        Err(e) => return Either::A(err((e, client))),
+        Err(e) => return Either::A(err(e)),
     };
 
     // generate the ON CONFLICT string
@@ -186,46 +177,47 @@ fn execute_insert<'a>(
     ]
     .join("");
 
-    let insert_future =
-        client
-            .prepare(&insert_query_str)
-            .then(move |result| match result {
-                Ok(statement) => Ok((statement, client)),
-                Err(e) => Err((ApiError::from(e), client)),
-            })
-            .and_then(move |(statement, mut client)| {
-                // convert the column values into the actual values we will use for the INSERT statement execution
-                let mut prep_values: Vec<&dyn ToSql> = vec![];
-                for column_value in column_values.iter() {
-                    match column_value {
-                        ColumnTypeValue::BigInt(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Bool(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::ByteA(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Char(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Citext(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Date(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Decimal(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Float8(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::HStore(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Int(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Json(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::JsonB(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::MacAddr(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Name(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Oid(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Real(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::SmallInt(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Text(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Time(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Timestamp(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::TimestampTz(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::Uuid(col_val) => prep_values.push(col_val),
-                        ColumnTypeValue::VarChar(col_val) => prep_values.push(col_val),
-                    };
-                }
+    let insert_future = conn
+        .client
+        .prepare(&insert_query_str)
+        .then(move |result| match result {
+            Ok(statement) => Ok(statement),
+            Err(e) => Err(ApiError::from(e)),
+        })
+        .and_then(move |statement| {
+            // convert the column values into the actual values we will use for the INSERT statement execution
+            let mut prep_values: Vec<&dyn ToSql> = vec![];
+            for column_value in column_values.iter() {
+                match column_value {
+                    ColumnTypeValue::BigInt(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Bool(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::ByteA(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Char(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Citext(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Date(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Decimal(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Float8(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::HStore(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Int(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Json(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::JsonB(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::MacAddr(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Name(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Oid(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Real(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::SmallInt(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Text(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Time(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Timestamp(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::TimestampTz(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::Uuid(col_val) => prep_values.push(col_val),
+                    ColumnTypeValue::VarChar(col_val) => prep_values.push(col_val),
+                };
+            }
 
-                if is_return_rows {
-                    let return_rows_future = client.query(&statement, &prep_values).collect().then(
+            if is_return_rows {
+                let return_rows_future =
+                    conn.client.query(&statement, &prep_values).collect().then(
                         |result| match result {
                             Ok(rows) => {
                                 match rows
@@ -234,32 +226,27 @@ fn execute_insert<'a>(
                                     .collect::<Result<Vec<RowFields>, ApiError>>()
                                 {
                                     Ok(row_fields) => {
-                                        Ok((InsertResult::Rows(row_fields), client, column_types))
+                                        Ok((InsertResult::Rows(row_fields), column_types))
                                     }
-                                    Err(e) => Err((e, client)),
+                                    Err(e) => Err(e),
                                 }
                             }
-                            Err(e) => Err((ApiError::from(e), client)),
+                            Err(e) => Err(ApiError::from(e)),
                         },
                     );
 
-                    Either::A(return_rows_future)
-                } else {
-                    let return_row_count_future =
-                        client
-                            .execute(&statement, &prep_values)
-                            .then(move |result| match result {
-                                Ok(num_rows) => Ok((
-                                    InsertResult::NumRowsAffected(num_rows),
-                                    client,
-                                    column_types,
-                                )),
-                                Err(e) => Err((ApiError::from(e), client)),
-                            });
+                Either::A(return_rows_future)
+            } else {
+                let return_row_count_future = conn.client.execute(&statement, &prep_values).then(
+                    move |result| match result {
+                        Ok(num_rows) => Ok((InsertResult::NumRowsAffected(num_rows), column_types)),
+                        Err(e) => Err(ApiError::from(e)),
+                    },
+                );
 
-                    Either::B(return_row_count_future)
-                }
-            });
+                Either::B(return_row_count_future)
+            }
+        });
 
     Either::B(insert_future)
 }

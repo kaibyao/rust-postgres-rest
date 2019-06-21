@@ -1,4 +1,6 @@
-use futures::future::{Either, Future, FutureResult, join_all, ok};
+use futures::future::{join_all, ok, Either, Future};
+use futures::stream::Stream;
+use l337_postgres::l337::Error as PoolError;
 use sqlparser::{
     dialect::PostgreSqlDialect,
     sqlast::{ASTNode, SQLQuery, SQLSelect, SQLSetExpr, SQLStatement},
@@ -6,11 +8,12 @@ use sqlparser::{
 };
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
-use tokio_postgres::Client;
+use tokio_postgres::Error as PgError;
 
 use super::select_table_stats::{
     select_column_stats, select_column_stats_statement, TableColumnStat,
 };
+use crate::db::{Pool};
 use crate::errors::ApiError;
 
 /// Converts a WHERE clause string into an ASTNode.
@@ -375,10 +378,10 @@ impl ForeignKeyReference {
     /// );
     /// ```
     pub fn from_query_columns(
-        mut client: Client,
-        table: &str,
+        pool: Pool,
+        table: String,
         columns: Vec<String>,
-    ) -> Box<dyn Future<Item = (Vec<Self>, Client), Error = (ApiError, Client)> + Send> {
+    ) -> Box<dyn Future<Item = Vec<Self>, Error = PoolError<PgError>> + Send> {
         let mut fk_columns: Vec<String> = columns
             .iter()
             .filter_map(|col| {
@@ -394,7 +397,7 @@ impl ForeignKeyReference {
 
         // First, check if any columns are using the `.` foreign key delimiter.
         if fk_columns.is_empty() {
-            let empty_future: FutureResult<(Vec<Self>, Client), (ApiError, Client)> = ok((vec![], client));
+            let empty_future = ok(vec![]);
             return Box::new(empty_future);
         }
 
@@ -406,7 +409,10 @@ impl ForeignKeyReference {
                     (col.get(0..dot_index), col.get(dot_index..))
                 {
                     if !fk_columns_grouped.contains_key(parent_col_name) {
-                        fk_columns_grouped.insert(parent_col_name.to_string(), (vec![child_column.to_string()], vec![col]));
+                        fk_columns_grouped.insert(
+                            parent_col_name.to_string(),
+                            (vec![child_column.to_string()], vec![col]),
+                        );
                     } else {
                         let (child_columns, original_refs) =
                             fk_columns_grouped.get_mut(parent_col_name).unwrap();
@@ -419,77 +425,162 @@ impl ForeignKeyReference {
         }
 
         // get column stats for table
-        let process_column_stats_future = ForeignKeyReference::process_column_stats(client, table, fk_columns_grouped);
+        let process_column_stats_future =
+            ForeignKeyReference::process_column_stats(pool, table, fk_columns_grouped);
 
         Box::new(process_column_stats_future)
     }
 
-    fn process_column_stats(mut client: Client, table: &str, fk_columns_grouped: HashMap<String, (Vec<String>, Vec<String>)>) -> impl Future<Item = (Vec<Self>, Client), Error = (ApiError, Client)> + Send {
-        let table_string = table.to_string();
-        select_column_stats_statement(&mut client, table)
-            .then(move |result| match result {
-                Ok(statement) => Ok((client.query(&statement, &[]), client, fk_columns_grouped)),
-                Err(e) => Err((e, client)),
-            })
-            .map(|(query, client, fk_columns_grouped)| {
-                select_column_stats(query)
-                    .then(move |result| match result {
-                        Ok(stats) => { Ok((stats, client, fk_columns_grouped)) },
-                        Err(e) => { Err((e, client)) }
-                    })
-            })
-            .flatten()
-            .map_err(|(e, client)| (ApiError::from(e), client))
-            .map(|(stats, client, fk_columns_grouped)| {
-                // contains a (&str, &Vec<&str>, &Vec<&str>) tuple representing the matched parent column name, child columns, and original column strings
-                let mut matched_columns = vec![];
+    fn process_column_stats(
+        pool: Pool,
+        table: String,
+        fk_columns_grouped: HashMap<String, (Vec<String>, Vec<String>)>,
+    ) -> impl Future<Item = Vec<Self>, Error = PoolError<PgError>> + Send {
+        pool.connection().and_then(move |mut conn| {
+            let statement_str = &format!("
+                WITH foreign_keys as (
+                    SELECT
+                        col.attname AS column_name,
 
-                // filter the table column stats to just the foreign key columns that match the given columns
-                let filtered_stats: Vec<TableColumnStat> = stats.into_iter().filter(|stat| {
-                    if !stat.is_foreign_key { return false; }
+                        substring(
+                            pg_get_constraintdef(c.oid), position(' REFERENCES ' in pg_get_constraintdef(c.oid))+12, position('(' in substring(pg_get_constraintdef(c.oid), 14))-position(' REFERENCES ' in pg_get_constraintdef(c.oid))+1
+                        ) AS fk_table,
+
+                        substring(
+                            pg_get_constraintdef(c.oid), position('(' in substring(pg_get_constraintdef(c.oid), 14))+14, position(')' in substring(pg_get_constraintdef(c.oid), position('(' in substring(pg_get_constraintdef(c.oid), 14))+14))-1
+                        ) AS fk_column
+                    FROM
+                        pg_constraint c
+                        JOIN LATERAL UNNEST(c.conkey) WITH ORDINALITY AS u(attnum, attposition) ON TRUE
+                        JOIN pg_class tbl ON tbl.oid = c.conrelid
+                        JOIN pg_namespace sch ON sch.oid = tbl.relnamespace
+                        JOIN pg_attribute col ON (col.attrelid = tbl.oid AND col.attnum = u.attnum)
+                    WHERE (
+                        sch.nspname = 'public' AND
+                        c.contype = 'f' AND
+                        (tbl.relname = '{0}')
+                    )
+                    GROUP BY c.oid, col.attname
+                    ORDER BY column_name
+                )
+                SELECT
+                    c.column_name,
+                    c.udt_name as column_type,
+                    c.column_default as default_value,
+                    c.character_maximum_length,
+                    c.character_octet_length,
+                    c.is_nullable,
+                    EXISTS(SELECT column_name from foreign_keys WHERE column_name = c.column_name) AS is_foreign_key,
+                    f.fk_table,
+                    f.fk_column
+                FROM
+                    information_schema.columns c
+                    LEFT JOIN foreign_keys f ON c.column_name = f.column_name
+                WHERE
+                    table_schema = 'public' AND
+                    table_name = '{0}'
+                ORDER BY table_name, column_name;", table.clone());
+
+            conn.client.prepare(&statement_str)
+                .map_err(PoolError::External)
+                .and_then(move |statement| {
+                    conn.client.query(&statement, &[])
+                        .map_err(PoolError::External)
+                        .map(|row| {
+                            let is_nullable_string: String = row.get(5);
+
+                            TableColumnStat {
+                                column_name: row.get(0),
+                                column_type: row.get(1),
+                                default_value: row.get(2),
+                                is_nullable: match is_nullable_string.as_str() {
+                                    "YES" => true,
+                                    "NO" => false,
+                                    _ => false,
+                                },
+                                is_foreign_key: row.get(6),
+                                foreign_key_table: row.get(7),
+                                foreign_key_column: row.get(8),
+                                char_max_length: row.get(3),
+                                char_octet_length: row.get(4),
+                            }
+                        })
+                        .collect()
+                })
+                .map(move |stats| (stats, fk_columns_grouped))
+
+
+
+            // select_column_stats_statement(&mut conn, table)
+            //     .map_err(PoolError::External)
+            //     .and_then(move |statement| {
+            //         let q = conn.client.query(&statement, &[]);
+            //         select_column_stats(q).map_err(PoolError::External)
+            //     })
+            //     .map(move |stats| (stats, fk_columns_grouped))
+        })
+        .map(|(stats, fk_columns_grouped)| {
+            // contains a tuple representing the (matched parent column name, child columns, and original column strings)
+            let mut matched_columns: Vec<(String, Vec<String>, Vec<String>)> = vec![];
+
+            // filter the table column stats to just the foreign key columns that match the given columns
+            let filtered_stats: Vec<TableColumnStat> = stats
+                .into_iter()
+                .filter(|stat| {
+                    if !stat.is_foreign_key {
+                        return false;
+                    }
 
                     match fk_columns_grouped
                         .iter()
-                        .find(|(parent_col, _child_col_vec)| parent_col == &&stat.column_name) {
-                            Some((
-                                matched_parent_fk_column,
-                                (matched_child_col_vec, matched_orig_refs),
-                            )) => {
-                                matched_columns.push((
-                                    matched_parent_fk_column.to_string(),
-                                    matched_child_col_vec.iter().map(|s| s.to_string()).collect(),
-                                    matched_orig_refs.clone(),
-                                ));
-                                true
-                            },
-                            None => false,
+                        .find(|(parent_col, _child_col_vec)| parent_col == &&stat.column_name)
+                    {
+                        Some((
+                            matched_parent_fk_column,
+                            (matched_child_col_vec, matched_orig_refs),
+                        )) => {
+                            matched_columns.push((
+                                matched_parent_fk_column.to_string(),
+                                matched_child_col_vec
+                                    .iter()
+                                    .map(|s| s.to_string())
+                                    .collect(),
+                                matched_orig_refs.clone(),
+                            ));
+                            true
                         }
-                }).collect();
+                        None => false,
+                    }
+                })
+                .collect();
 
-                // stats and matched_columns should have the same length and their indexes should match
-                join_all(ForeignKeyReference::stats_to_fkr_futures(table_string, filtered_stats, matched_columns, client))
-                    .then(move |result| match result {
-                        Ok(fkrs) => Ok((fkrs, client)),
-                        Err(e) => Err((e, client))
-                    })
-            })
-            .flatten()
+            (filtered_stats, matched_columns)
+        })
+        // stats and matched_columns should have the same length and their indexes should match
+        .and_then(|(filtered_stats, matched_columns)| ForeignKeyReference::stats_to_fkr_futures(
+            pool.clone(),
+            table,
+            filtered_stats,
+            matched_columns,
+        ))
     }
 
     /// Maps a Vec of `TableColumnStat`s to a Future wrapping a Vec of `ForeignKeyReference`s. Used by from_query_columns.
     fn stats_to_fkr_futures(
+        mut pool: Pool,
         table: String,
         stats: Vec<TableColumnStat>,
         matched_columns: Vec<(String, Vec<String>, Vec<String>)>,
-        mut client: Client,
-    ) -> Vec<impl Future<Item = Self, Error = ApiError>> {
+    ) -> impl Future<Item = Vec<Self>, Error = PoolError<PgError>> {
         let mut fkr_futures = vec![];
-
         for (i, stat) in stats.into_iter().enumerate() {
-        // stats.into_iter().enumerate().map(move |(i, stat)| {
+            // stats.into_iter().enumerate().map(move |(i, stat)| {
             let (_parent_col_match, child_columns_match, original_refs_match) = &matched_columns[i];
 
-            let original_refs = original_refs_match.iter().map(|col| col.to_string()).collect();
+            let original_refs = original_refs_match
+                .iter()
+                .map(|col| col.to_string())
+                .collect();
             let foreign_key_table = stat.foreign_key_table.clone().unwrap();
 
             // filter child columns to just the foreign keys
@@ -511,43 +602,40 @@ impl ForeignKeyReference {
 
             // child column is not a foreign key, return future with ForeignKeyReference
             if child_fk_columns.is_empty() {
-                let no_child_columns_fut = ok::<ForeignKeyReference, ApiError>(ForeignKeyReference {
-                    referring_column: stat_column_name_clone,
-                    referring_table: table_clone,
-                    table_referred: foreign_key_table,
-                    foreign_key_column: stat_fk_column,
-                    nested_fks: vec![],
-                    original_refs,
-                });
+                let no_child_columns_fut =
+                    ok::<ForeignKeyReference, PoolError<PgError>>(ForeignKeyReference {
+                        referring_column: stat_column_name_clone,
+                        referring_table: table_clone,
+                        table_referred: foreign_key_table,
+                        foreign_key_column: stat_fk_column,
+                        nested_fks: vec![],
+                        original_refs,
+                    });
 
                 fkr_futures.push(Either::A(no_child_columns_fut));
                 continue;
             }
 
             // child columns are all FKs, so we need to recursively call this function
-            let child_columns_future = Self::from_query_columns(client, &foreign_key_table, child_fk_columns)
-                .then(|result| match result {
-                    Ok((nested_fks, client_reuse)) => {
-                        client = client_reuse;
-                        Ok(ForeignKeyReference {
+            let child_columns_future =
+                Self::from_query_columns(pool.clone(), foreign_key_table, child_fk_columns).then(
+                    move |result| match result {
+                        Ok(nested_fks) => Ok(ForeignKeyReference {
                             referring_column: stat_column_name_clone,
                             referring_table: table_clone,
                             table_referred: foreign_key_table,
                             foreign_key_column: stat_fk_column,
                             nested_fks,
                             original_refs,
-                        })
+                        }),
+                        Err(e) => Err(e),
                     },
-                    Err((e, client_reuse)) => {
-                        client = client_reuse;
-                        Err(e)
-                    }
-                });
+                );
 
             fkr_futures.push(Either::B(child_columns_future));
         }
 
-        fkr_futures
+        join_all(fkr_futures)
     }
 
     /// Given an array of ForeignKeyReference, find the one that matches a given table and column name, as well as the matching foreign key table column.

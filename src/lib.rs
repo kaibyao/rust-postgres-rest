@@ -11,16 +11,16 @@ extern crate serde;
 #[macro_use]
 extern crate tokio_postgres;
 
-use actix_web::{Scope, web};
+use actix_web::{web, Scope};
 
 // library modules
 mod queries;
 
 mod db;
-use crate::db::PgConnection;
+use crate::db::connect;
 
 mod endpoints;
-use endpoints::{get_all_table_names, index, post_table, get_table};
+use endpoints::{get_all_table_names, get_table, index, post_table};
 
 mod errors;
 
@@ -46,7 +46,7 @@ impl<'a> AppConfig<'a> {
 
 /// Takes an initialized App and config, and appends the Rest API functionality to the scope’s endpoint.
 pub fn generate_rest_api_scope(config: &AppConfig) -> Scope {
-    let pool = PgConnection::connect(config.database_url).unwrap();
+    let pool = connect(config.database_url).unwrap();
 
     web::scope(config.scope_name)
         .data(pool)
@@ -56,6 +56,6 @@ pub fn generate_rest_api_scope(config: &AppConfig) -> Scope {
         .service(
             web::resource("/{table}")
                 .route(web::get().to_async(get_table))
-                .route(web::post().to_async(post_table))
+                .route(web::post().to_async(post_table)),
         )
 }

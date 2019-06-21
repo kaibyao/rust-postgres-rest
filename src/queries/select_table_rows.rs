@@ -4,7 +4,6 @@ use futures::stream::Stream;
 use regex::Regex;
 use sqlparser::sqlast::ASTNode;
 use tokio_postgres::types::ToSql;
-use tokio_postgres::Client;
 
 use super::foreign_keys::{
     fk_ast_nodes_from_where_ast, fk_columns_from_where_ast, where_clause_str_to_ast,
@@ -13,6 +12,7 @@ use super::foreign_keys::{
 use super::postgres_types::{convert_row_fields, RowFields};
 use super::query_types::QueryParamsSelect;
 use super::utils::{validate_sql_name, validate_where_column};
+use crate::db::{Pool};
 use crate::errors::ApiError;
 
 #[derive(Debug, PartialEq)]
@@ -24,19 +24,15 @@ enum PreparedStatementValue {
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query
 pub fn select_table_rows(
-    client: Client,
+    pool: &Pool,
     params: QueryParamsSelect,
-) -> impl Future<Item = (Vec<RowFields>, Client), Error = (ApiError, Client)> {
+) -> impl Future<Item = Vec<RowFields>, Error = ApiError> {
     if let Err(e) = validate_sql_name(&params.table) {
-        return Either::A(err::<(Vec<RowFields>, Client), (ApiError, Client)>((
-            e, client,
-        )));
+        return Either::A(err::<Vec<RowFields>, ApiError>(e));
     }
 
     // get list of every column being used in the query params (columns, where, distinct, group_by, order_by). Used for finding all foreign key references
-    let mut columns = params
-        .columns
-        .clone();
+    let mut columns = params.columns.clone();
 
     // WHERE clause foreign key references
     let where_ast = match &params.conditions {
@@ -46,12 +42,9 @@ pub fn select_table_rows(
                 None => ASTNode::SQLIdentifier("".to_string()),
             },
             Err(_) => {
-                return Either::A(err::<(Vec<RowFields>, Client), (ApiError, Client)>((
-                    ApiError::generate_error(
-                        "INVALID_SQL_SYNTAX",
-                        ["WHERE", where_clause_str].join(":"),
-                    ),
-                    client,
+                return Either::A(err::<Vec<RowFields>, ApiError>(ApiError::generate_error(
+                    "INVALID_SQL_SYNTAX",
+                    ["WHERE", where_clause_str].join(":"),
                 )));
             }
         },
@@ -70,70 +63,65 @@ pub fn select_table_rows(
         columns.extend(v.clone());
     }
 
+    let pool = pool.clone();
+
     // parse columns for foreign key usage
-    let fk_future = ForeignKeyReference::from_query_columns(client, &params.table, columns).and_then(|(fk_columns, mut client)| {
-        dbg!(&fk_columns);
+    let fk_future = ForeignKeyReference::from_query_columns(pool.clone(), params.table.clone(), columns)
+        .map_err(ApiError::from)
+        .and_then(move |fk_columns| {
+            dbg!(&fk_columns);
 
-        let (statement_str, prepared_values) =
-            match build_select_statement(&params, fk_columns, where_ast) {
-                Ok((stmt, prep_vals)) => (stmt, prep_vals),
-                Err(e) => {
-                    return Either::A(err::<(Vec<RowFields>, Client), (ApiError, Client)>((
-                        e, client,
-                    )))
-                }
-            };
-
-        dbg!(&statement_str);
-        dbg!(&prepared_values);
-
-        // sending prepared statement to postgres
-        let select_rows_future = client
-            .prepare(&statement_str)
-            .map_err(|e| (
-                ApiError::from(e),
-                client,
-            ))
-            .and_then(move |statement| {
-                let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
-                    vec![]
-                } else {
-                    prepared_values
-                        .iter()
-                        .map(|val| {
-                            let val_to_sql: &dyn ToSql = match val {
-                                PreparedStatementValue::Int4(val_i32) => val_i32,
-                                PreparedStatementValue::Int8(val_i64) => val_i64,
-                                PreparedStatementValue::String(val_string) => val_string,
-                            };
-                            val_to_sql
-                        })
-                        .collect()
+            let (statement_str, prepared_values) =
+                match build_select_statement(&params, fk_columns, where_ast) {
+                    Ok((stmt, prep_vals)) => (stmt, prep_vals),
+                    Err(e) => return Either::A(err::<Vec<RowFields>, ApiError>(e)),
                 };
 
-                dbg!(&prep_values);
+            dbg!(&statement_str);
+            dbg!(&prepared_values);
 
-                client
-                    .query(&statement, &prep_values)
-                    .then(|result| match result {
-                        Ok(row) => match convert_row_fields(&row) {
-                            Ok(row_fields) => Ok(row_fields),
-                            Err(e) => Err(e),
-                        },
-                        Err(e) => Err(ApiError::from(e)),
-                    })
-                    .collect()
-                    .then(|result| {
-                        dbg!(&result);
-                        match result {
-                            Ok(row_fields) => Ok((row_fields, client)),
-                            Err(e) => Err((e, client)),
-                        }
-                    })
-            });
+            // sending prepared statement to postgres
+            let select_rows_future = pool
+                .connection()
+                .map_err(ApiError::from)
+                .and_then(|mut conn|
+                    conn.client
+                    .prepare(&statement_str)
+                    .map_err(ApiError::from)
+                    .and_then(move |statement| {
+                        let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
+                            vec![]
+                        } else {
+                            prepared_values
+                                .iter()
+                                .map(|val| {
+                                    let val_to_sql: &dyn ToSql = match val {
+                                        PreparedStatementValue::Int4(val_i32) => val_i32,
+                                        PreparedStatementValue::Int8(val_i64) => val_i64,
+                                        PreparedStatementValue::String(val_string) => val_string,
+                                    };
+                                    val_to_sql
+                                })
+                                .collect()
+                        };
 
-        Either::B(select_rows_future)
-    });
+                        dbg!(&prep_values);
+
+                        conn.client
+                            .query(&statement, &prep_values)
+                            .then(|result| match result {
+                                Ok(row) => match convert_row_fields(&row) {
+                                    Ok(row_fields) => Ok(row_fields),
+                                    Err(e) => Err(e),
+                                },
+                                Err(e) => Err(ApiError::from(e)),
+                            })
+                            .collect()
+                    })
+                );
+
+            Either::B(select_rows_future)
+        });
 
     Either::B(fk_future)
 }

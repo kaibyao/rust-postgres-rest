@@ -4,8 +4,10 @@ use futures::future::{err, join_all, Either, Future};
 use futures::stream::Stream;
 use std::collections::HashMap;
 
+use crate::db::Connection;
 use tokio_postgres::impls::{Prepare, Query};
-use tokio_postgres::{Client, Error};
+use tokio_postgres::Error as PgError;
+
 #[derive(Debug, Deserialize, Serialize)]
 /// Stats for a single column of a table
 pub struct TableColumnStat {
@@ -78,34 +80,34 @@ pub struct TableStats {
 
 /// Returns the requested table’s stats: number of rows, the foreign keys referring to the table, and column names + types
 pub fn select_table_stats(
-    mut client: Client,
+    mut conn: Connection,
     table: String,
-) -> impl Future<Item = (TableStats, Client), Error = (ApiError, Client)> {
+) -> impl Future<Item = TableStats, Error = ApiError> {
     if let Err(e) = validate_sql_name(&table) {
-        return Either::A(err::<(TableStats, Client), (ApiError, Client)>((e, client)));
+        return Either::A(err::<TableStats, ApiError>(e));
     }
 
     // run all sub-operations in "parallel"
 
     // create prepared statements
     let f = join_all(vec![
-        select_row_count_statement(&mut client, &table),
-        select_constraints_statement(&mut client, &table),
-        select_indexes_statement(&mut client, &table),
-        select_column_stats_statement(&mut client, &table),
+        select_row_count_statement(&mut conn, &table),
+        select_constraints_statement(&mut conn, &table),
+        select_indexes_statement(&mut conn, &table),
+        select_column_stats_statement(&mut conn, &table),
     ])
     .then(move |result| match result {
         // query the statements
         Ok(statements) => {
             let mut queries = vec![];
             for statement in &statements {
-                queries.push(client.query(statement, &[]))
+                queries.push(conn.client.query(statement, &[]))
             }
-            Ok((queries, client))
+            Ok(queries)
         }
-        Err(e) => Err((e, client)),
+        Err(e) => Err(e),
     })
-    .and_then(|(mut queries, client)| {
+    .and_then(|mut queries| {
         // compile the results of the sub-operations into final stats
         let column_stats_q = queries.pop().unwrap();
         let indexes_q = queries.pop().unwrap();
@@ -120,20 +122,23 @@ pub fn select_table_stats(
         count_f
             .join4(constraints_f, indexes_f, column_stats_f)
             .then(move |result| match result {
-                Ok((row_count, constraints, indexes, column_stats)) => Ok((
-                    compile_table_stats(&table, row_count, constraints, indexes, column_stats),
-                    client,
+                Ok((row_count, constraints, indexes, column_stats)) => Ok(compile_table_stats(
+                    &table,
+                    row_count,
+                    constraints,
+                    indexes,
+                    column_stats,
                 )),
-                Err(e) => Err((e, client)),
+                Err(e) => Err(e),
             })
     })
-    .map_err(|(e, client)| (ApiError::from(e), client));
+    .map_err(|e| ApiError::from(e));
 
     Either::B(f)
 }
 
 /// Returns a given table’s column stats: column names, column types, length, default values, and foreign keys information.
-pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>, Error = Error> {
+pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>, Error = PgError> {
     q.map(|row| {
         let is_nullable_string: String = row.get(5);
 
@@ -154,13 +159,9 @@ pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>,
         }
     })
     .collect()
-    .then(move |result| match result {
-        Ok(stats) => Ok(stats),
-        Err(e) => Err(e),
-    })
 }
 
-pub fn select_column_stats_statement(client: &mut Client, table: &str) -> Prepare {
+pub fn select_column_stats_statement(conn: &mut Connection, table: &str) -> Prepare {
     let statement_str = &format!("
 WITH foreign_keys as (
     SELECT
@@ -206,7 +207,7 @@ WHERE
     table_name = '{0}'
 ORDER BY table_name, column_name;", table);
 
-    client.prepare(&statement_str)
+    conn.client.prepare(&statement_str)
 }
 
 /// Takes the results of individual queries and generates the final table stats object
@@ -259,7 +260,7 @@ fn compile_table_stats(
     }
 }
 
-fn select_constraints(q: Query) -> impl Future<Item = Vec<Constraint>, Error = Error> {
+fn select_constraints(q: Query) -> impl Future<Item = Vec<Constraint>, Error = PgError> {
     // retrieves all constraints (c = check, u = unique, f = foreign key, p = primary key)
     // shamelessly taken from https://dba.stackexchange.com/questions/36979/retrieving-all-pk-and-fk
 
@@ -312,7 +313,7 @@ fn select_constraints(q: Query) -> impl Future<Item = Vec<Constraint>, Error = E
     .collect()
 }
 
-fn select_constraints_statement(client: &mut Client, table: &str) -> Prepare {
+fn select_constraints_statement(conn: &mut Connection, table: &str) -> Prepare {
     let statement_str = format!(r#"
 SELECT
     c.conname                   AS name,
@@ -345,11 +346,11 @@ WHERE (
 GROUP BY name, constraint_type, "table", definition
 ORDER BY "table";"#, table);
 
-    client.prepare(&statement_str)
+    conn.client.prepare(&statement_str)
 }
 
 // returns indexes (including primary keys) of a given table
-fn select_indexes(q: Query) -> impl Future<Item = Vec<TableIndex>, Error = Error> {
+fn select_indexes(q: Query) -> impl Future<Item = Vec<TableIndex>, Error = PgError> {
     q.map(|row| {
         let column_names_str: String = row.get(2);
         TableIndex {
@@ -371,7 +372,7 @@ fn select_indexes(q: Query) -> impl Future<Item = Vec<TableIndex>, Error = Error
     })
 }
 
-fn select_indexes_statement(client: &mut Client, table: &str) -> Prepare {
+fn select_indexes_statement(conn: &mut Connection, table: &str) -> Prepare {
     // taken from https://stackoverflow.com/a/2213199
     let statement_str = format!(
         r#"
@@ -413,10 +414,10 @@ ORDER BY
         table
     );
 
-    client.prepare(&statement_str)
+    conn.client.prepare(&statement_str)
 }
 
-fn select_row_count(q: Query) -> impl Future<Item = i64, Error = Error> {
+fn select_row_count(q: Query) -> impl Future<Item = i64, Error = PgError> {
     q.map(|row| row.get(0))
         .collect()
         .then(move |result| match result {
@@ -425,8 +426,8 @@ fn select_row_count(q: Query) -> impl Future<Item = i64, Error = Error> {
         })
 }
 
-fn select_row_count_statement(client: &mut Client, table: &str) -> Prepare {
+fn select_row_count_statement(conn: &mut Connection, table: &str) -> Prepare {
     let statement_str = ["SELECT COUNT(*) FROM ", table, ";"].join("");
 
-    client.prepare(&statement_str)
+    conn.client.prepare(&statement_str)
 }

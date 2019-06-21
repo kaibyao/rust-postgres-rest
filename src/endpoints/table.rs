@@ -2,7 +2,7 @@ use actix_web::dev::HttpResponseBuilder;
 use actix_web::http::StatusCode;
 use actix_web::web::Json;
 use actix_web::{web, HttpRequest, HttpResponse};
-use futures::future::{Either, err};
+use futures::future::{err, Either};
 use futures::Future;
 use serde_json::Value;
 
@@ -14,10 +14,13 @@ use crate::queries::{
 use query_types::{QueryParamsInsert, QueryParamsSelect, RequestQueryStringParams};
 
 /// Retrieves a list of table names that exist in the DB.
-pub fn get_all_table_names(db: web::Data<Pool>) -> impl Future<Item = HttpResponse, Error = ApiError> {
-    db.run(select_all_tables)
+pub fn get_all_table_names(
+    db: web::Data<Pool>,
+) -> impl Future<Item = HttpResponse, Error = ApiError> {
+    db.connection()
+        .map_err(ApiError::from)
+        .and_then(|conn| select_all_tables(conn).map_err(ApiError::from))
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
-        .or_else(|e| Err(ApiError::from(e)))
 }
 
 /// Inserts new rows into a table
@@ -40,7 +43,9 @@ pub fn post_table(
     };
 
     let insert_response = db
-        .run(|client| insert_into_table(client, params))
+        .connection()
+        .map_err(ApiError::from)
+        .and_then(|conn| insert_into_table(conn, params))
         .and_then(|num_rows_affected| {
             Ok(HttpResponseBuilder::new(StatusCode::OK).json(num_rows_affected))
         })
@@ -68,7 +73,8 @@ fn get_table_rows(
     db: web::Data<Pool>,
     params: QueryParamsSelect,
 ) -> impl Future<Item = HttpResponse, Error = ApiError> {
-    db.run(|client| select_table_rows(client, params))
+    select_table_rows(db.get_ref(), params)
+        .map_err(ApiError::from)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
         .or_else(|e| Err(ApiError::from(e)))
 }
@@ -77,7 +83,9 @@ fn get_table_stats(
     db: web::Data<Pool>,
     table: String,
 ) -> impl Future<Item = HttpResponse, Error = ApiError> {
-    db.run(|client| select_table_stats(client, table))
+    db.connection()
+        .map_err(ApiError::from)
+        .and_then(|conn| select_table_stats(conn, table))
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
         .or_else(|e| Err(ApiError::from(e)))
 }

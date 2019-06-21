@@ -58,7 +58,10 @@ where
         <T as FromSql>::accepts(ty)
     }
 
-    fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn StdError + 'static + Send + Sync>> {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn StdError + 'static + Send + Sync>> {
         <T as FromSql>::from_sql(ty, raw).map(ColumnValue::NotNullable)
     }
 
