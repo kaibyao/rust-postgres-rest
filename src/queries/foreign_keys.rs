@@ -1,6 +1,6 @@
 use futures::future::{join_all, ok, Either, Future};
 use sqlparser::{
-    dialect::PostgreSqlDialect,
+    dialect::Dialect,
     sqlast::{ASTNode, SQLQuery, SQLSelect, SQLSetExpr, SQLStatement},
     sqlparser::Parser,
 };
@@ -11,10 +11,25 @@ use super::select_table_stats::{
 };
 use crate::{db::Pool, errors::ApiError};
 
+struct PgDialectWithPreparedStatement;
+impl Dialect for PgDialectWithPreparedStatement {
+    fn is_identifier_start(&self, ch: char) -> bool {
+        (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch == '@') || ch == '$'
+    }
+
+    fn is_identifier_part(&self, ch: char) -> bool {
+        (ch >= 'a' && ch <= 'z')
+            || (ch >= 'A' && ch <= 'Z')
+            || (ch >= '0' && ch <= '9')
+            || (ch == '@')
+            || ch == '_'
+    }
+}
+
 /// Converts a WHERE clause string into an ASTNode.
 pub fn where_clause_str_to_ast(clause: &str) -> Result<Option<ASTNode>, ApiError> {
     let full_statement = ["SELECT * FROM a_table WHERE ", clause].join("");
-    let dialect = PostgreSqlDialect {};
+    let dialect = PgDialectWithPreparedStatement;
 
     // convert the statement into an AST, and then extract the "WHERE" portion of the AST
     let mut parsed = Parser::parse_sql(&dialect, full_statement)?;

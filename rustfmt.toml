@@ -1,5 +1,6 @@
 comment_width = 100
 edition = "2018"
 merge_imports = true
+reorder_imports = true
 use_field_init_shorthand = true
 wrap_comments = true

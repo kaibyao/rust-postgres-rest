@@ -38,8 +38,6 @@ pub fn select_table_rows(
     // order_by). Used for finding all foreign key references
     let mut columns = params.columns.clone();
 
-    dbg!(&params);
-
     // WHERE clause foreign key references
     let where_ast = match &params.conditions {
         Some(where_clause_str) => match where_clause_str_to_ast(where_clause_str) {
@@ -48,7 +46,6 @@ pub fn select_table_rows(
                 None => ASTNode::SQLIdentifier("".to_string()),
             },
             Err(_e) => {
-                dbg!(_e);
                 return Either::A(err::<Vec<RowFields>, ApiError>(ApiError::generate_error(
                     "INVALID_SQL_SYNTAX",
                     ["WHERE", where_clause_str].join(":"),
@@ -73,16 +70,11 @@ pub fn select_table_rows(
     // parse columns for foreign key usage
     let fk_future = ForeignKeyReference::from_query_columns(&pool, params.table.clone(), columns)
         .and_then(move |fk_columns| {
-            dbg!(&fk_columns);
-
             let (statement_str, prepared_values) =
                 match build_select_statement(params, fk_columns, where_ast) {
                     Ok((stmt, prep_vals)) => (stmt, prep_vals),
                     Err(e) => return Either::A(err::<Vec<RowFields>, ApiError>(e)),
                 };
-
-            dbg!(&statement_str);
-            dbg!(&prepared_values);
 
             // sending prepared statement to postgres
             let select_rows_future = pool
@@ -110,8 +102,6 @@ pub fn select_table_rows(
                                     })
                                     .collect()
                             };
-
-                            dbg!(&prep_values);
 
                             conn.query(&statement, &prep_values)
                                 .collect()
@@ -153,8 +143,6 @@ fn build_select_statement(
         statement.extend(get_column_str(distinct_columns, &params.table, &fks)?);
         statement.push(") ");
     }
-
-    // dbg!(&params.columns);
 
     // building column selection
     statement.extend(get_column_str(&params.columns, &params.table, &fks)?);
