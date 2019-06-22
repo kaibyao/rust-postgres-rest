@@ -5,8 +5,8 @@ use failure::Fail;
 /// Describes the type of notification we are sending
 pub enum MessageCategory {
     Error,
-    // Info,
-    // Warning,
+    /* Info,
+     * Warning, */
 }
 
 #[derive(Debug, Fail, Serialize)]
@@ -149,33 +149,33 @@ impl From<actix_http::error::Error> for ApiError {
         }
     }
 }
-impl From<l337_postgres::l337::Error<ApiError>> for ApiError {
-    fn from(err: l337_postgres::l337::Error<ApiError>) -> Self {
+impl From<bb8::RunError<ApiError>> for ApiError {
+    fn from(err: bb8::RunError<ApiError>) -> Self {
         match err {
-            l337_postgres::l337::Error::Internal(e) => {
-                let details = format!("{}", e);
+            bb8::RunError::TimedOut => {
+                let details = "The database connection timed out.".to_string();
                 ApiError::InternalError {
                     category: MessageCategory::Error,
-                    code: "DATABASE_ERROR",
+                    code: "DATABASE_ERROR_TIMEOUT",
                     details,
                     message: "There was an error when making the request with the database pool.",
                     http_status: 500,
                 }
             }
-            l337_postgres::l337::Error::External(e) => e,
+            bb8::RunError::User(e) => e,
         }
     }
 }
-impl From<l337_postgres::l337::Error<tokio_postgres::Error>> for ApiError {
-    fn from(err: l337_postgres::l337::Error<tokio_postgres::Error>) -> Self {
-        let (code, details) = match err {
-            l337_postgres::l337::Error::External(e) => ("DATABASE_ERROR", format!("{}", e)),
-            l337_postgres::l337::Error::Internal(e) => ("DATABASE_ERROR", format!("{}", e)),
+impl From<bb8::RunError<tokio_postgres::Error>> for ApiError {
+    fn from(err: bb8::RunError<tokio_postgres::Error>) -> Self {
+        let details = match err {
+            bb8::RunError::TimedOut => "The database connection timed out.".to_string(),
+            bb8::RunError::User(e) => format!("{}", e),
         };
 
         ApiError::InternalError {
             category: MessageCategory::Error,
-            code,
+            code: "DATABASE_ERROR",
             details,
             message: "There was an error when making the request with the database pool.",
             http_status: 500,
@@ -216,7 +216,7 @@ impl From<sqlparser::sqlparser::ParserError> for ApiError {
             category: MessageCategory::Error,
             code: "SQL_PARSER_ERROR",
             details,
-            message: "A message occurred when parsing JSON.",
+            message: "A message occurred when parsing SQL.",
             offender: "".to_string(),
             http_status: 400,
         }

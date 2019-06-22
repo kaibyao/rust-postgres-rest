@@ -6,9 +6,7 @@ use eui48::MacAddress as Eui48MacAddress;
 use postgres_protocol::types::{macaddr_from_sql, macaddr_to_sql};
 use rust_decimal::Decimal;
 use serde_json::Value;
-use std::collections::HashMap;
-use std::error::Error as StdError;
-use std::str::FromStr;
+use std::{collections::HashMap, error::Error as StdError, str::FromStr};
 use tokio_postgres::{
     accepts,
     row::Row,
@@ -44,7 +42,8 @@ impl ToSql for MacAddress {
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
-/// Represents a single column value for a returned row. We have to have an Enum describing column data that is non-nullable vs nullable
+/// Represents a single column value for a returned row. We have to have an Enum describing column
+/// data that is non-nullable vs nullable
 pub enum ColumnValue<T> {
     Nullable(Option<T>),
     NotNullable(T),

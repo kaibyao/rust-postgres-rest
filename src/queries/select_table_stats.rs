@@ -1,12 +1,15 @@
 use super::utils::validate_sql_name;
 use crate::errors::ApiError;
-use futures::future::{err, join_all, Either, Future};
-use futures::stream::Stream;
+use futures::{
+    future::{err, join_all, Either, Future},
+    stream::Stream,
+};
 use std::collections::HashMap;
 
-use crate::db::Connection;
-use tokio_postgres::impls::{Prepare, Query};
-use tokio_postgres::Error as PgError;
+use tokio_postgres::{
+    impls::{Prepare, Query},
+    Client, Error as PgError,
+};
 
 #[derive(Debug, Deserialize, Serialize)]
 /// Stats for a single column of a table
@@ -25,9 +28,12 @@ pub struct TableColumnStat {
     pub foreign_key_table: Option<String>,
     /// table column being referenced (if is_foreign_key)
     pub foreign_key_column: Option<String>,
-    /// If data_type identifies a character or bit string type, the declared maximum length; null for all other data types or if no maximum length was declared.
+    /// If data_type identifies a character or bit string type, the declared maximum length; null
+    /// for all other data types or if no maximum length was declared.
     pub char_max_length: Option<i32>,
-    /// If data_type identifies a character type, the maximum possible length in octets (bytes) of a datum; null for all other data types. The maximum octet length depends on the declared character maximum length (see above) and the server encoding.
+    /// If data_type identifies a character type, the maximum possible length in octets (bytes) of
+    /// a datum; null for all other data types. The maximum octet length depends on the declared
+    /// character maximum length (see above) and the server encoding.
     pub char_octet_length: Option<i32>,
 }
 
@@ -78,13 +84,14 @@ pub struct TableStats {
     pub rows: i64,
 }
 
-/// Returns the requested table’s stats: number of rows, the foreign keys referring to the table, and column names + types
+/// Returns the requested table’s stats: number of rows, the foreign keys referring to the table,
+/// and column names + types
 pub fn select_table_stats(
-    mut conn: Connection,
+    mut conn: Client,
     table: String,
-) -> impl Future<Item = TableStats, Error = ApiError> {
+) -> impl Future<Item = (TableStats, Client), Error = (ApiError, Client)> {
     if let Err(e) = validate_sql_name(&table) {
-        return Either::A(err::<TableStats, ApiError>(e));
+        return Either::A(err::<(TableStats, Client), (ApiError, Client)>((e, conn)));
     }
 
     // run all sub-operations in "parallel"
@@ -101,13 +108,13 @@ pub fn select_table_stats(
         Ok(statements) => {
             let mut queries = vec![];
             for statement in &statements {
-                queries.push(conn.client.query(statement, &[]))
+                queries.push(conn.query(statement, &[]))
             }
-            Ok(queries)
+            Ok((queries, conn))
         }
-        Err(e) => Err(e),
+        Err(e) => Err((e, conn)),
     })
-    .and_then(|mut queries| {
+    .and_then(|(mut queries, conn)| {
         // compile the results of the sub-operations into final stats
         let column_stats_q = queries.pop().unwrap();
         let indexes_q = queries.pop().unwrap();
@@ -122,22 +129,20 @@ pub fn select_table_stats(
         count_f
             .join4(constraints_f, indexes_f, column_stats_f)
             .then(move |result| match result {
-                Ok((row_count, constraints, indexes, column_stats)) => Ok(compile_table_stats(
-                    &table,
-                    row_count,
-                    constraints,
-                    indexes,
-                    column_stats,
+                Ok((row_count, constraints, indexes, column_stats)) => Ok((
+                    compile_table_stats(&table, row_count, constraints, indexes, column_stats),
+                    conn,
                 )),
-                Err(e) => Err(e),
+                Err(e) => Err((e, conn)),
             })
     })
-    .map_err(|e| ApiError::from(e));
+    .map_err(|(e, conn)| (ApiError::from(e), conn));
 
     Either::B(f)
 }
 
-/// Returns a given table’s column stats: column names, column types, length, default values, and foreign keys information.
+/// Returns a given table’s column stats: column names, column types, length, default values, and
+/// foreign keys information.
 pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>, Error = PgError> {
     q.map(|row| {
         let is_nullable_string: String = row.get(5);
@@ -161,7 +166,7 @@ pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>,
     .collect()
 }
 
-pub fn select_column_stats_statement(conn: &mut Connection, table: &str) -> Prepare {
+pub fn select_column_stats_statement(conn: &mut Client, table: &str) -> Prepare {
     let statement_str = &format!("
 WITH foreign_keys as (
     SELECT
@@ -207,7 +212,7 @@ WHERE
     table_name = '{0}'
 ORDER BY table_name, column_name;", table);
 
-    conn.client.prepare(&statement_str)
+    conn.prepare(&statement_str)
 }
 
 /// Takes the results of individual queries and generates the final table stats object
@@ -225,7 +230,8 @@ fn compile_table_stats(
         match constraint.constraint_type {
             "foreign_key" => {
                 if let Some(fk_table) = &constraint.fk_table {
-                    // push foreign key information to referenced_by if fk_table matches the current table
+                    // push foreign key information to referenced_by if fk_table matches the current
+                    // table
                     if fk_table == table {
                         referenced_by.push(TableReferencedBy {
                             referencing_table: constraint.table.clone(),
@@ -264,7 +270,8 @@ fn select_constraints(q: Query) -> impl Future<Item = Vec<Constraint>, Error = P
     // retrieves all constraints (c = check, u = unique, f = foreign key, p = primary key)
     // shamelessly taken from https://dba.stackexchange.com/questions/36979/retrieving-all-pk-and-fk
 
-    // Using lazy_static so that COLUMN_REG and CONSTRAINT_MAP are only compiled once total (versus compiling every time this function is called)
+    // Using lazy_static so that COLUMN_REG and CONSTRAINT_MAP are only compiled once total (versus
+    // compiling every time this function is called)
     lazy_static! {
         // static ref COLUMN_REG: Regex = Regex::new(r"^\{(.*)\}$").unwrap();
         static ref CONSTRAINT_MAP: HashMap<char, &'static str> = {
@@ -313,7 +320,7 @@ fn select_constraints(q: Query) -> impl Future<Item = Vec<Constraint>, Error = P
     .collect()
 }
 
-fn select_constraints_statement(conn: &mut Connection, table: &str) -> Prepare {
+fn select_constraints_statement(conn: &mut Client, table: &str) -> Prepare {
     let statement_str = format!(r#"
 SELECT
     c.conname                   AS name,
@@ -346,7 +353,7 @@ WHERE (
 GROUP BY name, constraint_type, "table", definition
 ORDER BY "table";"#, table);
 
-    conn.client.prepare(&statement_str)
+    conn.prepare(&statement_str)
 }
 
 // returns indexes (including primary keys) of a given table
@@ -372,7 +379,7 @@ fn select_indexes(q: Query) -> impl Future<Item = Vec<TableIndex>, Error = PgErr
     })
 }
 
-fn select_indexes_statement(conn: &mut Connection, table: &str) -> Prepare {
+fn select_indexes_statement(conn: &mut Client, table: &str) -> Prepare {
     // taken from https://stackoverflow.com/a/2213199
     let statement_str = format!(
         r#"
@@ -414,7 +421,7 @@ ORDER BY
         table
     );
 
-    conn.client.prepare(&statement_str)
+    conn.prepare(&statement_str)
 }
 
 fn select_row_count(q: Query) -> impl Future<Item = i64, Error = PgError> {
@@ -426,8 +433,8 @@ fn select_row_count(q: Query) -> impl Future<Item = i64, Error = PgError> {
         })
 }
 
-fn select_row_count_statement(conn: &mut Connection, table: &str) -> Prepare {
+fn select_row_count_statement(conn: &mut Client, table: &str) -> Prepare {
     let statement_str = ["SELECT COUNT(*) FROM ", table, ";"].join("");
 
-    conn.client.prepare(&statement_str)
+    conn.prepare(&statement_str)
 }

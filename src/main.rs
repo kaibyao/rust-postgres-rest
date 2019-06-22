@@ -26,5 +26,5 @@ fn main() {
     .start();
 
     println!("Running server on {}", ip_address);
-    let _s = sys.run().unwrap();
+    sys.run().unwrap();
 }

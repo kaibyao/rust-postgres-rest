@@ -1,19 +1,22 @@
-use futures::future::{err, Either, Future};
-use futures::stream::Stream;
-
+use actix_web::web::Data;
+use futures::{
+    future::{err, Either, Future},
+    stream::Stream,
+};
 use regex::Regex;
 use sqlparser::sqlast::ASTNode;
 use tokio_postgres::types::ToSql;
 
-use super::foreign_keys::{
-    fk_ast_nodes_from_where_ast, fk_columns_from_where_ast, where_clause_str_to_ast,
-    ForeignKeyReference,
+use super::{
+    foreign_keys::{
+        fk_ast_nodes_from_where_ast, fk_columns_from_where_ast, where_clause_str_to_ast,
+        ForeignKeyReference,
+    },
+    postgres_types::{convert_row_fields, RowFields},
+    query_types::QueryParamsSelect,
+    utils::{validate_sql_name, validate_where_column},
 };
-use super::postgres_types::{convert_row_fields, RowFields};
-use super::query_types::QueryParamsSelect;
-use super::utils::{validate_sql_name, validate_where_column};
-use crate::db::Pool;
-use crate::errors::ApiError;
+use crate::{db::Pool, errors::ApiError};
 
 #[derive(Debug, PartialEq)]
 enum PreparedStatementValue {
@@ -24,15 +27,18 @@ enum PreparedStatementValue {
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query
 pub fn select_table_rows(
-    pool: &Pool,
+    pool: Data<Pool>,
     params: QueryParamsSelect,
 ) -> impl Future<Item = Vec<RowFields>, Error = ApiError> {
     if let Err(e) = validate_sql_name(&params.table) {
         return Either::A(err::<Vec<RowFields>, ApiError>(e));
     }
 
-    // get list of every column being used in the query params (columns, where, distinct, group_by, order_by). Used for finding all foreign key references
+    // get list of every column being used in the query params (columns, where, distinct, group_by,
+    // order_by). Used for finding all foreign key references
     let mut columns = params.columns.clone();
+
+    dbg!(&params);
 
     // WHERE clause foreign key references
     let where_ast = match &params.conditions {
@@ -41,7 +47,8 @@ pub fn select_table_rows(
                 Some(ast) => ast,
                 None => ASTNode::SQLIdentifier("".to_string()),
             },
-            Err(_) => {
+            Err(_e) => {
+                dbg!(_e);
                 return Either::A(err::<Vec<RowFields>, ApiError>(ApiError::generate_error(
                     "INVALID_SQL_SYNTAX",
                     ["WHERE", where_clause_str].join(":"),
@@ -63,79 +70,77 @@ pub fn select_table_rows(
         columns.extend(v.clone());
     }
 
-    let pool = pool.clone();
-
     // parse columns for foreign key usage
-    let fk_future =
-        ForeignKeyReference::from_query_columns(pool.clone(), params.table.clone(), columns)
-            .map_err(ApiError::from)
-            .and_then(move |fk_columns| {
-                dbg!(&fk_columns);
+    let fk_future = ForeignKeyReference::from_query_columns(&pool, params.table.clone(), columns)
+        .and_then(move |fk_columns| {
+            dbg!(&fk_columns);
 
-                let (statement_str, prepared_values) =
-                    match build_select_statement(&params, fk_columns, where_ast) {
-                        Ok((stmt, prep_vals)) => (stmt, prep_vals),
-                        Err(e) => return Either::A(err::<Vec<RowFields>, ApiError>(e)),
-                    };
+            let (statement_str, prepared_values) =
+                match build_select_statement(params, fk_columns, where_ast) {
+                    Ok((stmt, prep_vals)) => (stmt, prep_vals),
+                    Err(e) => return Either::A(err::<Vec<RowFields>, ApiError>(e)),
+                };
 
-                dbg!(&statement_str);
-                dbg!(&prepared_values);
+            dbg!(&statement_str);
+            dbg!(&prepared_values);
 
-                // sending prepared statement to postgres
-                let select_rows_future =
-                    pool.connection()
-                        .map_err(ApiError::from)
-                        .and_then(move |mut conn| {
-                            conn.client
-                                .prepare(&statement_str)
-                                .map_err(ApiError::from)
-                                .and_then(move |statement| {
-                                    let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty()
-                                    {
-                                        vec![]
-                                    } else {
-                                        prepared_values
-                                            .iter()
-                                            .map(|val| {
-                                                let val_to_sql: &dyn ToSql = match val {
-                                                    PreparedStatementValue::Int4(val_i32) => {
-                                                        val_i32
-                                                    }
-                                                    PreparedStatementValue::Int8(val_i64) => {
-                                                        val_i64
-                                                    }
-                                                    PreparedStatementValue::String(val_string) => {
-                                                        val_string
-                                                    }
-                                                };
-                                                val_to_sql
-                                            })
-                                            .collect()
-                                    };
+            // sending prepared statement to postgres
+            let select_rows_future = pool
+                .run(move |mut conn| {
+                    conn.prepare(&statement_str)
+                        .then(move |results| match results {
+                            Ok(statement) => Ok((statement, conn)),
+                            Err(e) => Err((e, conn)),
+                        })
+                        .and_then(move |(statement, mut conn)| {
+                            let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
+                                vec![]
+                            } else {
+                                prepared_values
+                                    .iter()
+                                    .map(|val| {
+                                        let val_to_sql: &dyn ToSql = match val {
+                                            PreparedStatementValue::Int4(val_i32) => val_i32,
+                                            PreparedStatementValue::Int8(val_i64) => val_i64,
+                                            PreparedStatementValue::String(val_string) => {
+                                                val_string
+                                            }
+                                        };
+                                        val_to_sql
+                                    })
+                                    .collect()
+                            };
 
-                                    dbg!(&prep_values);
+                            dbg!(&prep_values);
 
-                                    conn.client
-                                        .query(&statement, &prep_values)
-                                        .then(|result| match result {
-                                            Ok(row) => match convert_row_fields(&row) {
-                                                Ok(row_fields) => Ok(row_fields),
-                                                Err(e) => Err(e),
-                                            },
-                                            Err(e) => Err(ApiError::from(e)),
-                                        })
-                                        .collect()
+                            conn.query(&statement, &prep_values)
+                                .collect()
+                                .then(|results| match results {
+                                    Ok(rows) => Ok((rows, conn)),
+                                    Err(e) => Err((e, conn)),
                                 })
-                        });
+                        })
+                })
+                .map_err(ApiError::from)
+                .and_then(|rows| {
+                    match rows
+                        .iter()
+                        .map(convert_row_fields)
+                        .collect::<Result<Vec<RowFields>, ApiError>>()
+                    {
+                        Ok(row_fields) => Ok(row_fields),
+                        Err(e) => Err(e),
+                    }
+                });
 
-                Either::B(select_rows_future)
-            });
+            Either::B(select_rows_future)
+        });
 
     Either::B(fk_future)
 }
 
 fn build_select_statement(
-    params: &QueryParamsSelect,
+    params: QueryParamsSelect,
     fks: Vec<ForeignKeyReference>,
     mut where_ast: ASTNode,
 ) -> Result<(String, Vec<PreparedStatementValue>), ApiError> {
@@ -291,7 +296,8 @@ fn build_select_statement(
     Ok((statement.join(""), prepared_values))
 }
 
-/// Generates a string of column names delimited by commas. Foreign keys are correctly accounted for.
+/// Generates a string of column names delimited by commas. Foreign keys are correctly accounted
+/// for.
 fn get_column_str<'a>(
     columns: &'a [String],
     table: &'a str,
@@ -393,14 +399,13 @@ fn get_where_string<'a>(
 
 #[cfg(test)]
 mod build_select_statement_tests {
-    use super::super::query_types::QueryParamsSelect;
-    use super::*;
+    use super::{super::query_types::QueryParamsSelect, *};
     use pretty_assertions::assert_eq;
 
     #[test]
     fn basic_query() {
         match build_select_statement(
-            &QueryParamsSelect {
+            QueryParamsSelect {
                 columns: vec!["id".to_string()],
                 conditions: None,
                 distinct: None,
@@ -426,7 +431,7 @@ mod build_select_statement_tests {
     #[test]
     fn multiple_columns() {
         match build_select_statement(
-            &QueryParamsSelect {
+            QueryParamsSelect {
                 columns: vec!["id".to_string(), "name".to_string()],
                 conditions: None,
                 distinct: None,
@@ -452,7 +457,7 @@ mod build_select_statement_tests {
     #[test]
     fn distinct() {
         match build_select_statement(
-            &QueryParamsSelect {
+            QueryParamsSelect {
                 columns: vec!["id".to_string()],
                 conditions: None,
                 distinct: Some(vec!["name".to_string(), "blah".to_string()]),
@@ -481,7 +486,7 @@ mod build_select_statement_tests {
     #[test]
     fn offset() {
         match build_select_statement(
-            &QueryParamsSelect {
+            QueryParamsSelect {
                 columns: vec!["id".to_string()],
                 conditions: None,
                 distinct: None,
@@ -507,7 +512,7 @@ mod build_select_statement_tests {
     #[test]
     fn order_by() {
         match build_select_statement(
-            &QueryParamsSelect {
+            QueryParamsSelect {
                 columns: vec!["id".to_string()],
                 conditions: None,
                 distinct: None,
@@ -536,7 +541,7 @@ mod build_select_statement_tests {
     #[test]
     fn conditions() {
         match build_select_statement(
-            &QueryParamsSelect {
+            QueryParamsSelect {
                 columns: vec!["id".to_string()],
                 conditions: Some("(id > 10 OR id < 20) AND name = 'test'".to_string()),
                 distinct: None,
@@ -565,7 +570,7 @@ mod build_select_statement_tests {
     #[test]
     fn prepared_values() {
         match build_select_statement(
-            &QueryParamsSelect {
+            QueryParamsSelect {
                 columns: vec!["id".to_string()],
                 conditions: Some("(id > $1 OR id < $2) AND name = $3".to_string()),
                 distinct: None,
@@ -603,7 +608,7 @@ mod build_select_statement_tests {
     #[test]
     fn complex_query() {
         match build_select_statement(
-            &QueryParamsSelect {
+            QueryParamsSelect {
                 columns: vec![
                     "id".to_string(),
                     "test_bigint".to_string(),

@@ -44,7 +44,8 @@ impl<'a> AppConfig<'a> {
     }
 }
 
-/// Takes an initialized App and config, and appends the Rest API functionality to the scope’s endpoint.
+/// Takes an initialized App and config, and appends the Rest API functionality to the scope’s
+/// endpoint.
 pub fn generate_rest_api_scope(config: &AppConfig) -> Scope {
     let pool = connect(config.database_url).unwrap();
 

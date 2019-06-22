@@ -1,15 +1,21 @@
-use actix_web::dev::HttpResponseBuilder;
-use actix_web::http::StatusCode;
-use actix_web::web::Json;
-use actix_web::{web, HttpRequest, HttpResponse};
-use futures::future::{err, Either};
-use futures::Future;
+use actix_web::{
+    dev::HttpResponseBuilder,
+    http::StatusCode,
+    web::{self, Json},
+    HttpRequest, HttpResponse,
+};
+use futures::{
+    future::{err, Either},
+    Future,
+};
 use serde_json::Value;
 
-use crate::db::Pool;
-use crate::errors::ApiError;
-use crate::queries::{
-    insert_into_table, query_types, select_all_tables, select_table_rows, select_table_stats,
+use crate::{
+    db::Pool,
+    errors::ApiError,
+    queries::{
+        insert_into_table, query_types, select_all_tables, select_table_rows, select_table_stats,
+    },
 };
 use query_types::{QueryParamsInsert, QueryParamsSelect, RequestQueryStringParams};
 
@@ -17,9 +23,8 @@ use query_types::{QueryParamsInsert, QueryParamsSelect, RequestQueryStringParams
 pub fn get_all_table_names(
     db: web::Data<Pool>,
 ) -> impl Future<Item = HttpResponse, Error = ApiError> {
-    db.connection()
+    db.run(select_all_tables)
         .map_err(ApiError::from)
-        .and_then(|conn| select_all_tables(conn).map_err(ApiError::from))
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }
 
@@ -42,11 +47,9 @@ pub fn post_table(
         }
     };
 
-    let insert_response = insert_into_table(db.get_ref(), params)
-        .and_then(|num_rows_affected| {
-            Ok(HttpResponseBuilder::new(StatusCode::OK).json(num_rows_affected))
-        })
-        .or_else(|e| Err(ApiError::from(e)));
+    let insert_response = insert_into_table(db.get_ref(), params).and_then(|num_rows_affected| {
+        Ok(HttpResponseBuilder::new(StatusCode::OK).json(num_rows_affected))
+    });
 
     Either::B(insert_response)
 }
@@ -70,19 +73,16 @@ fn get_table_rows(
     db: web::Data<Pool>,
     params: QueryParamsSelect,
 ) -> impl Future<Item = HttpResponse, Error = ApiError> {
-    select_table_rows(db.get_ref(), params)
+    select_table_rows(db, params)
         .map_err(ApiError::from)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
-        .or_else(|e| Err(ApiError::from(e)))
 }
 
 fn get_table_stats(
     db: web::Data<Pool>,
     table: String,
 ) -> impl Future<Item = HttpResponse, Error = ApiError> {
-    db.connection()
+    db.run(|conn| select_table_stats(conn, table))
         .map_err(ApiError::from)
-        .and_then(|conn| select_table_stats(conn, table))
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
-        .or_else(|e| Err(ApiError::from(e)))
 }

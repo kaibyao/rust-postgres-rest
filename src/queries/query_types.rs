@@ -10,28 +10,35 @@ pub struct RequestQueryStringParams {
     pub columns: Option<String>,
     /// This param is required in order for DELETE operation to process.
     pub confirm_delete: Option<String>,
-    /// The `ON CONFLICT` action to perform (`update` or `nothing`) for POSTing to the table endpoint (to insert new rows).
+    /// The `ON CONFLICT` action to perform (`update` or `nothing`) for POSTing to the table
+    /// endpoint (to insert new rows).
     pub conflict_action: Option<String>,
-    /// Used in conjunction with `conflict_action`. Comma-separated list of columns that determine if a row being inserted conflicts with an existing row.
+    /// Used in conjunction with `conflict_action`. Comma-separated list of columns that determine
+    /// if a row being inserted conflicts with an existing row.
     pub conflict_target: Option<String>,
-    /// A comma-separated list of column names for which rows that have duplicate values are excluded (in a GET/SELECT statement).
+    /// A comma-separated list of column names for which rows that have duplicate values are
+    /// excluded (in a GET/SELECT statement).
     pub distinct: Option<String>,
     /// The WHERE clause of the SQL statement. Remember to URI-encode the final result. NOTE: $1, $2, etc. can be used in combination with `prepared_values` to create prepared statements (see https://www.postgresql.org/docs/current/sql-prepare.html).
     pub r#where: Option<String>,
-    /// Comma-separated list representing the field(s) on which to group the resulting rows (in a GET/SELECT statement).
+    /// Comma-separated list representing the field(s) on which to group the resulting rows (in a
+    /// GET/SELECT statement).
     pub group_by: Option<String>,
-    /// Comma-separated list representing the field(s) on which to sort the resulting rows (in a GET/SELECT statement).
+    /// Comma-separated list representing the field(s) on which to sort the resulting rows (in a
+    /// GET/SELECT statement).
     pub order_by: Option<String>,
     /// The maximum number of rows that can be returned (in a GET/SELECT statement).
     pub limit: Option<usize>,
     /// The number of rows to exclude (in a GET/SELECT statement).
     pub offset: Option<usize>,
-    /// If the WHERE clause contains ${number}, this comma-separated list of values is used to substitute the numbered parameters.
+    /// If the WHERE clause contains ${number}, this comma-separated list of values is used to
+    /// substitute the numbered parameters.
     pub prepared_values: Option<String>,
     /// Comma-separated list of columns to return from the POST/INSERT operation.
     pub returning_columns: Option<String>,
 }
 
+#[derive(Debug)]
 /// Represents a single SELECT query
 pub struct QueryParamsSelect {
     pub distinct: Option<Vec<String>>,

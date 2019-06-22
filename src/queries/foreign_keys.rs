@@ -1,19 +1,15 @@
 use futures::future::{join_all, ok, Either, Future};
-use l337_postgres::l337::Error as PoolError;
 use sqlparser::{
     dialect::PostgreSqlDialect,
     sqlast::{ASTNode, SQLQuery, SQLSelect, SQLSetExpr, SQLStatement},
     sqlparser::Parser,
 };
-use std::borrow::BorrowMut;
-use std::collections::HashMap;
-use tokio_postgres::Error as PgError;
+use std::{borrow::BorrowMut, collections::HashMap};
 
 use super::select_table_stats::{
     select_column_stats, select_column_stats_statement, TableColumnStat,
 };
-use crate::db::{Pool};
-use crate::errors::ApiError;
+use crate::{db::Pool, errors::ApiError};
 
 /// Converts a WHERE clause string into an ASTNode.
 pub fn where_clause_str_to_ast(clause: &str) -> Result<Option<ASTNode>, ApiError> {
@@ -158,7 +154,8 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut ASTNode) -> Vec<(String, &mut ASTNo
     fks
 }
 
-/// Similar to `fk_ast_nodes_from_where_ast`. Extracts the raw/incorrect foreign key column strings from a WHERE ASTNode
+/// Similar to `fk_ast_nodes_from_where_ast`. Extracts the raw/incorrect foreign key column strings
+/// from a WHERE ASTNode
 pub fn fk_columns_from_where_ast(ast: &ASTNode) -> Vec<String> {
     let mut fks = vec![];
 
@@ -279,7 +276,8 @@ pub struct ForeignKeyReference {
 }
 
 impl ForeignKeyReference {
-    /// Given a table name and list of table column names, return a list of foreign key references. If none of the provided columns are foreign keys, returns `Ok(None)`.
+    /// Given a table name and list of table column names, return a list of foreign key references.
+    /// If none of the provided columns are foreign keys, returns `Ok(None)`.
     ///
     /// # Examples
     ///
@@ -377,10 +375,10 @@ impl ForeignKeyReference {
     /// );
     /// ```
     pub fn from_query_columns(
-        pool: Pool,
+        pool: &Pool,
         table: String,
         columns: Vec<String>,
-    ) -> Box<dyn Future<Item = Vec<Self>, Error = PoolError<PgError>> + Send> {
+    ) -> Box<dyn Future<Item = Vec<Self>, Error = ApiError> + Send> {
         let mut fk_columns: Vec<String> = columns
             .iter()
             .filter_map(|col| {
@@ -431,29 +429,37 @@ impl ForeignKeyReference {
     }
 
     fn process_column_stats(
-        pool: Pool,
+        pool: &Pool,
         table: String,
         fk_columns_grouped: HashMap<String, (Vec<String>, Vec<String>)>,
-    ) -> impl Future<Item = Vec<Self>, Error = PoolError<PgError>> + Send {
+    ) -> impl Future<Item = Vec<Self>, Error = ApiError> + Send {
         // used later in futures
         let table_str = &table;
-        let table_clone_2 = table_str.to_string();
+        let table_clone = table_str.to_string();
         let pool_clone = pool.clone();
 
-        pool.connection().and_then(move |mut conn| {
-            select_column_stats_statement(&mut conn, &table_clone_2)
-                .map_err(PoolError::External)
-                .and_then(move |statement| {
-                    let q = conn.client.query(&statement, &[]);
-                    select_column_stats(q).map_err(PoolError::External)
+        pool.run(move |mut conn| {
+            select_column_stats_statement(&mut conn, &table_clone)
+                .then(move |results| match results {
+                    Ok(statement) => Ok((statement, conn)),
+                    Err(e) => Err((e, conn)),
                 })
-                .map(move |stats| (stats, fk_columns_grouped))
+                .and_then(move |(statement, mut conn)| {
+                    let q = conn.query(&statement, &[]);
+                    select_column_stats(q).then(move |results| match results {
+                        Ok(stats) => Ok(((stats, fk_columns_grouped), conn)),
+                        Err(e) => Err((e, conn)),
+                    })
+                })
         })
+        .map_err(ApiError::from)
         .map(|(stats, fk_columns_grouped)| {
-            // contains a tuple representing the (matched parent column name, child columns, and original column strings)
+            // contains a tuple representing the (matched parent column name, child columns, and
+            // original column strings)
             let mut matched_columns: Vec<(String, Vec<String>, Vec<String>)> = vec![];
 
-            // filter the table column stats to just the foreign key columns that match the given columns
+            // filter the table column stats to just the foreign key columns that match the given
+            // columns
             let filtered_stats: Vec<TableColumnStat> = stats
                 .into_iter()
                 .filter(|stat| {
@@ -487,21 +493,25 @@ impl ForeignKeyReference {
             (filtered_stats, matched_columns)
         })
         // stats and matched_columns should have the same length and their indexes should match
-        .and_then(move |(filtered_stats, matched_columns)| ForeignKeyReference::stats_to_fkr_futures(
-            pool_clone,
-            table,
-            filtered_stats,
-            matched_columns,
-        ))
+        .and_then(move |(filtered_stats, matched_columns)| {
+            ForeignKeyReference::stats_to_fkr_futures(
+                pool_clone,
+                table,
+                filtered_stats,
+                matched_columns,
+            )
+            .map_err(ApiError::from)
+        })
     }
 
-    /// Maps a Vec of `TableColumnStat`s to a Future wrapping a Vec of `ForeignKeyReference`s. Used by from_query_columns.
+    /// Maps a Vec of `TableColumnStat`s to a Future wrapping a Vec of `ForeignKeyReference`s. Used
+    /// by from_query_columns.
     fn stats_to_fkr_futures(
         pool: Pool,
         table: String,
         stats: Vec<TableColumnStat>,
         matched_columns: Vec<(String, Vec<String>, Vec<String>)>,
-    ) -> impl Future<Item = Vec<Self>, Error = PoolError<PgError>> {
+    ) -> impl Future<Item = Vec<Self>, Error = ApiError> {
         let mut fkr_futures = vec![];
         for (i, stat) in stats.into_iter().enumerate() {
             // stats.into_iter().enumerate().map(move |(i, stat)| {
@@ -533,7 +543,7 @@ impl ForeignKeyReference {
             // child column is not a foreign key, return future with ForeignKeyReference
             if child_fk_columns.is_empty() {
                 let no_child_columns_fut =
-                    ok::<ForeignKeyReference, PoolError<PgError>>(ForeignKeyReference {
+                    ok::<ForeignKeyReference, ApiError>(ForeignKeyReference {
                         referring_column: stat_column_name_clone,
                         referring_table: table_clone,
                         table_referred: foreign_key_table,
@@ -548,19 +558,17 @@ impl ForeignKeyReference {
 
             // child columns are all FKs, so we need to recursively call this function
             let child_columns_future =
-                Self::from_query_columns(pool.clone(), foreign_key_table.clone(), child_fk_columns).then(
-                    move |result| match result {
-                        Ok(nested_fks) => Ok(ForeignKeyReference {
+                Self::from_query_columns(&pool, foreign_key_table.clone(), child_fk_columns)
+                    .and_then(move |nested_fks| {
+                        Ok(ForeignKeyReference {
                             referring_column: stat_column_name_clone,
                             referring_table: table_clone,
                             table_referred: foreign_key_table,
                             foreign_key_column: stat_fk_column,
                             nested_fks,
                             original_refs,
-                        }),
-                        Err(e) => Err(e),
-                    },
-                );
+                        })
+                    });
 
             fkr_futures.push(Either::B(child_columns_future));
         }
@@ -568,14 +576,16 @@ impl ForeignKeyReference {
         join_all(fkr_futures)
     }
 
-    /// Given an array of ForeignKeyReference, find the one that matches a given table and column name, as well as the matching foreign key table column.
+    /// Given an array of ForeignKeyReference, find the one that matches a given table and column
+    /// name, as well as the matching foreign key table column.
     pub fn find<'a>(refs: &'a [Self], table: &str, col: &'a str) -> Option<(&'a Self, &'a str)> {
         for fkr in refs {
             if fkr.referring_table != table {
                 continue;
             }
 
-            // see if any of the `ForeignKeyReference`s have any original references that match the given column name
+            // see if any of the `ForeignKeyReference`s have any original references that match the
+            // given column name
             let found_orig_ref = fkr.original_refs.iter().find(|ref_col| col == *ref_col);
 
             if found_orig_ref.is_some() {
@@ -585,7 +595,10 @@ impl ForeignKeyReference {
                     return Self::find(&fkr.nested_fks, &fkr.table_referred, sub_column_str);
                 }
 
-                // by this point, sub_column_breadcrumbs should have a length of 1 or 2 (1 if there's no FK, 2 if there is a FK). If the original column string had more than 1 level for foreign keys, the function would have recursively called itself until it got to this point
+                // by this point, sub_column_breadcrumbs should have a length of 1 or 2 (1 if
+                // there's no FK, 2 if there is a FK). If the original column string had more than 1
+                // level for foreign keys, the function would have recursively called itself until
+                // it got to this point
                 let sub_column_breadcrumbs: Vec<&str> = col.split('.').collect();
                 let sub_column_str = if sub_column_breadcrumbs.len() > 1 {
                     sub_column_breadcrumbs[1]
@@ -599,9 +612,11 @@ impl ForeignKeyReference {
         None
     }
 
-    /// Given a list of foreign key references, construct the `INNER JOIN` SQL string to be used in a query.
+    /// Given a list of foreign key references, construct the `INNER JOIN` SQL string to be used in
+    /// a query.
     pub fn inner_join_expr(fk_refs: &[Self]) -> String {
-        // a vec of tuples where each tuple contains: referring table name, referring table column to equate, fk table name to join with, fk table column to equate
+        // a vec of tuples where each tuple contains: referring table name, referring table column
+        // to equate, fk table name to join with, fk table column to equate
         let join_data = Self::inner_join_expr_calc(fk_refs);
 
         join_data
@@ -628,7 +643,8 @@ impl ForeignKeyReference {
     }
 
     fn inner_join_expr_calc(fk_refs: &[Self]) -> Vec<(&str, &str, &str, &str)> {
-        // a vec of tuples where each tuple contains: referring table name, referring table column to equate, fk table name to join with, fk table column to equate
+        // a vec of tuples where each tuple contains: referring table name, referring table column
+        // to equate, fk table name to join with, fk table column to equate
         let mut join_data: Vec<(&str, &str, &str, &str)> = vec![];
 
         for fk in fk_refs {

@@ -1,11 +1,13 @@
 use crate::errors::ApiError;
 use regex::Regex;
 
-/// Checks an SQL identifier (such as table or column name) and returns true if it is valid or false otherwise.
-/// The identifier must start with a lower-case letter or underscore, and only contain alphanumeric or underscore characters.
-/// (Sorry, I don’t have time or energy for UTF-8 shenanigans)
+/// Checks an SQL identifier (such as table or column name) and returns true if it is valid or false
+/// otherwise. The identifier must start with a lower-case letter or underscore, and only contain
+/// alphanumeric or underscore characters. (Sorry, I don’t have time or energy for UTF-8
+/// shenanigans)
 pub fn validate_sql_name(name: &str) -> Result<(), ApiError> {
-    // Using lazy_static so that VALID_REGEX is only compiled once total (versus compiling the regex every time this function is called)
+    // Using lazy_static so that VALID_REGEX is only compiled once total (versus compiling the regex
+    // every time this function is called)
     lazy_static! {
         static ref VALID_REGEX: Regex = Regex::new(r"^[a-z_][a-z0-9_]*$").unwrap();
     }
@@ -27,7 +29,8 @@ pub fn validate_sql_name(name: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Like `validate_sql_name`, but also allows for parentheses (for functions/aggregates like `COUNT()`), and periods (for foreign key traversal).
+/// Like `validate_sql_name`, but also allows for parentheses (for functions/aggregates like
+/// `COUNT()`), and periods (for foreign key traversal).
 pub fn validate_where_column(name: &str) -> Result<(), ApiError> {
     lazy_static! {
         static ref VALID_REGEX: Regex = Regex::new(r"^[A-Za-z_][A-Za-z0-9_\(\)\.]*$").unwrap();
