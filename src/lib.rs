@@ -21,8 +21,6 @@ use futures03::TryFutureExt;
 use futures01::future::{Either, err};
 mod queries;
 
-mod compat;
-
 mod db;
 use crate::db::{PgConnection, Pool};
 

@@ -5,6 +5,7 @@ use futures01::future::Future;
 use futures01::stream::Stream;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use tokio_postgres::impls::{Query, Execute};
 use tokio_postgres::types::ToSql;
 use tokio_postgres::Client;
 // use crate::compat::ToSqlSyncSend;
@@ -16,6 +17,11 @@ static INSERT_ROWS_BATCH_COUNT: usize = 2;
 enum InsertResult {
     Rows(Vec<RowFields>),
     NumRowsAffected(u64),
+}
+
+enum InsertType {
+    Query(Query),
+    Execute(Execute),
 }
 
 /// Runs an INSERT INTO <table> query
@@ -148,59 +154,60 @@ async fn execute_insert<'a>(
         Err(e) => return Err((ApiError::from(e), client)),
     };
 
-    // convert the column values into the actual values we will use for the INSERT statement execution
-    let mut prep_values: Vec<&dyn ToSql> = vec![];
-    for column_value in column_values.iter() {
-        match column_value {
-            ColumnTypeValue::BigInt(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Bool(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::ByteA(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Char(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Citext(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Date(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Decimal(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Float8(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::HStore(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Int(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Json(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::JsonB(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::MacAddr(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Name(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Oid(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Real(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::SmallInt(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Text(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Time(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Timestamp(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::TimestampTz(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::Uuid(col_val) => prep_values.push(col_val),
-            ColumnTypeValue::VarChar(col_val) => prep_values.push(col_val),
-        };
-    }
+    let query = {
+        // convert the column values into the actual values we will use for the INSERT statement execution
+        let mut prep_values: Vec<&dyn ToSql> = column_values.iter().map(|column_value| -> &dyn ToSql {
+            match column_value {
+            ColumnTypeValue::BigInt(col_val) => col_val,
+            ColumnTypeValue::Bool(col_val) => col_val,
+            ColumnTypeValue::ByteA(col_val) => col_val,
+            ColumnTypeValue::Char(col_val) => col_val,
+            ColumnTypeValue::Citext(col_val) => col_val,
+            ColumnTypeValue::Date(col_val) => col_val,
+            ColumnTypeValue::Decimal(col_val) => col_val,
+            ColumnTypeValue::Float8(col_val) => col_val,
+            ColumnTypeValue::HStore(col_val) => col_val,
+            ColumnTypeValue::Int(col_val) => col_val,
+            ColumnTypeValue::Json(col_val) => col_val,
+            ColumnTypeValue::JsonB(col_val) => col_val,
+            ColumnTypeValue::MacAddr(col_val) => col_val,
+            ColumnTypeValue::Name(col_val) => col_val,
+            ColumnTypeValue::Oid(col_val) => col_val,
+            ColumnTypeValue::Real(col_val) => col_val,
+            ColumnTypeValue::SmallInt(col_val) => col_val,
+            ColumnTypeValue::Text(col_val) => col_val,
+            ColumnTypeValue::Time(col_val) => col_val,
+            ColumnTypeValue::Timestamp(col_val) => col_val,
+            ColumnTypeValue::TimestampTz(col_val) => col_val,
+            ColumnTypeValue::Uuid(col_val) => col_val,
+            ColumnTypeValue::VarChar(col_val) => col_val,
+        }}).collect();
 
-    if is_return_rows {
-        match client
-            .query(&statement, &prep_values)
-            .collect()
-            .compat()
-            .await
-        {
-            Ok(rows) => match rows
-                .iter()
-                .map(|row| convert_row_fields(&row))
-                .collect::<Result<Vec<RowFields>, ApiError>>()
-            {
-                Ok(row_fields) => Ok((InsertResult::Rows(row_fields), client)),
-                Err(e) => Err((e, client)),
-            },
-            Err(e) => Err((ApiError::from(e), client)),
+        if is_return_rows {
+            InsertType::Query(client.query(&statement, &prep_values))
+        } else {
+            InsertType::Execute(client.execute(&statement, &prep_values))
         }
-    } else {
-        // let r = client.execute(&statement, &prep_values).compat().await;
-        match client.execute(&statement, &prep_values).compat().await {
+    };
+
+    match query {
+        InsertType::Query(q) => match q.collect()
+            .compat()
+            .await {
+                Ok(rows) => match rows
+                    .iter()
+                    .map(|row| convert_row_fields(&row))
+                    .collect::<Result<Vec<RowFields>, ApiError>>()
+                {
+                    Ok(row_fields) => Ok((InsertResult::Rows(row_fields), client)),
+                    Err(e) => Err((e, client)),
+                },
+                Err(e) => Err((ApiError::from(e), client)),
+            },
+        InsertType::Execute(ex) => match ex.compat().await {
             Ok(num_rows) => Ok((InsertResult::NumRowsAffected(num_rows), client)),
             Err(e) => Err((ApiError::from(e), client)),
-        }
+        },
     }
 }
 

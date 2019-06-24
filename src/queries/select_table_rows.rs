@@ -90,26 +90,28 @@ pub async fn select_table_rows(
         Err(e) => return Err((ApiError::from(e), client)),
     };
 
-    let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
-        vec![]
-    } else {
-        prepared_values
-            .iter()
-            .map(|val| {
-                let val_to_sql: &dyn ToSql = match val {
-                    PreparedStatementValue::Int4(val_i32) => val_i32,
-                    PreparedStatementValue::Int8(val_i64) => val_i64,
-                    PreparedStatementValue::String(val_string) => val_string,
-                };
-                val_to_sql
-            })
-            .collect()
+    // dbg!(&prep_values);
+    let query = {
+        let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
+            vec![]
+        } else {
+            prepared_values
+                .iter()
+                .map(|val| {
+                    let val_to_sql: &dyn ToSql = match val {
+                        PreparedStatementValue::Int4(val_i32) => val_i32,
+                        PreparedStatementValue::Int8(val_i64) => val_i64,
+                        PreparedStatementValue::String(val_string) => val_string,
+                    };
+                    val_to_sql
+                })
+                .collect()
+        };
+
+        client.query(&statement, &prep_values)
     };
 
-    // dbg!(&prep_values);
-
-    match client
-        .query(&statement, &prep_values)
+    match query
         .then(|result| match result {
             Ok(row) => match convert_row_fields(&row) {
                 Ok(row_fields) => Ok(row_fields),

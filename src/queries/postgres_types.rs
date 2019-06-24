@@ -12,7 +12,6 @@ use tokio_postgres::{
     types::{FromSql, IsNull, ToSql, Type},
 };
 use uuid::Uuid;
-use crate::compat::ToSqlSyncSend;
 use crate::errors::ApiError;
 
 /// we have to define our own MacAddress type in order for Serde to serialize it properly.
@@ -40,8 +39,6 @@ impl ToSql for MacAddress {
     accepts!(MACADDR);
     to_sql_checked!();
 }
-
-impl ToSqlSyncSend for MacAddress {}
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
@@ -103,8 +100,6 @@ where
     to_sql_checked!();
 }
 
-impl<T> ToSqlSyncSend for ColumnValue<T> where T: ToSqlSyncSend {}
-
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 /// Represents a postgres column's type
@@ -136,8 +131,6 @@ pub enum ColumnTypeValue {
     // VarBit(ColumnValue<bit_vec::BitVec>),
     VarChar(ColumnValue<String>),
 }
-
-impl Sync for ColumnTypeValue {}
 
 impl ColumnTypeValue {
     /// Parses a serde_json::Value and returns the Rust-Typed version.
