@@ -21,6 +21,7 @@ fn run_integration_tests() {
 
     // run tests
 
+
     // shut down
     sys.block_on(lazy(|| -> Result<(), ()> {
         System::current().stop();

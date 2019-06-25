@@ -138,8 +138,8 @@ impl From<actix::MailboxError> for ApiError {
         }
     }
 }
-impl From<actix_http::error::Error> for ApiError {
-    fn from(err: actix_http::error::Error) -> Self {
+impl From<actix_web::Error> for ApiError {
+    fn from(err: actix_web::Error) -> Self {
         ApiError::InternalError {
             category: MessageCategory::Error,
             code: "ACTIX_ERROR",

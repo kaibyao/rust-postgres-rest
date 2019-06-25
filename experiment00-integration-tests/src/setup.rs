@@ -1,5 +1,3 @@
-#![feature(async_await)]
-
 use experiment00::{generate_rest_api_scope, AppConfig};
 // use std::env::var_os;
 use actix::spawn;
