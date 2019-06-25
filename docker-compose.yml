@@ -6,3 +6,5 @@ services:
     restart: always
     environment:
       POSTGRES_PASSWORD: example # user = postgres
+    ports:
+    - 5433:5432
