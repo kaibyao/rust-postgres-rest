@@ -1,11 +1,10 @@
-use actix_web::web::Data;
 use futures::{
     future::{err, Either, Future},
     stream::Stream,
 };
 use regex::Regex;
 use sqlparser::sqlast::ASTNode;
-use tokio_postgres::types::ToSql;
+use tokio_postgres::{types::ToSql};
 
 use super::{
     foreign_keys::{
@@ -14,9 +13,9 @@ use super::{
     },
     postgres_types::{convert_row_fields, RowFields},
     query_types::QueryParamsSelect,
-    utils::{validate_sql_name, validate_where_column},
+    utils::{validate_table_name, validate_where_column},
 };
-use crate::{db::Pool, errors::ApiError};
+use crate::{db::connect, errors::ApiError};
 
 #[derive(Debug, PartialEq)]
 enum PreparedStatementValue {
@@ -27,10 +26,10 @@ enum PreparedStatementValue {
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query
 pub fn select_table_rows(
-    pool: Data<Pool>,
+    db_url: String,
     params: QueryParamsSelect,
 ) -> impl Future<Item = Vec<RowFields>, Error = ApiError> {
-    if let Err(e) = validate_sql_name(&params.table) {
+    if let Err(e) = validate_table_name(&params.table) {
         return Either::A(err::<Vec<RowFields>, ApiError>(e));
     }
 
@@ -68,7 +67,7 @@ pub fn select_table_rows(
     }
 
     // parse columns for foreign key usage
-    let fk_future = ForeignKeyReference::from_query_columns(&pool, params.table.clone(), columns)
+    let fk_future = ForeignKeyReference::from_query_columns(&db_url, params.table.clone(), columns)
         .and_then(move |fk_columns| {
             let (statement_str, prepared_values) =
                 match build_select_statement(params, fk_columns, where_ast) {
@@ -77,14 +76,12 @@ pub fn select_table_rows(
                 };
 
             // sending prepared statement to postgres
-            let select_rows_future = pool
-                .run(move |mut conn| {
+            let select_rows_future = connect(&db_url)
+                .map_err(ApiError::from)
+                .and_then(move |mut conn| {
                     conn.prepare(&statement_str)
-                        .then(move |results| match results {
-                            Ok(statement) => Ok((statement, conn)),
-                            Err(e) => Err((e, conn)),
-                        })
-                        .and_then(move |(statement, mut conn)| {
+                        .map_err(ApiError::from)
+                        .and_then(move |statement| {
                             let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
                                 vec![]
                             } else {
@@ -105,22 +102,16 @@ pub fn select_table_rows(
 
                             conn.query(&statement, &prep_values)
                                 .collect()
-                                .then(|results| match results {
-                                    Ok(rows) => Ok((rows, conn)),
-                                    Err(e) => Err((e, conn)),
-                                })
+                                .map_err(ApiError::from)
                         })
                 })
-                .map_err(ApiError::from)
-                .and_then(|rows| {
-                    match rows
-                        .iter()
-                        .map(convert_row_fields)
-                        .collect::<Result<Vec<RowFields>, ApiError>>()
-                    {
-                        Ok(row_fields) => Ok(row_fields),
-                        Err(e) => Err(e),
-                    }
+                .and_then(|rows| match rows
+                    .iter()
+                    .map(convert_row_fields)
+                    .collect::<Result<Vec<RowFields>, ApiError>>()
+                {
+                    Ok(row_fields) => Ok(row_fields),
+                    Err(e) => Err(e),
                 });
 
             Either::B(select_rows_future)
@@ -297,6 +288,7 @@ fn get_column_str<'a>(
     // no FKs exist, just add columns with commas in between
     if !is_fks_exist {
         for (i, column) in columns.iter().enumerate() {
+            validate_where_column(column)?;
             statement.push(column);
 
             if i < columns.len() - 1 {
@@ -635,5 +627,72 @@ mod build_select_statement_tests {
                 panic!(e);
             }
         };
+    }
+}
+
+#[cfg(test)]
+mod get_column_str_tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn foreign_keys_nested() {
+        let columns = vec!["id".to_string(), "parent_id.company_id.name".to_string()];
+        let fks = [ForeignKeyReference {
+            original_refs: vec![
+                "parent_id.company_id.name".to_string(),
+            ],
+            referring_table: "child".to_string(),
+            referring_column: "parent_id".to_string(),
+            table_referred: "adult".to_string(),
+            foreign_key_column: "id".to_string(),
+            nested_fks: vec![
+                ForeignKeyReference {
+                    original_refs: vec![
+                        "company_id.name".to_string(),
+                    ],
+                    referring_table: "adult".to_string(),
+                    referring_column: "company_id".to_string(),
+                    table_referred: "company".to_string(),
+                    foreign_key_column: "id".to_string(),
+                    nested_fks: vec![],
+                },
+            ],
+        }];
+        let table = "child";
+
+        let column_str = get_column_str(&columns, table, &fks).unwrap().join("");
+        assert_eq!(column_str, r#"child.id AS "id", company.name AS "parent_id.company_id.name""#);
+    }
+
+    #[test]
+    fn foreign_keys_nested_more_than_one() {
+        let columns = vec!["parent_id.name".to_string(), "parent_id.company_id.name".to_string()];
+        let fks = [ForeignKeyReference {
+            original_refs: vec![
+                "parent_id.company_id.name".to_string(),
+                "parent_id.name".to_string(),
+            ],
+            referring_table: "child".to_string(),
+            referring_column: "parent_id".to_string(),
+            table_referred: "adult".to_string(),
+            foreign_key_column: "id".to_string(),
+            nested_fks: vec![
+                ForeignKeyReference {
+                    original_refs: vec![
+                        "company_id.name".to_string(),
+                    ],
+                    referring_table: "adult".to_string(),
+                    referring_column: "company_id".to_string(),
+                    table_referred: "company".to_string(),
+                    foreign_key_column: "id".to_string(),
+                    nested_fks: vec![],
+                },
+            ],
+        }];
+        let table = "child";
+
+        let column_str = get_column_str(&columns, table, &fks).unwrap().join("");
+        assert_eq!(column_str, r#"adult.name AS "parent_id.name", company.name AS "parent_id.company_id.name""#);
     }
 }

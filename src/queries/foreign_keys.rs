@@ -9,7 +9,7 @@ use std::{borrow::BorrowMut, collections::HashMap};
 use super::select_table_stats::{
     select_column_stats, select_column_stats_statement, TableColumnStat,
 };
-use crate::{db::Pool, errors::ApiError};
+use crate::{db::connect, errors::ApiError};
 
 struct PgDialectWithPreparedStatement;
 impl Dialect for PgDialectWithPreparedStatement {
@@ -390,7 +390,7 @@ impl ForeignKeyReference {
     /// );
     /// ```
     pub fn from_query_columns(
-        pool: &Pool,
+        db_url: &str,
         table: String,
         columns: Vec<String>,
     ) -> Box<dyn Future<Item = Vec<Self>, Error = ApiError> + Send> {
@@ -438,36 +438,34 @@ impl ForeignKeyReference {
 
         // get column stats for table
         let process_column_stats_future =
-            ForeignKeyReference::process_column_stats(pool, table, fk_columns_grouped);
+            ForeignKeyReference::process_column_stats(db_url, table, fk_columns_grouped);
 
         Box::new(process_column_stats_future)
     }
 
     fn process_column_stats(
-        pool: &Pool,
+        db_url: &str,
         table: String,
         fk_columns_grouped: HashMap<String, (Vec<String>, Vec<String>)>,
     ) -> impl Future<Item = Vec<Self>, Error = ApiError> + Send {
         // used later in futures
         let table_str = &table;
         let table_clone = table_str.to_string();
-        let pool_clone = pool.clone();
+        let db_url_str = db_url.to_string();
 
-        pool.run(move |mut conn| {
+        connect(db_url)
+        .map_err(ApiError::from)
+        .and_then(move |mut conn| {
             select_column_stats_statement(&mut conn, &table_clone)
-                .then(move |results| match results {
-                    Ok(statement) => Ok((statement, conn)),
-                    Err(e) => Err((e, conn)),
-                })
-                .and_then(move |(statement, mut conn)| {
+                .map_err(ApiError::from)
+                .and_then(move |statement| {
                     let q = conn.query(&statement, &[]);
                     select_column_stats(q).then(move |results| match results {
-                        Ok(stats) => Ok(((stats, fk_columns_grouped), conn)),
-                        Err(e) => Err((e, conn)),
+                        Ok(stats) => Ok((stats, fk_columns_grouped)),
+                        Err(e) => Err(ApiError::from(e)),
                     })
                 })
         })
-        .map_err(ApiError::from)
         .map(|(stats, fk_columns_grouped)| {
             // contains a tuple representing the (matched parent column name, child columns, and
             // original column strings)
@@ -510,7 +508,7 @@ impl ForeignKeyReference {
         // stats and matched_columns should have the same length and their indexes should match
         .and_then(move |(filtered_stats, matched_columns)| {
             ForeignKeyReference::stats_to_fkr_futures(
-                pool_clone,
+                db_url_str,
                 table,
                 filtered_stats,
                 matched_columns,
@@ -522,7 +520,7 @@ impl ForeignKeyReference {
     /// Maps a Vec of `TableColumnStat`s to a Future wrapping a Vec of `ForeignKeyReference`s. Used
     /// by from_query_columns.
     fn stats_to_fkr_futures(
-        pool: Pool,
+        db_url_str: String,
         table: String,
         stats: Vec<TableColumnStat>,
         matched_columns: Vec<(String, Vec<String>, Vec<String>)>,
@@ -573,7 +571,7 @@ impl ForeignKeyReference {
 
             // child columns are all FKs, so we need to recursively call this function
             let child_columns_future =
-                Self::from_query_columns(&pool, foreign_key_table.clone(), child_fk_columns)
+                Self::from_query_columns(&db_url_str, foreign_key_table.clone(), child_fk_columns)
                     .and_then(move |nested_fks| {
                         Ok(ForeignKeyReference {
                             referring_column: stat_column_name_clone,
@@ -604,9 +602,14 @@ impl ForeignKeyReference {
             let found_orig_ref = fkr.original_refs.iter().find(|ref_col| col == *ref_col);
 
             if found_orig_ref.is_some() {
-                if !&fkr.nested_fks.is_empty() {
+                if !fkr.nested_fks.is_empty() {
                     let first_dot_pos = col.find('.').unwrap();
                     let sub_column_str = &col[first_dot_pos + 1..];
+
+                    if !sub_column_str.contains('.') {
+                        return Some((fkr, sub_column_str));
+                    }
+
                     return Self::find(&fkr.nested_fks, &fkr.table_referred, sub_column_str);
                 }
 

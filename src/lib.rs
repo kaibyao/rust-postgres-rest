@@ -13,28 +13,28 @@ extern crate serde;
 #[macro_use]
 extern crate tokio_postgres;
 
-use actix_web::{web, Scope};
-
 // library modules
 mod queries;
 
-mod db;
-use crate::db::connect;
+pub mod db;
 
 mod endpoints;
 use endpoints::{get_all_table_names, get_table, index, post_table};
 
 mod errors;
+pub use errors::ApiError;
+
+use actix_web::{web, Scope};
 
 pub struct AppConfig<'a> {
-    pub database_url: &'a str,
+    pub db_url: &'a str,
     pub scope_name: &'a str,
 }
 
 impl<'a> Default for AppConfig<'a> {
     fn default() -> Self {
         AppConfig {
-            database_url: "",
+            db_url: "",
             scope_name: "/api",
         }
     }
@@ -48,11 +48,9 @@ impl<'a> AppConfig<'a> {
 
 /// Takes an initialized App and config, and appends the Rest API functionality to the scope’s
 /// endpoint.
-pub fn generate_rest_api_scope(config: &AppConfig) -> Scope {
-    let pool = connect(config.database_url).unwrap();
-
+pub fn generate_rest_api_scope(config: AppConfig<'static>) -> Scope {
     web::scope(config.scope_name)
-        .data(pool)
+        .data(config)
         .route("", web::get().to(index))
         .route("/", web::get().to(index))
         .route("/table", web::get().to_async(get_all_table_names))

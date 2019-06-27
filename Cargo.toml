@@ -1,5 +1,48 @@
-[workspace]
-members = [
-  "experiment00",
-  "experiment00-integration-tests"
-]
+[package]
+name = "experiment00"
+version = "0.1.0"
+authors = ["Kai Yao <kai.b.yao@gmail.com>"]
+edition = "2018"
+
+[lib]
+name = "experiment00"
+path = "src/lib.rs"
+
+[[bin]]
+name = "experiment00example"
+path = "src/main.rs"
+
+[dependencies]
+actix = "^0.8"
+actix-web = "^1.0"
+
+# DO NOT USE BB8. INTEGRATION TESTS WOULD HAVE DB CONNECTION TIMEOUTS.
+# If you really need a connection pool, look into pgbouncer or L337-postgres.
+# bb8 = "^0.3"
+# bb8-postgres = { version = "^0.3", features = ["with-bit-vec-0_5", "with-chrono-0_4", "with-eui48-0_4", "with-eui48-0_4", "with-serde_json-1", "with-uuid-0_7"] }
+
+bit-vec = "^0.6"
+chrono = { version = "^0.4", features = ["serde"] }
+eui48 = { version = "^0.4", features = ["serde"] }
+failure = "^0.1"
+futures = "^0.1"
+futures03 = { package = "futures-preview", version = "0.3.0-alpha.16", features = ["compat"] }
+lazy_static = "^1.2"
+postgres-protocol = "^0.4"
+regex = "^1.1"
+#rust_decimal = { version = "1.0.1", git = "https://github.com/kaibyao/rust-decimal.git", features = ["postgres"] }
+serde = {version = "^1.0", features = ["derive"] }
+serde_json = "^1.0"
+sqlparser = "^0.3"
+tokio-postgres = { version = "0.4.0-rc.2", features = ["with-bit-vec-0_5", "with-chrono-0_4", "with-eui48-0_4", "with-eui48-0_4", "with-serde_json-1", "with-uuid-0_7"] }
+uuid = { version = "^0.7", features = ["serde"] }
+
+[dependencies.rust_decimal]
+# version = "1.0.1"
+git = "https://github.com/kaibyao/rust-decimal.git"
+# path = "../../../Misc/_delete/rust-decimal"
+features = ["postgres", "serde"]
+
+[dev-dependencies]
+pretty_assertions = "^0.6"
+reqwest = "0.9.18"

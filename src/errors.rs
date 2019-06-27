@@ -51,6 +51,15 @@ impl ApiError {
                 offender,
             },
 
+            "INVALID_DB_CONFIG" => ApiError::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "Either `db_url` or `db_pool` config property needs to be set.".to_string(),
+                http_status: 400,
+                message: "Both `db_url` and `db_pool` were found empty.",
+                offender,
+            },
+
             "INVALID_JSON_TYPE_CONVERSION" => ApiError::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
@@ -63,7 +72,7 @@ impl ApiError {
             "INVALID_SQL_IDENTIFIER" => ApiError::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
-                details: "Valid identifiers must only contain alphanumeric and underscore (_) characters. The first character must also be a letter or underscore.".to_string(),
+                details: "Valid identifiers must only contain alphanumeric and underscore (_) characters. The first character must also be a letter or underscore. Wildcards (*) are not allowed.".to_string(),
                 http_status: 400,
                 message: "There was an identifier (such as table or column name) that did not have valid characters.",
                 offender,
@@ -145,39 +154,6 @@ impl From<actix_web::Error> for ApiError {
             code: "ACTIX_ERROR",
             details: format!("{}", err),
             message: "Error occurred with Actix.",
-            http_status: 500,
-        }
-    }
-}
-impl From<bb8::RunError<ApiError>> for ApiError {
-    fn from(err: bb8::RunError<ApiError>) -> Self {
-        match err {
-            bb8::RunError::TimedOut => {
-                let details = "The database connection timed out.".to_string();
-                ApiError::InternalError {
-                    category: MessageCategory::Error,
-                    code: "DATABASE_ERROR_TIMEOUT",
-                    details,
-                    message: "There was an error when making the request with the database pool.",
-                    http_status: 500,
-                }
-            }
-            bb8::RunError::User(e) => e,
-        }
-    }
-}
-impl From<bb8::RunError<tokio_postgres::Error>> for ApiError {
-    fn from(err: bb8::RunError<tokio_postgres::Error>) -> Self {
-        let details = match err {
-            bb8::RunError::TimedOut => "The database connection timed out.".to_string(),
-            bb8::RunError::User(e) => format!("{}", e),
-        };
-
-        ApiError::InternalError {
-            category: MessageCategory::Error,
-            code: "DATABASE_ERROR",
-            details,
-            message: "There was an error when making the request with the database pool.",
             http_status: 500,
         }
     }

@@ -36,6 +36,12 @@ Theoretically I could just use that, but I'm doubting its performance. It’s pr
 - there should probably be an option to disable specific endpoints.
 - Need to add a query parser for all endpoints
 
+## To run tests
+
+You will need `docker-compose` to run tests. In one terminal, run `docker-compose up` to start the postgres docker image.
+
+In another terminal, run `cargo test`.
+
 ## Endpoints
 
 ### `GET /{table}`

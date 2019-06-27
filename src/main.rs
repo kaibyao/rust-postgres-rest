@@ -14,11 +14,11 @@ fn main() {
     // start 1 server on each cpu thread
     HttpServer::new(move || {
         let mut config = AppConfig::new();
-        config.database_url = "postgresql://kaiby@localhost:5432/crossroads";
+        config.db_url = "postgresql://kaiby@localhost:5432/crossroads";
 
         App::new().service(
             // appends an actix-web Scope under the "/api" endpoint to app and returns it
-            generate_rest_api_scope(&config),
+            generate_rest_api_scope(config),
         )
     })
     .bind(ip_address)

@@ -12,6 +12,8 @@ CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS hstore WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
+-- For testing fields
+
 DROP TABLE IF EXISTS public.test_fields;
 CREATE TABLE IF NOT EXISTS public.test_fields (
     id bigint NOT NULL,
@@ -115,3 +117,40 @@ INSERT INTO public.test_fields (
   100.01,
   100.02
 );
+
+-- For testing foreign keys
+DROP TABLE IF EXISTS public.child;
+DROP TABLE IF EXISTS public.adult;
+DROP TABLE IF EXISTS public.school;
+DROP TABLE IF EXISTS public.company;
+
+CREATE TABLE public.company (
+  id BIGINT CONSTRAINT company_id_key PRIMARY KEY,
+  name TEXT
+);
+
+CREATE TABLE public.school (
+  id BIGINT CONSTRAINT school_id_key PRIMARY KEY,
+  name TEXT
+);
+
+CREATE TABLE public.adult (
+  id BIGINT CONSTRAINT adult_id_key PRIMARY KEY,
+  company_id BIGINT,
+  name TEXT
+);
+ALTER TABLE public.adult ADD CONSTRAINT adult_company_id FOREIGN KEY (company_id) REFERENCES public.company(id);
+
+CREATE TABLE public.child (
+  id BIGINT CONSTRAINT child_id_key PRIMARY KEY,
+  parent_id BIGINT,
+  school_id BIGINT,
+  name TEXT
+);
+ALTER TABLE public.child ADD CONSTRAINT child_parent_id FOREIGN KEY (parent_id) REFERENCES public.adult(id);
+ALTER TABLE public.child ADD CONSTRAINT child_school_id FOREIGN KEY (school_id) REFERENCES public.school(id);
+
+INSERT INTO public.company (id, name) VALUES (100, 'Stark Corporation');
+INSERT INTO public.school (id, name) VALUES (10, 'Winterfell Tower');
+INSERT INTO public.adult (id, company_id, name) VALUES (1, 100, 'Ned');
+INSERT INTO public.child (id, name, parent_id, school_id) VALUES (1000, 'Robb', 1, 10);

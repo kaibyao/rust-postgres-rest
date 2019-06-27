@@ -11,27 +11,29 @@ use futures::{
 use serde_json::Value;
 
 use crate::{
-    db::Pool,
+    db::connect,
     errors::ApiError,
     queries::{
         insert_into_table, query_types, select_all_tables, select_table_rows, select_table_stats,
     },
+    AppConfig,
 };
 use query_types::{QueryParamsInsert, QueryParamsSelect, RequestQueryStringParams};
 
 /// Retrieves a list of table names that exist in the DB.
 pub fn get_all_table_names(
-    db: web::Data<Pool>,
+    config: web::Data<AppConfig>,
 ) -> impl Future<Item = HttpResponse, Error = ApiError> {
-    db.run(select_all_tables)
+    connect(config.db_url)
         .map_err(ApiError::from)
+        .and_then(|client| select_all_tables(client).map_err(ApiError::from))
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }
 
 /// Inserts new rows into a table
 pub fn post_table(
     req: HttpRequest,
-    db: web::Data<Pool>,
+    config: web::Data<AppConfig>,
     body: Json<Value>,
     query_string_params: web::Query<RequestQueryStringParams>,
 ) -> impl Future<Item = HttpResponse, Error = ApiError> {
@@ -47,7 +49,8 @@ pub fn post_table(
         }
     };
 
-    let insert_response = insert_into_table(db.get_ref(), params).and_then(|num_rows_affected| {
+    let insert_response = connect(config.db_url)
+        .map_err(ApiError::from).and_then(|client| insert_into_table(client, params)).and_then(|num_rows_affected| {
         Ok(HttpResponseBuilder::new(StatusCode::OK).json(num_rows_affected))
     });
 
@@ -57,32 +60,34 @@ pub fn post_table(
 /// Queries a table using SELECT.
 pub fn get_table(
     req: HttpRequest,
-    db: web::Data<Pool>,
+    config: web::Data<AppConfig>,
     query_string_params: web::Query<RequestQueryStringParams>,
 ) -> impl Future<Item = HttpResponse, Error = ApiError> {
     let params = QueryParamsSelect::from_http_request(&req, query_string_params.into_inner());
 
     if params.columns.is_empty() {
-        Either::A(get_table_stats(db, params.table))
+        Either::A(get_table_stats(config.db_url, params.table))
     } else {
-        Either::B(get_table_rows(db, params))
+        Either::B(get_table_rows(config.db_url, params))
     }
 }
 
 fn get_table_rows(
-    db: web::Data<Pool>,
+    db_url: &str,
     params: QueryParamsSelect,
 ) -> impl Future<Item = HttpResponse, Error = ApiError> {
-    select_table_rows(db, params)
+    select_table_rows(db_url.to_string(), params)
         .map_err(ApiError::from)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }
 
 fn get_table_stats(
-    db: web::Data<Pool>,
+    db_url: &str,
     table: String,
 ) -> impl Future<Item = HttpResponse, Error = ApiError> {
-    db.run(|conn| select_table_stats(conn, table))
+    connect(db_url)
+        .map_err(ApiError::from)
+        .and_then(|conn| select_table_stats(conn, table))
         .map_err(ApiError::from)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }

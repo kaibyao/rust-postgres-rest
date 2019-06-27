@@ -1,4 +1,4 @@
-use super::utils::validate_sql_name;
+use super::utils::validate_table_name;
 use crate::errors::ApiError;
 use futures::{
     future::{err, join_all, Either, Future},
@@ -81,7 +81,6 @@ pub struct TableStats {
     pub indexes: Vec<TableIndex>,
     pub primary_key: Option<Vec<String>>,
     pub referenced_by: Vec<TableReferencedBy>,
-    pub rows: i64,
 }
 
 /// Returns the requested table’s stats: number of rows, the foreign keys referring to the table,
@@ -89,54 +88,40 @@ pub struct TableStats {
 pub fn select_table_stats(
     mut conn: Client,
     table: String,
-) -> impl Future<Item = (TableStats, Client), Error = (ApiError, Client)> {
-    if let Err(e) = validate_sql_name(&table) {
-        return Either::A(err::<(TableStats, Client), (ApiError, Client)>((e, conn)));
+) -> impl Future<Item = TableStats, Error = ApiError> {
+    if let Err(e) = validate_table_name(&table) {
+        return Either::A(err::<TableStats, ApiError>(e));
     }
 
     // run all sub-operations in "parallel"
 
     // create prepared statements
     let f = join_all(vec![
-        select_row_count_statement(&mut conn, &table),
         select_constraints_statement(&mut conn, &table),
         select_indexes_statement(&mut conn, &table),
         select_column_stats_statement(&mut conn, &table),
     ])
-    .then(move |result| match result {
+    .and_then(move |statements| {
         // query the statements
-        Ok(statements) => {
-            let mut queries = vec![];
-            for statement in &statements {
-                queries.push(conn.query(statement, &[]))
-            }
-            Ok((queries, conn))
+        let mut queries = vec![];
+        for statement in &statements {
+            queries.push(conn.query(statement, &[]))
         }
-        Err(e) => Err((e, conn)),
-    })
-    .and_then(|(mut queries, conn)| {
+
         // compile the results of the sub-operations into final stats
         let column_stats_q = queries.pop().unwrap();
         let indexes_q = queries.pop().unwrap();
         let constraints_q = queries.pop().unwrap();
-        let count_q = queries.pop().unwrap();
 
-        let count_f = select_row_count(count_q);
         let constraints_f = select_constraints(constraints_q);
         let indexes_f = select_indexes(indexes_q);
         let column_stats_f = select_column_stats(column_stats_q);
 
-        count_f
-            .join4(constraints_f, indexes_f, column_stats_f)
-            .then(move |result| match result {
-                Ok((row_count, constraints, indexes, column_stats)) => Ok((
-                    compile_table_stats(&table, row_count, constraints, indexes, column_stats),
-                    conn,
-                )),
-                Err(e) => Err((e, conn)),
-            })
+        constraints_f
+            .join3(indexes_f, column_stats_f)
+            .map(move |(constraints, indexes, column_stats)| compile_table_stats(&table, constraints, indexes, column_stats))
     })
-    .map_err(|(e, conn)| (ApiError::from(e), conn));
+    .map_err(|e| ApiError::from(e));
 
     Either::B(f)
 }
@@ -218,7 +203,6 @@ ORDER BY table_name, column_name;", table);
 /// Takes the results of individual queries and generates the final table stats object
 fn compile_table_stats(
     table: &str,
-    row_count: i64,
     constraints: Vec<Constraint>,
     indexes: Vec<TableIndex>,
     column_stats: Vec<TableColumnStat>,
@@ -262,7 +246,6 @@ fn compile_table_stats(
             _ => Some(opt_primary_key),
         },
         referenced_by,
-        rows: row_count,
     }
 }
 
@@ -420,21 +403,6 @@ ORDER BY
     ix.indisprimary;"#,
         table
     );
-
-    conn.prepare(&statement_str)
-}
-
-fn select_row_count(q: Query) -> impl Future<Item = i64, Error = PgError> {
-    q.map(|row| row.get(0))
-        .collect()
-        .then(move |result| match result {
-            Ok(rows) => Ok(rows[0]),
-            Err(e) => Err(e),
-        })
-}
-
-fn select_row_count_statement(conn: &mut Client, table: &str) -> Prepare {
-    let statement_str = ["SELECT COUNT(*) FROM ", table, ";"].join("");
 
     conn.prepare(&statement_str)
 }
