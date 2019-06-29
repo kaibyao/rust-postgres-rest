@@ -21,8 +21,8 @@ pub mod db;
 mod endpoints;
 use endpoints::{get_all_table_names, get_table, index, post_table};
 
-mod errors;
-pub use errors::ApiError;
+mod error;
+pub use error::Error;
 
 use actix_web::{web, Scope};
 

@@ -1,11 +1,11 @@
-use crate::errors::ApiError;
+use crate::Error;
 use regex::Regex;
 
 /// Checks a table name and returns true if it is valid (false otherwise).
 /// The identifier must start with a lower-case letter or underscore, and only contain
 /// alphanumeric or underscore characters. (Sorry, I don’t have time or energy for UTF-8
 /// shenanigans)
-pub fn validate_table_name(name: &str) -> Result<(), ApiError> {
+pub fn validate_table_name(name: &str) -> Result<(), Error> {
     // Using lazy_static so that VALID_REGEX is only compiled once total (versus compiling the regex
     // every time this function is called)
     lazy_static! {
@@ -13,14 +13,14 @@ pub fn validate_table_name(name: &str) -> Result<(), ApiError> {
     }
 
     if name == "table" {
-        return Err(ApiError::generate_error(
+        return Err(Error::generate_error(
             "SQL_IDENTIFIER_KEYWORD",
             name.to_string(),
         ));
     }
 
     if !VALID_REGEX.is_match(name) {
-        return Err(ApiError::generate_error(
+        return Err(Error::generate_error(
             "INVALID_SQL_IDENTIFIER",
             name.to_string(),
         ));
@@ -31,7 +31,7 @@ pub fn validate_table_name(name: &str) -> Result<(), ApiError> {
 
 /// Like `validate_table_name`, but applies to all other identifiers. Allows parentheses (for functions/aggregates like
 /// `COUNT()`), periods (for foreign key traversal), and AS aliases.
-pub fn validate_where_column(name: &str) -> Result<(), ApiError> {
+pub fn validate_where_column(name: &str) -> Result<(), Error> {
     lazy_static! {
         // Rules:
         // - Starts with a letter (or underscore).
@@ -42,7 +42,7 @@ pub fn validate_where_column(name: &str) -> Result<(), ApiError> {
     }
 
     if name == "table" {
-        return Err(ApiError::generate_error(
+        return Err(Error::generate_error(
             "SQL_IDENTIFIER_KEYWORD",
             name.to_string(),
         ));
@@ -56,7 +56,7 @@ pub fn validate_where_column(name: &str) -> Result<(), ApiError> {
     //     let orig = &name[..matched.start()];
     //     dbg!(orig);
     //     if !VALID_REGEX.is_match(orig) {
-    //         return Err(ApiError::generate_error(
+    //         return Err(Error::generate_error(
     //             "INVALID_SQL_IDENTIFIER",
     //             orig.to_string(),
     //         ));
@@ -65,7 +65,7 @@ pub fn validate_where_column(name: &str) -> Result<(), ApiError> {
     //     let alias = &name[matched.end()..];
     //     dbg!(alias);
     //     if !VALID_REGEX.is_match(alias) {
-    //         return Err(ApiError::generate_error(
+    //         return Err(Error::generate_error(
     //             "INVALID_SQL_IDENTIFIER",
     //             alias.to_string(),
     //         ));
@@ -77,7 +77,7 @@ pub fn validate_where_column(name: &str) -> Result<(), ApiError> {
     dbg!(name);
 
     if !VALID_REGEX.is_match(name) {
-        return Err(ApiError::generate_error(
+        return Err(Error::generate_error(
             "INVALID_SQL_IDENTIFIER",
             name.to_string(),
         ));

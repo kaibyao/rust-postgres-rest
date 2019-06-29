@@ -11,7 +11,7 @@ use super::{
     query_types::{QueryParamsInsert, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement},
 };
-use crate::{errors::ApiError};
+use crate::{Error};
 
 static INSERT_ROWS_BATCH_COUNT: usize = 2;
 
@@ -24,7 +24,7 @@ enum InsertResult {
 pub fn insert_into_table(
     mut conn: Client,
     params: QueryParamsInsert,
-) -> impl Future<Item = QueryResult, Error = ApiError> {
+) -> impl Future<Item = QueryResult, Error = Error> {
     // serde_json::Values can't automatically convert to non-JSON/JSONB columns.
     // Therefore, get column types of table so we know what types into which the json values are
     // converted. apparently rust_postgres already does this in the background, would be nice if
@@ -34,10 +34,10 @@ pub fn insert_into_table(
     let table = params.table.clone();
 
     select_column_stats_statement(&mut conn, &table)
-        .map_err(ApiError::from)
+        .map_err(Error::from)
         .and_then(move |statement| {
             let q = conn.query(&statement, &[]);
-            select_column_stats(q).map_err(ApiError::from).map(|stats| {
+            select_column_stats(q).map_err(Error::from).map(|stats| {
                 (stats, conn)
             })
         })
@@ -68,7 +68,7 @@ pub fn insert_into_table(
                     .collect()
                     .then(|r| match r {
                         Ok(_) => Ok(conn),
-                        Err(e) => Err((ApiError::from(e), conn)),
+                        Err(e) => Err((Error::from(e), conn)),
                     })
                     .and_then(|conn| {
                         loop_fn(
@@ -135,7 +135,7 @@ pub fn insert_into_table(
                             .for_each(|_| Ok(()))
                             .then(|r| match r {
                                 Ok(_) => Ok(results),
-                                Err(e) => Err((ApiError::from(e), conn)),
+                                Err(e) => Err((Error::from(e), conn)),
                             })
                     })
                     .or_else(|(e, mut conn)| {
@@ -183,7 +183,7 @@ fn execute_insert<'a>(
         HashMap<String, String>,
         InsertResult,
     ),
-    Error = (ApiError, Client),
+    Error = (Error, Client),
 > {
     let mut is_return_rows = false;
 
@@ -226,7 +226,7 @@ fn execute_insert<'a>(
         .prepare(&insert_query_str)
         .then(move |result| match result {
             Ok(statement) => Ok((statement, conn)),
-            Err(e) => Err((ApiError::from(e), conn)),
+            Err(e) => Err((Error::from(e), conn)),
         })
         .and_then(move |(statement, mut conn)| {
             // convert the column values into the actual values we will use for the INSERT statement
@@ -267,7 +267,7 @@ fn execute_insert<'a>(
                             match rows
                                 .iter()
                                 .map(|row| convert_row_fields(&row))
-                                .collect::<Result<Vec<RowFields>, ApiError>>()
+                                .collect::<Result<Vec<RowFields>, Error>>()
                             {
                                 Ok(row_fields) => {
                                     Ok((conn, params, column_types, InsertResult::Rows(row_fields)))
@@ -275,7 +275,7 @@ fn execute_insert<'a>(
                                 Err(e) => Err((e, conn)),
                             }
                         }
-                        Err(e) => Err((ApiError::from(e), conn)),
+                        Err(e) => Err((Error::from(e), conn)),
                     },
                 );
 
@@ -290,7 +290,7 @@ fn execute_insert<'a>(
                                 column_types,
                                 InsertResult::NumRowsAffected(num_rows),
                             )),
-                            Err(e) => Err((ApiError::from(e), conn)),
+                            Err(e) => Err((Error::from(e), conn)),
                         });
 
                 Either::B(return_row_count_future)
@@ -373,14 +373,14 @@ fn get_insert_params(
     rows: &[Map<String, Value>],
     columns: &[&str],
     column_types: &HashMap<String, String>,
-) -> Result<(String, Vec<ColumnTypeValue>), ApiError> {
+) -> Result<(String, Vec<ColumnTypeValue>), Error> {
     let mut prep_column_number = 1;
     let mut row_strs = vec![];
 
     // generate the array of json-converted-to-rust_postgres values to insert.
-    let nested_column_values_result: Result<Vec<Vec<ColumnTypeValue>>, ApiError> = rows
+    let nested_column_values_result: Result<Vec<Vec<ColumnTypeValue>>, Error> = rows
         .iter()
-        .map(|row| -> Result<Vec<ColumnTypeValue>, ApiError> {
+        .map(|row| -> Result<Vec<ColumnTypeValue>, Error> {
             // row_str_arr is used for the prepared statement parameter string
             let mut row_str_arr: Vec<String> = vec![];
             let mut column_values: Vec<ColumnTypeValue> = vec![];

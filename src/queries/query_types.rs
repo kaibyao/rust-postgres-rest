@@ -1,5 +1,5 @@
 use super::postgres_types::RowFields;
-use crate::errors::ApiError;
+use crate::Error;
 use actix_web::HttpRequest;
 use serde_json::{Map, Value};
 
@@ -122,7 +122,7 @@ impl QueryParamsInsert {
         req: &HttpRequest,
         body: Value,
         query_string_params: RequestQueryStringParams,
-    ) -> Result<Self, ApiError> {
+    ) -> Result<Self, Error> {
         // generate ON CONFLICT data
         let conflict_action = match query_string_params.conflict_action {
             Some(action_str) => Some(action_str.to_string().to_lowercase()),
@@ -140,7 +140,7 @@ impl QueryParamsInsert {
         if (conflict_action.is_some() && conflict_target.is_none())
             || (conflict_action.is_none() && conflict_target.is_some())
         {
-            return Err(ApiError::generate_error("INCORRECT_REQUEST_BODY", "`conflict_action` and `conflict_target` must both be present for the `ON CONFLICT` clause to be generated correctly.".to_string()));
+            return Err(Error::generate_error("INCORRECT_REQUEST_BODY", "`conflict_action` and `conflict_target` must both be present for the `ON CONFLICT` clause to be generated correctly.".to_string()));
         }
 
         if let (Some(conflict_action_str), Some(conflict_target_vec)) =
@@ -148,14 +148,14 @@ impl QueryParamsInsert {
         {
             // Some validation checking of conflict_action and conflict_target
             if conflict_action_str != "nothing" && conflict_action_str != "update" {
-                return Err(ApiError::generate_error(
+                return Err(Error::generate_error(
                     "INCORRECT_REQUEST_BODY",
                     "Valid options for `conflict_action` are: `nothing`, `update`.".to_string(),
                 ));
             }
 
             if conflict_target_vec.is_empty() {
-                return Err(ApiError::generate_error(
+                return Err(Error::generate_error(
                     "INCORRECT_REQUEST_BODY",
                     "`conflict_target` must be a comma-separated list of column names and include at least one column name.".to_string(),
                 ));
@@ -165,7 +165,7 @@ impl QueryParamsInsert {
                 .iter()
                 .any(|conflict_target_str| *conflict_target_str == "")
             {
-                return Err(ApiError::generate_error(
+                return Err(Error::generate_error(
                     "INCORRECT_REQUEST_BODY",
                     "<Empty string> is not a valid column name for the parameter`conflict_target`."
                         .to_string(),
@@ -177,7 +177,7 @@ impl QueryParamsInsert {
         let returning_columns = match query_string_params.returning_columns {
             Some(columns_str) => {
                 if columns_str == "" {
-                    return Err(ApiError::generate_error(
+                    return Err(Error::generate_error(
                         "INCORRECT_REQUEST_BODY",
                         "`conflict_target` must be a comma-separated list of column names and include at least one column name.".to_string(),
                     ));
@@ -185,9 +185,9 @@ impl QueryParamsInsert {
 
                 let returning_columns_vec = columns_str
                         .split(',')
-                        .map(|column_str| -> Result<String, ApiError> {
+                        .map(|column_str| -> Result<String, Error> {
                             if column_str == "" {
-                                return Err(ApiError::generate_error(
+                                return Err(Error::generate_error(
                                     "INCORRECT_REQUEST_BODY",
                                     "`conflict_target` must be a comma-separated list of column names and include at least one column name.".to_string(),
                                 ));
@@ -195,7 +195,7 @@ impl QueryParamsInsert {
 
                             Ok(column_str.to_string())
                         })
-                        .collect::<Result<Vec<String>, ApiError>>()?;
+                        .collect::<Result<Vec<String>, Error>>()?;
 
                 Some(returning_columns_vec)
             }
@@ -206,7 +206,7 @@ impl QueryParamsInsert {
             Some(body_rows_to_insert) => {
                 if !body_rows_to_insert
                 .iter().all(Value::is_object) {
-                    return Err(ApiError::generate_error("INCORRECT_REQUEST_BODY", "The body needs to be an array of objects where each object represents a row and whose key-values represent column names and their values.".to_string()));
+                    return Err(Error::generate_error("INCORRECT_REQUEST_BODY", "The body needs to be an array of objects where each object represents a row and whose key-values represent column names and their values.".to_string()));
                 }
 
                 body_rows_to_insert
@@ -219,7 +219,7 @@ impl QueryParamsInsert {
                 })
                 .collect()
             },
-            None => return Err(ApiError::generate_error("INCORRECT_REQUEST_BODY", "The body needs to be an array of objects where each object represents a row and whose key-values represent column names and their values.".to_string())),
+            None => return Err(Error::generate_error("INCORRECT_REQUEST_BODY", "The body needs to be an array of objects where each object represents a row and whose key-values represent column names and their values.".to_string())),
         };
 
         Ok(QueryParamsInsert {

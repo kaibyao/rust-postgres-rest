@@ -1,5 +1,5 @@
 use super::utils::validate_table_name;
-use crate::errors::ApiError;
+use crate::Error;
 use futures::{
     future::{err, join_all, Either, Future},
     stream::Stream,
@@ -88,9 +88,9 @@ pub struct TableStats {
 pub fn select_table_stats(
     mut conn: Client,
     table: String,
-) -> impl Future<Item = TableStats, Error = ApiError> {
+) -> impl Future<Item = TableStats, Error = Error> {
     if let Err(e) = validate_table_name(&table) {
-        return Either::A(err::<TableStats, ApiError>(e));
+        return Either::A(err::<TableStats, Error>(e));
     }
 
     // run all sub-operations in "parallel"
@@ -121,7 +121,7 @@ pub fn select_table_stats(
             .join3(indexes_f, column_stats_f)
             .map(move |(constraints, indexes, column_stats)| compile_table_stats(&table, constraints, indexes, column_stats))
     })
-    .map_err(|e| ApiError::from(e));
+    .map_err(|e| Error::from(e));
 
     Either::B(f)
 }

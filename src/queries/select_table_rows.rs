@@ -15,7 +15,7 @@ use super::{
     query_types::QueryParamsSelect,
     utils::{validate_table_name, validate_where_column},
 };
-use crate::{db::connect, errors::ApiError};
+use crate::{db::connect, Error};
 
 #[derive(Debug, PartialEq)]
 enum PreparedStatementValue {
@@ -28,9 +28,9 @@ enum PreparedStatementValue {
 pub fn select_table_rows(
     db_url: String,
     params: QueryParamsSelect,
-) -> impl Future<Item = Vec<RowFields>, Error = ApiError> {
+) -> impl Future<Item = Vec<RowFields>, Error = Error> {
     if let Err(e) = validate_table_name(&params.table) {
-        return Either::A(err::<Vec<RowFields>, ApiError>(e));
+        return Either::A(err::<Vec<RowFields>, Error>(e));
     }
 
     // get list of every column being used in the query params (columns, where, distinct, group_by,
@@ -45,7 +45,7 @@ pub fn select_table_rows(
                 None => ASTNode::SQLIdentifier("".to_string()),
             },
             Err(_e) => {
-                return Either::A(err::<Vec<RowFields>, ApiError>(ApiError::generate_error(
+                return Either::A(err::<Vec<RowFields>, Error>(Error::generate_error(
                     "INVALID_SQL_SYNTAX",
                     ["WHERE", where_clause_str].join(":"),
                 )));
@@ -72,15 +72,15 @@ pub fn select_table_rows(
             let (statement_str, prepared_values) =
                 match build_select_statement(params, fk_columns, where_ast) {
                     Ok((stmt, prep_vals)) => (stmt, prep_vals),
-                    Err(e) => return Either::A(err::<Vec<RowFields>, ApiError>(e)),
+                    Err(e) => return Either::A(err::<Vec<RowFields>, Error>(e)),
                 };
 
             // sending prepared statement to postgres
             let select_rows_future = connect(&db_url)
-                .map_err(ApiError::from)
+                .map_err(Error::from)
                 .and_then(move |mut conn| {
                     conn.prepare(&statement_str)
-                        .map_err(ApiError::from)
+                        .map_err(Error::from)
                         .and_then(move |statement| {
                             let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
                                 vec![]
@@ -102,13 +102,13 @@ pub fn select_table_rows(
 
                             conn.query(&statement, &prep_values)
                                 .collect()
-                                .map_err(ApiError::from)
+                                .map_err(Error::from)
                         })
                 })
                 .and_then(|rows| match rows
                     .iter()
                     .map(convert_row_fields)
-                    .collect::<Result<Vec<RowFields>, ApiError>>()
+                    .collect::<Result<Vec<RowFields>, Error>>()
                 {
                     Ok(row_fields) => Ok(row_fields),
                     Err(e) => Err(e),
@@ -124,7 +124,7 @@ fn build_select_statement(
     params: QueryParamsSelect,
     fks: Vec<ForeignKeyReference>,
     mut where_ast: ASTNode,
-) -> Result<(String, Vec<PreparedStatementValue>), ApiError> {
+) -> Result<(String, Vec<PreparedStatementValue>), Error> {
     let mut statement = vec!["SELECT "];
     let is_fks_exist = !fks.is_empty();
 
@@ -281,7 +281,7 @@ fn get_column_str<'a>(
     columns: &'a [String],
     table: &'a str,
     fks: &'a [ForeignKeyReference],
-) -> Result<Vec<&'a str>, ApiError> {
+) -> Result<Vec<&'a str>, Error> {
     let mut statement: Vec<&str> = vec![];
     let is_fks_exist = !fks.is_empty();
 

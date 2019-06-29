@@ -9,7 +9,7 @@ use std::{borrow::BorrowMut, collections::HashMap};
 use super::select_table_stats::{
     select_column_stats, select_column_stats_statement, TableColumnStat,
 };
-use crate::{db::connect, errors::ApiError};
+use crate::{db::connect, Error};
 
 struct PgDialectWithPreparedStatement;
 impl Dialect for PgDialectWithPreparedStatement {
@@ -27,7 +27,7 @@ impl Dialect for PgDialectWithPreparedStatement {
 }
 
 /// Converts a WHERE clause string into an ASTNode.
-pub fn where_clause_str_to_ast(clause: &str) -> Result<Option<ASTNode>, ApiError> {
+pub fn where_clause_str_to_ast(clause: &str) -> Result<Option<ASTNode>, Error> {
     let full_statement = ["SELECT * FROM a_table WHERE ", clause].join("");
     let dialect = PgDialectWithPreparedStatement;
 
@@ -393,7 +393,7 @@ impl ForeignKeyReference {
         db_url: &str,
         table: String,
         columns: Vec<String>,
-    ) -> Box<dyn Future<Item = Vec<Self>, Error = ApiError> + Send> {
+    ) -> Box<dyn Future<Item = Vec<Self>, Error = Error> + Send> {
         let mut fk_columns: Vec<String> = columns
             .iter()
             .filter_map(|col| {
@@ -447,22 +447,22 @@ impl ForeignKeyReference {
         db_url: &str,
         table: String,
         fk_columns_grouped: HashMap<String, (Vec<String>, Vec<String>)>,
-    ) -> impl Future<Item = Vec<Self>, Error = ApiError> + Send {
+    ) -> impl Future<Item = Vec<Self>, Error = Error> + Send {
         // used later in futures
         let table_str = &table;
         let table_clone = table_str.to_string();
         let db_url_str = db_url.to_string();
 
         connect(db_url)
-        .map_err(ApiError::from)
+        .map_err(Error::from)
         .and_then(move |mut conn| {
             select_column_stats_statement(&mut conn, &table_clone)
-                .map_err(ApiError::from)
+                .map_err(Error::from)
                 .and_then(move |statement| {
                     let q = conn.query(&statement, &[]);
                     select_column_stats(q).then(move |results| match results {
                         Ok(stats) => Ok((stats, fk_columns_grouped)),
-                        Err(e) => Err(ApiError::from(e)),
+                        Err(e) => Err(Error::from(e)),
                     })
                 })
         })
@@ -513,7 +513,7 @@ impl ForeignKeyReference {
                 filtered_stats,
                 matched_columns,
             )
-            .map_err(ApiError::from)
+            .map_err(Error::from)
         })
     }
 
@@ -524,7 +524,7 @@ impl ForeignKeyReference {
         table: String,
         stats: Vec<TableColumnStat>,
         matched_columns: Vec<(String, Vec<String>, Vec<String>)>,
-    ) -> impl Future<Item = Vec<Self>, Error = ApiError> {
+    ) -> impl Future<Item = Vec<Self>, Error = Error> {
         let mut fkr_futures = vec![];
         for (i, stat) in stats.into_iter().enumerate() {
             // stats.into_iter().enumerate().map(move |(i, stat)| {
@@ -556,7 +556,7 @@ impl ForeignKeyReference {
             // child column is not a foreign key, return future with ForeignKeyReference
             if child_fk_columns.is_empty() {
                 let no_child_columns_fut =
-                    ok::<ForeignKeyReference, ApiError>(ForeignKeyReference {
+                    ok::<ForeignKeyReference, Error>(ForeignKeyReference {
                         referring_column: stat_column_name_clone,
                         referring_table: table_clone,
                         table_referred: foreign_key_table,

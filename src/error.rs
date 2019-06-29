@@ -12,7 +12,7 @@ pub enum MessageCategory {
 #[derive(Debug, Fail, Serialize)]
 #[serde(untagged)]
 /// A wrapper around all the errors we can run into.
-pub enum ApiError {
+pub enum Error {
     /// Describes errors that are generated due to user misuse.
     #[fail(
         display = "{}: {} Offender: {}.\n\nDetails:\n{}",
@@ -38,11 +38,11 @@ pub enum ApiError {
     },
 }
 
-impl ApiError {
-    /// Used to generate an ApiError
+impl Error {
+    /// Used to generate an Error
     pub fn generate_error(err_id: &'static str, offender: String) -> Self {
         match err_id {
-            "INCORRECT_REQUEST_BODY" => ApiError::UserError {
+            "INCORRECT_REQUEST_BODY" => Error::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
                 details: "".to_string(),
@@ -51,7 +51,7 @@ impl ApiError {
                 offender,
             },
 
-            "INVALID_DB_CONFIG" => ApiError::UserError {
+            "INVALID_DB_CONFIG" => Error::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
                 details: "Either `db_url` or `db_pool` config property needs to be set.".to_string(),
@@ -60,7 +60,7 @@ impl ApiError {
                 offender,
             },
 
-            "INVALID_JSON_TYPE_CONVERSION" => ApiError::UserError {
+            "INVALID_JSON_TYPE_CONVERSION" => Error::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
                 details: "The type of the JSON data does not match the type of the database column.".to_string(),
@@ -69,7 +69,7 @@ impl ApiError {
                 offender
             },
 
-            "INVALID_SQL_IDENTIFIER" => ApiError::UserError {
+            "INVALID_SQL_IDENTIFIER" => Error::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
                 details: "Valid identifiers must only contain alphanumeric and underscore (_) characters. The first character must also be a letter or underscore. Wildcards (*) are not allowed.".to_string(),
@@ -78,7 +78,7 @@ impl ApiError {
                 offender,
             },
 
-            "INVALID_SQL_SYNTAX" => ApiError::UserError {
+            "INVALID_SQL_SYNTAX" => Error::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
                 details: "The SQL expression could not be parsed by PostgreSQL.".to_string(),
@@ -87,7 +87,7 @@ impl ApiError {
                 offender,
             },
 
-            "NO_DATABASE_CONNECTION" => ApiError::UserError {
+            "NO_DATABASE_CONNECTION" => Error::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
                 details: "A database client does not exist.".to_string(),
@@ -96,7 +96,7 @@ impl ApiError {
                 offender,
             },
 
-            "REQUIRED_PARAMETER_MISSING" => ApiError::UserError {
+            "REQUIRED_PARAMETER_MISSING" => Error::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
                 details: "".to_string(),
@@ -105,7 +105,7 @@ impl ApiError {
                 offender,
             },
 
-            "SQL_IDENTIFIER_KEYWORD" => ApiError::UserError {
+            "SQL_IDENTIFIER_KEYWORD" => Error::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
                 details: "`table` is a reserved keyword and cannot be used to name SQL identifiers".to_string(),
@@ -114,7 +114,7 @@ impl ApiError {
                 offender,
             },
 
-            "UNSUPPORTED_DATA_TYPE" => ApiError::UserError {
+            "UNSUPPORTED_DATA_TYPE" => Error::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
                 details: "".to_string(),
@@ -124,7 +124,7 @@ impl ApiError {
             },
 
             // If this happens, that means we forgot to implement an error handler
-            _ => ApiError::UserError {
+            _ => Error::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
                 details: "Generic error.".to_string(),
@@ -136,9 +136,9 @@ impl ApiError {
     }
 }
 
-impl From<actix::MailboxError> for ApiError {
+impl From<actix::MailboxError> for Error {
     fn from(err: actix::MailboxError) -> Self {
-        ApiError::InternalError {
+        Error::InternalError {
             category: MessageCategory::Error,
             code: "SEND_MESSAGE_ERROR",
             details: format!("{}", err),
@@ -147,9 +147,9 @@ impl From<actix::MailboxError> for ApiError {
         }
     }
 }
-impl From<actix_web::Error> for ApiError {
+impl From<actix_web::Error> for Error {
     fn from(err: actix_web::Error) -> Self {
-        ApiError::InternalError {
+        Error::InternalError {
             category: MessageCategory::Error,
             code: "ACTIX_ERROR",
             details: format!("{}", err),
@@ -158,9 +158,9 @@ impl From<actix_web::Error> for ApiError {
         }
     }
 }
-impl From<actix_web::error::PayloadError> for ApiError {
+impl From<actix_web::error::PayloadError> for Error {
     fn from(err: actix_web::error::PayloadError) -> Self {
-        ApiError::InternalError {
+        Error::InternalError {
             category: MessageCategory::Error,
             code: "PAYLOAD_ERROR",
             details: format!("{}", err),
@@ -169,9 +169,9 @@ impl From<actix_web::error::PayloadError> for ApiError {
         }
     }
 }
-impl From<serde_json::error::Error> for ApiError {
+impl From<serde_json::error::Error> for Error {
     fn from(err: serde_json::error::Error) -> Self {
-        ApiError::UserError {
+        Error::UserError {
             category: MessageCategory::Error,
             code: "JSON_ERROR",
             details: format!("{}", err),
@@ -181,14 +181,14 @@ impl From<serde_json::error::Error> for ApiError {
         }
     }
 }
-impl From<sqlparser::sqlparser::ParserError> for ApiError {
+impl From<sqlparser::sqlparser::ParserError> for Error {
     fn from(err: sqlparser::sqlparser::ParserError) -> Self {
         let details = match err {
             sqlparser::sqlparser::ParserError::ParserError(err_str) => err_str,
             sqlparser::sqlparser::ParserError::TokenizerError(err_str) => err_str,
         };
 
-        ApiError::UserError {
+        Error::UserError {
             category: MessageCategory::Error,
             code: "SQL_PARSER_ERROR",
             details,
@@ -198,9 +198,9 @@ impl From<sqlparser::sqlparser::ParserError> for ApiError {
         }
     }
 }
-impl From<tokio_postgres::Error> for ApiError {
+impl From<tokio_postgres::Error> for Error {
     fn from(err: tokio_postgres::Error) -> Self {
-        ApiError::InternalError {
+        Error::InternalError {
             category: MessageCategory::Error,
             code: "DATABASE_ERROR",
             details: format!("{}", err),
@@ -210,7 +210,7 @@ impl From<tokio_postgres::Error> for ApiError {
     }
 }
 
-impl futures::future::Future for ApiError {
+impl futures::future::Future for Error {
     type Item = ();
     type Error = Self;
 
@@ -219,7 +219,7 @@ impl futures::future::Future for ApiError {
     }
 }
 
-/// Used for formatting the ApiErrors that occur to display in an http response.
+/// Used for formatting the Errors that occur to display in an http response.
 #[derive(Debug, Serialize)]
 struct DisplayUserError<'a> {
     code: &'static str,
@@ -228,11 +228,11 @@ struct DisplayUserError<'a> {
     offender: Option<&'a str>,
 }
 
-// How ApiErrors are formatted for an http response
-impl actix_web::ResponseError for ApiError {
+// How Errors are formatted for an http response
+impl actix_web::ResponseError for Error {
     fn render_response(&self) -> HttpResponse {
         match self {
-            ApiError::UserError {
+            Error::UserError {
                 code,
                 details,
                 http_status,
@@ -248,7 +248,7 @@ impl actix_web::ResponseError for ApiError {
                 },
             ),
 
-            ApiError::InternalError {
+            Error::InternalError {
                 code,
                 details,
                 http_status,
