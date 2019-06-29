@@ -11,7 +11,7 @@ use super::{
     query_types::{QueryParamsInsert, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement},
 };
-use crate::{Error};
+use crate::Error;
 
 static INSERT_ROWS_BATCH_COUNT: usize = 2;
 
@@ -37,9 +37,9 @@ pub fn insert_into_table(
         .map_err(Error::from)
         .and_then(move |statement| {
             let q = conn.query(&statement, &[]);
-            select_column_stats(q).map_err(Error::from).map(|stats| {
-                (stats, conn)
-            })
+            select_column_stats(q)
+                .map_err(Error::from)
+                .map(|stats| (stats, conn))
         })
         .and_then(move |(stats, mut conn)| {
             let mut column_types: HashMap<String, String> = HashMap::new();
@@ -63,8 +63,8 @@ pub fn insert_into_table(
                     }
                 }
 
-
-                let batch_insert_future = conn.simple_query("BEGIN")
+                let batch_insert_future = conn
+                    .simple_query("BEGIN")
                     .collect()
                     .then(|r| match r {
                         Ok(_) => Ok(conn),
@@ -82,20 +82,11 @@ pub fn insert_into_table(
                                 params,
                                 conn,
                             )| {
-                                execute_insert(
-                                    conn,
-                                    params,
-                                    column_types,
-                                    &insert_batches[i],
-                                )
-                                .and_then(
-                                    move |(conn, params, column_types, insert_result)| {
+                                execute_insert(conn, params, column_types, &insert_batches[i])
+                                    .and_then(move |(conn, params, column_types, insert_result)| {
                                         match insert_result {
-                                            InsertResult::NumRowsAffected(
-                                                num_rows_affected,
-                                            ) => {
-                                                total_num_rows_affected +=
-                                                    num_rows_affected;
+                                            InsertResult::NumRowsAffected(num_rows_affected) => {
+                                                total_num_rows_affected += num_rows_affected;
                                             }
                                             InsertResult::Rows(rows) => {
                                                 total_rows_returned.extend(rows);
@@ -120,8 +111,7 @@ pub fn insert_into_table(
                                                 conn,
                                             )))
                                         }
-                                    },
-                                )
+                                    })
                             },
                         )
                     })
@@ -155,13 +145,15 @@ pub fn insert_into_table(
             } else {
                 // insert all rows
                 let rows = params.rows.clone();
-                let simple_insert_future = execute_insert(conn, params, column_types, &rows)
-                    .then(|result| match result {
+                let simple_insert_future =
+                    execute_insert(conn, params, column_types, &rows).then(|result| match result {
                         Ok((_conn, _params, _column_types, insert_result)) => match insert_result {
-                            InsertResult::NumRowsAffected(num_rows_affected) => Ok(QueryResult::from_num_rows_affected(num_rows_affected)),
-                            InsertResult::Rows(rows) => Ok(QueryResult::QueryTableResult(rows))
+                            InsertResult::NumRowsAffected(num_rows_affected) => {
+                                Ok(QueryResult::from_num_rows_affected(num_rows_affected))
+                            }
+                            InsertResult::Rows(rows) => Ok(QueryResult::QueryTableResult(rows)),
                         },
-                        Err((e, _client)) => Err(e)
+                        Err((e, _client)) => Err(e),
                     });
 
                 // simple_insert_future

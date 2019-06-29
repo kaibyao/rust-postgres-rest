@@ -4,6 +4,8 @@ use futures::{
     future::{err, join_all, Either, Future},
     stream::Stream,
 };
+use lazy_static::lazy_static;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use tokio_postgres::{
@@ -117,9 +119,11 @@ pub fn select_table_stats(
         let indexes_f = select_indexes(indexes_q);
         let column_stats_f = select_column_stats(column_stats_q);
 
-        constraints_f
-            .join3(indexes_f, column_stats_f)
-            .map(move |(constraints, indexes, column_stats)| compile_table_stats(&table, constraints, indexes, column_stats))
+        constraints_f.join3(indexes_f, column_stats_f).map(
+            move |(constraints, indexes, column_stats)| {
+                compile_table_stats(&table, constraints, indexes, column_stats)
+            },
+        )
     })
     .map_err(|e| Error::from(e));
 

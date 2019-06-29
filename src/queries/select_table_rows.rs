@@ -2,9 +2,10 @@ use futures::{
     future::{err, Either, Future},
     stream::Stream,
 };
+use lazy_static::lazy_static;
 use regex::Regex;
 use sqlparser::sqlast::ASTNode;
-use tokio_postgres::{types::ToSql};
+use tokio_postgres::types::ToSql;
 
 use super::{
     foreign_keys::{
@@ -105,13 +106,15 @@ pub fn select_table_rows(
                                 .map_err(Error::from)
                         })
                 })
-                .and_then(|rows| match rows
-                    .iter()
-                    .map(convert_row_fields)
-                    .collect::<Result<Vec<RowFields>, Error>>()
-                {
-                    Ok(row_fields) => Ok(row_fields),
-                    Err(e) => Err(e),
+                .and_then(|rows| {
+                    match rows
+                        .iter()
+                        .map(convert_row_fields)
+                        .collect::<Result<Vec<RowFields>, Error>>()
+                    {
+                        Ok(row_fields) => Ok(row_fields),
+                        Err(e) => Err(e),
+                    }
                 });
 
             Either::B(select_rows_future)
@@ -639,35 +642,35 @@ mod get_column_str_tests {
     fn foreign_keys_nested() {
         let columns = vec!["id".to_string(), "parent_id.company_id.name".to_string()];
         let fks = [ForeignKeyReference {
-            original_refs: vec![
-                "parent_id.company_id.name".to_string(),
-            ],
+            original_refs: vec!["parent_id.company_id.name".to_string()],
             referring_table: "child".to_string(),
             referring_column: "parent_id".to_string(),
             table_referred: "adult".to_string(),
             foreign_key_column: "id".to_string(),
-            nested_fks: vec![
-                ForeignKeyReference {
-                    original_refs: vec![
-                        "company_id.name".to_string(),
-                    ],
-                    referring_table: "adult".to_string(),
-                    referring_column: "company_id".to_string(),
-                    table_referred: "company".to_string(),
-                    foreign_key_column: "id".to_string(),
-                    nested_fks: vec![],
-                },
-            ],
+            nested_fks: vec![ForeignKeyReference {
+                original_refs: vec!["company_id.name".to_string()],
+                referring_table: "adult".to_string(),
+                referring_column: "company_id".to_string(),
+                table_referred: "company".to_string(),
+                foreign_key_column: "id".to_string(),
+                nested_fks: vec![],
+            }],
         }];
         let table = "child";
 
         let column_str = get_column_str(&columns, table, &fks).unwrap().join("");
-        assert_eq!(column_str, r#"child.id AS "id", company.name AS "parent_id.company_id.name""#);
+        assert_eq!(
+            column_str,
+            r#"child.id AS "id", company.name AS "parent_id.company_id.name""#
+        );
     }
 
     #[test]
     fn foreign_keys_nested_more_than_one() {
-        let columns = vec!["parent_id.name".to_string(), "parent_id.company_id.name".to_string()];
+        let columns = vec![
+            "parent_id.name".to_string(),
+            "parent_id.company_id.name".to_string(),
+        ];
         let fks = [ForeignKeyReference {
             original_refs: vec![
                 "parent_id.company_id.name".to_string(),
@@ -677,22 +680,21 @@ mod get_column_str_tests {
             referring_column: "parent_id".to_string(),
             table_referred: "adult".to_string(),
             foreign_key_column: "id".to_string(),
-            nested_fks: vec![
-                ForeignKeyReference {
-                    original_refs: vec![
-                        "company_id.name".to_string(),
-                    ],
-                    referring_table: "adult".to_string(),
-                    referring_column: "company_id".to_string(),
-                    table_referred: "company".to_string(),
-                    foreign_key_column: "id".to_string(),
-                    nested_fks: vec![],
-                },
-            ],
+            nested_fks: vec![ForeignKeyReference {
+                original_refs: vec!["company_id.name".to_string()],
+                referring_table: "adult".to_string(),
+                referring_column: "company_id".to_string(),
+                table_referred: "company".to_string(),
+                foreign_key_column: "id".to_string(),
+                nested_fks: vec![],
+            }],
         }];
         let table = "child";
 
         let column_str = get_column_str(&columns, table, &fks).unwrap().join("");
-        assert_eq!(column_str, r#"adult.name AS "parent_id.name", company.name AS "parent_id.company_id.name""#);
+        assert_eq!(
+            column_str,
+            r#"adult.name AS "parent_id.name", company.name AS "parent_id.company_id.name""#
+        );
     }
 }

@@ -12,11 +12,10 @@ use serde_json::Value;
 
 use crate::{
     db::connect,
-    Error,
     queries::{
         insert_into_table, query_types, select_all_tables, select_table_rows, select_table_stats,
     },
-    AppConfig,
+    AppConfig, Error,
 };
 use query_types::{QueryParamsInsert, QueryParamsSelect, RequestQueryStringParams};
 
@@ -50,9 +49,11 @@ pub fn post_table(
     };
 
     let insert_response = connect(config.db_url)
-        .map_err(Error::from).and_then(|client| insert_into_table(client, params)).and_then(|num_rows_affected| {
-        Ok(HttpResponseBuilder::new(StatusCode::OK).json(num_rows_affected))
-    });
+        .map_err(Error::from)
+        .and_then(|client| insert_into_table(client, params))
+        .and_then(|num_rows_affected| {
+            Ok(HttpResponseBuilder::new(StatusCode::OK).json(num_rows_affected))
+        });
 
     Either::B(insert_response)
 }
@@ -81,10 +82,7 @@ fn get_table_rows(
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }
 
-fn get_table_stats(
-    db_url: &str,
-    table: String,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+fn get_table_stats(db_url: &str, table: String) -> impl Future<Item = HttpResponse, Error = Error> {
     connect(db_url)
         .map_err(Error::from)
         .and_then(|conn| select_table_stats(conn, table))

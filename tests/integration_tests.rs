@@ -161,12 +161,7 @@ fn get_table_record_aggregates() {
 fn get_table_records_wildcards() {
     run_setup();
 
-    let url = [
-        "http://",
-        &SERVER_IP_PORT,
-        "/api/child?columns=*",
-    ]
-    .join("");
+    let url = ["http://", &SERVER_IP_PORT, "/api/child?columns=*"].join("");
     let res = reqwest::get(&url).unwrap();
 
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);

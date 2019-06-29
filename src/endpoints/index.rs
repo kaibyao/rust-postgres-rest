@@ -1,4 +1,5 @@
 use actix_web::HttpResponse;
+use lazy_static::lazy_static;
 use serde_json::{json, Value};
 
 pub fn index() -> HttpResponse {

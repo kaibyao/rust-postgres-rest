@@ -5,11 +5,13 @@ use eui48::MacAddress as Eui48MacAddress;
 
 use postgres_protocol::types::{macaddr_from_sql, macaddr_to_sql};
 use rust_decimal::Decimal;
+use serde::Serialize;
 use serde_json::Value;
 use std::{collections::HashMap, error::Error as StdError, str::FromStr};
 use tokio_postgres::{
     accepts,
     row::Row,
+    to_sql_checked,
     types::{FromSql, IsNull, ToSql, Type},
 };
 use uuid::Uuid;
@@ -456,10 +458,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_timestamptz(
-        column_type: &str,
-        value: &Value,
-    ) -> Result<Self, Error> {
+    fn convert_json_value_to_timestamptz(column_type: &str, value: &Value) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match DateTime::from_str(val) {
                 Ok(timestamptz) => Ok(ColumnTypeValue::TimestampTz(ColumnValue::NotNullable(

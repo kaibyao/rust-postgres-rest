@@ -5,27 +5,16 @@
 // to serialize large json (like the index)
 #![recursion_limit = "128"]
 
-// external crates
-#[macro_use]
-extern crate lazy_static;
-#[macro_use]
-extern crate serde;
-#[macro_use]
-extern crate tokio_postgres;
-
-// library modules
+mod db;
+mod endpoints;
+mod error;
 mod queries;
 
-pub mod db;
-
-mod endpoints;
+use actix_web::{web, Scope};
 use endpoints::{get_all_table_names, get_table, index, post_table};
-
-mod error;
 pub use error::Error;
 
-use actix_web::{web, Scope};
-
+/// API Configuration
 pub struct AppConfig<'a> {
     pub db_url: &'a str,
     pub scope_name: &'a str,
@@ -46,8 +35,7 @@ impl<'a> AppConfig<'a> {
     }
 }
 
-/// Takes an initialized App and config, and appends the Rest API functionality to the scope’s
-/// endpoint.
+/// Creates and returns an actix scope containing the REST API endpoints.
 pub fn generate_rest_api_scope(config: AppConfig<'static>) -> Scope {
     web::scope(config.scope_name)
         .data(config)

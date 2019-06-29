@@ -454,67 +454,67 @@ impl ForeignKeyReference {
         let db_url_str = db_url.to_string();
 
         connect(db_url)
-        .map_err(Error::from)
-        .and_then(move |mut conn| {
-            select_column_stats_statement(&mut conn, &table_clone)
-                .map_err(Error::from)
-                .and_then(move |statement| {
-                    let q = conn.query(&statement, &[]);
-                    select_column_stats(q).then(move |results| match results {
-                        Ok(stats) => Ok((stats, fk_columns_grouped)),
-                        Err(e) => Err(Error::from(e)),
-                    })
-                })
-        })
-        .map(|(stats, fk_columns_grouped)| {
-            // contains a tuple representing the (matched parent column name, child columns, and
-            // original column strings)
-            let mut matched_columns: Vec<(String, Vec<String>, Vec<String>)> = vec![];
-
-            // filter the table column stats to just the foreign key columns that match the given
-            // columns
-            let filtered_stats: Vec<TableColumnStat> = stats
-                .into_iter()
-                .filter(|stat| {
-                    if !stat.is_foreign_key {
-                        return false;
-                    }
-
-                    match fk_columns_grouped
-                        .iter()
-                        .find(|(parent_col, _child_col_vec)| parent_col == &&stat.column_name)
-                    {
-                        Some((
-                            matched_parent_fk_column,
-                            (matched_child_col_vec, matched_orig_refs),
-                        )) => {
-                            matched_columns.push((
-                                matched_parent_fk_column.to_string(),
-                                matched_child_col_vec
-                                    .iter()
-                                    .map(|s| s.to_string())
-                                    .collect(),
-                                matched_orig_refs.clone(),
-                            ));
-                            true
-                        }
-                        None => false,
-                    }
-                })
-                .collect();
-
-            (filtered_stats, matched_columns)
-        })
-        // stats and matched_columns should have the same length and their indexes should match
-        .and_then(move |(filtered_stats, matched_columns)| {
-            ForeignKeyReference::stats_to_fkr_futures(
-                db_url_str,
-                table,
-                filtered_stats,
-                matched_columns,
-            )
             .map_err(Error::from)
-        })
+            .and_then(move |mut conn| {
+                select_column_stats_statement(&mut conn, &table_clone)
+                    .map_err(Error::from)
+                    .and_then(move |statement| {
+                        let q = conn.query(&statement, &[]);
+                        select_column_stats(q).then(move |results| match results {
+                            Ok(stats) => Ok((stats, fk_columns_grouped)),
+                            Err(e) => Err(Error::from(e)),
+                        })
+                    })
+            })
+            .map(|(stats, fk_columns_grouped)| {
+                // contains a tuple representing the (matched parent column name, child columns, and
+                // original column strings)
+                let mut matched_columns: Vec<(String, Vec<String>, Vec<String>)> = vec![];
+
+                // filter the table column stats to just the foreign key columns that match the
+                // given columns
+                let filtered_stats: Vec<TableColumnStat> = stats
+                    .into_iter()
+                    .filter(|stat| {
+                        if !stat.is_foreign_key {
+                            return false;
+                        }
+
+                        match fk_columns_grouped
+                            .iter()
+                            .find(|(parent_col, _child_col_vec)| parent_col == &&stat.column_name)
+                        {
+                            Some((
+                                matched_parent_fk_column,
+                                (matched_child_col_vec, matched_orig_refs),
+                            )) => {
+                                matched_columns.push((
+                                    matched_parent_fk_column.to_string(),
+                                    matched_child_col_vec
+                                        .iter()
+                                        .map(|s| s.to_string())
+                                        .collect(),
+                                    matched_orig_refs.clone(),
+                                ));
+                                true
+                            }
+                            None => false,
+                        }
+                    })
+                    .collect();
+
+                (filtered_stats, matched_columns)
+            })
+            // stats and matched_columns should have the same length and their indexes should match
+            .and_then(move |(filtered_stats, matched_columns)| {
+                ForeignKeyReference::stats_to_fkr_futures(
+                    db_url_str,
+                    table,
+                    filtered_stats,
+                    matched_columns,
+                )
+                .map_err(Error::from)
+            })
     }
 
     /// Maps a Vec of `TableColumnStat`s to a Future wrapping a Vec of `ForeignKeyReference`s. Used
@@ -555,15 +555,14 @@ impl ForeignKeyReference {
 
             // child column is not a foreign key, return future with ForeignKeyReference
             if child_fk_columns.is_empty() {
-                let no_child_columns_fut =
-                    ok::<ForeignKeyReference, Error>(ForeignKeyReference {
-                        referring_column: stat_column_name_clone,
-                        referring_table: table_clone,
-                        table_referred: foreign_key_table,
-                        foreign_key_column: stat_fk_column,
-                        nested_fks: vec![],
-                        original_refs,
-                    });
+                let no_child_columns_fut = ok::<ForeignKeyReference, Error>(ForeignKeyReference {
+                    referring_column: stat_column_name_clone,
+                    referring_table: table_clone,
+                    table_referred: foreign_key_table,
+                    foreign_key_column: stat_fk_column,
+                    nested_fks: vec![],
+                    original_refs,
+                });
 
                 fkr_futures.push(Either::A(no_child_columns_fut));
                 continue;

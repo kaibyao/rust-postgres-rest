@@ -1,6 +1,7 @@
 use super::postgres_types::RowFields;
 use crate::Error;
 use actix_web::HttpRequest;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 #[derive(Debug, Deserialize)]

@@ -1,4 +1,5 @@
 use crate::Error;
+use lazy_static::lazy_static;
 use regex::Regex;
 
 /// Checks a table name and returns true if it is valid (false otherwise).
@@ -29,8 +30,8 @@ pub fn validate_table_name(name: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// Like `validate_table_name`, but applies to all other identifiers. Allows parentheses (for functions/aggregates like
-/// `COUNT()`), periods (for foreign key traversal), and AS aliases.
+/// Like `validate_table_name`, but applies to all other identifiers. Allows parentheses (for
+/// functions/aggregates like `COUNT()`), periods (for foreign key traversal), and AS aliases.
 pub fn validate_where_column(name: &str) -> Result<(), Error> {
     lazy_static! {
         // Rules:
@@ -48,8 +49,8 @@ pub fn validate_where_column(name: &str) -> Result<(), Error> {
         ));
     }
 
-    // check for " AS ", then validate both the original, non-aliased identifier, as well as the alias
-    // not supporting aliases currently. probably a good thing to implement though
+    // check for " AS ", then validate both the original, non-aliased identifier, as well as the
+    // alias not supporting aliases currently. probably a good thing to implement though
     // if AS_REGEX.is_match(name) {
     //     let matched = AS_REGEX.find(name).unwrap();
 

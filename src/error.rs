@@ -1,5 +1,6 @@
 use actix_web::{http, HttpResponse};
 use failure::Fail;
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 /// Describes the type of notification we are sending
