@@ -5,8 +5,10 @@
 // to serialize large json (like the index)
 #![recursion_limit = "128"]
 
+/// Individual endpoints that can be applied to actix routes using `.to_async()`.
+pub mod endpoints;
+
 mod db;
-mod endpoints;
 mod error;
 mod queries;
 

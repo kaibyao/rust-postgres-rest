@@ -2,6 +2,23 @@ use crate::Error;
 use lazy_static::lazy_static;
 use regex::Regex;
 
+/// Given a string of column names separated by commas, convert and return a vector of lowercase
+/// strings.
+pub fn normalize_columns(columns_str: &str) -> Result<Vec<String>, Error> {
+    columns_str
+        .split(',')
+        .map(|s| {
+            if s == "" {
+                return Err(Error::generate_error(
+                    "INCORRECT_REQUEST_BODY",
+                    ["`", s, "`", " is not a valid column name. Column names must be a comma-separated list and include at least one column name."].join(""),
+                ));
+            }
+            Ok(s.trim().to_lowercase())
+        })
+        .collect()
+}
+
 /// Checks a table name and returns true if it is valid (false otherwise).
 /// The identifier must start with a lower-case letter or underscore, and only contain
 /// alphanumeric or underscore characters. (Sorry, I don’t have time or energy for UTF-8
@@ -74,8 +91,6 @@ pub fn validate_where_column(name: &str) -> Result<(), Error> {
 
     //     return Ok(());
     // }
-
-    dbg!(name);
 
     if !VALID_REGEX.is_match(name) {
         return Err(Error::generate_error(

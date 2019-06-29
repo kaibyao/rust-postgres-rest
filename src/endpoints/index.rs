@@ -2,6 +2,7 @@ use actix_web::HttpResponse;
 use lazy_static::lazy_static;
 use serde_json::{json, Value};
 
+/// Displays a list of available endpoints and their descriptions.
 pub fn index() -> HttpResponse {
     lazy_static! {
         // static ref TABLE_COLUMN_STAT_HELP: Value = json!({
@@ -80,7 +81,7 @@ pub fn index() -> HttpResponse {
                     }
                 },
                 "POST": {
-                    "description": "Inserts new records into the table.",
+                    "description": "Inserts new records into the table. Returns the number of rows affected.",
                     "body": "An array of objects where each object represents a row and whose key-values represent column names and their values.",
                     "query_params": {
                         "conflict_action": {

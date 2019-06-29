@@ -1,4 +1,4 @@
-use super::postgres_types::RowFields;
+use super::{postgres_types::RowFields, utils::normalize_columns};
 use crate::Error;
 use actix_web::HttpRequest;
 use serde::{Deserialize, Serialize};
@@ -58,17 +58,17 @@ impl QueryParamsSelect {
     pub fn from_http_request(
         req: &HttpRequest,
         query_string_params: RequestQueryStringParams,
-    ) -> Self {
+    ) -> Result<Self, Error> {
         let default_limit = 10000;
         let default_offset = 0;
 
-        QueryParamsSelect {
+        let params = QueryParamsSelect {
             columns: match query_string_params.columns {
-                Some(columns_str) => Self::normalize_columns(&columns_str),
+                Some(columns_str) => normalize_columns(&columns_str)?,
                 None => vec![],
             },
             distinct: match query_string_params.distinct {
-                Some(distinct_str) => Some(Self::normalize_columns(&distinct_str)),
+                Some(distinct_str) => Some(normalize_columns(&distinct_str)?),
                 None => None,
             },
             table: req.match_info().query("table").to_lowercase(),
@@ -77,11 +77,11 @@ impl QueryParamsSelect {
                 None => None,
             },
             group_by: match query_string_params.group_by {
-                Some(group_by_str) => Some(Self::normalize_columns(&group_by_str)),
+                Some(group_by_str) => Some(normalize_columns(&group_by_str)?),
                 None => None,
             },
             order_by: match query_string_params.order_by {
-                Some(order_by_str) => Some(Self::normalize_columns(&order_by_str)),
+                Some(order_by_str) => Some(normalize_columns(&order_by_str)?),
                 None => None,
             },
             limit: match query_string_params.limit {
@@ -96,14 +96,9 @@ impl QueryParamsSelect {
                 Some(prepared_values) => Some(prepared_values.to_string()),
                 None => None,
             },
-        }
-    }
+        };
 
-    fn normalize_columns(columns_str: &str) -> Vec<String> {
-        columns_str
-            .split(',')
-            .map(|s| s.trim().to_lowercase())
-            .collect()
+        Ok(params)
     }
 }
 
@@ -130,12 +125,7 @@ impl QueryParamsInsert {
             None => None,
         };
         let conflict_target: Option<Vec<String>> = match query_string_params.conflict_target {
-            Some(targets_str) => Some(
-                targets_str
-                    .split(',')
-                    .map(|target_str| target_str.to_string().to_lowercase())
-                    .collect(),
-            ),
+            Some(targets_str) => Some(normalize_columns(&targets_str)?),
             None => None,
         };
         if (conflict_action.is_some() && conflict_target.is_none())
@@ -184,20 +174,7 @@ impl QueryParamsInsert {
                     ));
                 }
 
-                let returning_columns_vec = columns_str
-                        .split(',')
-                        .map(|column_str| -> Result<String, Error> {
-                            if column_str == "" {
-                                return Err(Error::generate_error(
-                                    "INCORRECT_REQUEST_BODY",
-                                    "`conflict_target` must be a comma-separated list of column names and include at least one column name.".to_string(),
-                                ));
-                            }
-
-                            Ok(column_str.to_string())
-                        })
-                        .collect::<Result<Vec<String>, Error>>()?;
-
+                let returning_columns_vec = normalize_columns(&columns_str)?;
                 Some(returning_columns_vec)
             }
             None => None,

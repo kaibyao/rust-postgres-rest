@@ -29,7 +29,7 @@ pub fn get_all_table_names(
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }
 
-/// Inserts new rows into a table
+/// Inserts new rows into a table. Returns the number of rows affected.
 pub fn post_table(
     req: HttpRequest,
     config: web::Data<AppConfig>,
@@ -64,12 +64,16 @@ pub fn get_table(
     config: web::Data<AppConfig>,
     query_string_params: web::Query<RequestQueryStringParams>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
-    let params = QueryParamsSelect::from_http_request(&req, query_string_params.into_inner());
+    let params = match QueryParamsSelect::from_http_request(&req, query_string_params.into_inner())
+    {
+        Ok(params) => params,
+        Err(e) => return Either::A(err(e)),
+    };
 
     if params.columns.is_empty() {
-        Either::A(get_table_stats(config.db_url, params.table))
+        Either::B(Either::A(get_table_stats(config.db_url, params.table)))
     } else {
-        Either::B(get_table_rows(config.db_url, params))
+        Either::B(Either::B(get_table_rows(config.db_url, params)))
     }
 }
 

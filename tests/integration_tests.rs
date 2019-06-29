@@ -6,7 +6,7 @@ use setup::{setup_db, start_web_server};
 
 use lazy_static::lazy_static;
 use pretty_assertions::assert_eq;
-use reqwest::{self, StatusCode};
+use reqwest::{self, Client, Method, StatusCode};
 use serde_json::{self, json, Value};
 use std::{ops::DerefMut, sync::Mutex};
 
@@ -58,7 +58,15 @@ fn get_table_names() {
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(
         response_body,
-        json!(["adult", "child", "company", "school", "test_fields"])
+        json!([
+            "adult",
+            "child",
+            "company",
+            "school",
+            "test_batch_insert",
+            "test_fields",
+            "test_insert"
+        ])
     );
 }
 
@@ -270,4 +278,139 @@ fn get_table_records_foreign_key_wildcards() {
     let res = reqwest::get(&url).unwrap();
 
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn post_table_record() {
+    run_setup();
+
+    let url = ["http://", &SERVER_IP_PORT, "/api/test_insert"].join("");
+    let mut res = Client::new()
+        .request(Method::POST, &url)
+        .json(&json!([{"id": 1}]))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!({ "num_rows": 1 }));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn post_table_records() {
+    run_setup();
+
+    let url = ["http://", &SERVER_IP_PORT, "/api/test_insert"].join("");
+    let mut res = Client::new()
+        .request(Method::POST, &url)
+        .json(&json!([{"id": 2}, {"id": 3}]))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!({ "num_rows": 2 }));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn post_table_records_returning_columns() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP_PORT,
+        "/api/test_insert?returning_columns=id, name",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::POST, &url)
+        .json(&json!([{"id": 4, "name": "A"}, {"id": 5, "name": "b"}]))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(
+        response_body,
+        json!([{ "id": 4, "name": "A" }, { "id": 5, "name": "b" }])
+    );
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn post_table_records_on_conflict_do_nothing() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP_PORT,
+        "/api/test_insert?returning_columns=id, name",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::POST, &url)
+        .json(&json!([{"id": 10, "name": "A"}]))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!([{ "id": 10, "name": "A" }]));
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // now attempt to send same request but with different name
+    let url = [
+        "http://",
+        &SERVER_IP_PORT,
+        "/api/test_insert?returning_columns=id, name&conflict_action=nothing&conflict_target=id",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::POST, &url)
+        .json(&json!([{"id": 10, "name": "B"}, {"id": 11, "name": "C"}]))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!([{ "id": 11, "name": "C" }]));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn post_table_records_on_conflict_update() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP_PORT,
+        "/api/test_insert?returning_columns=id, name",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::POST, &url)
+        .json(&json!([{"id": 12, "name": "A"}]))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!([{ "id": 12, "name": "A" }]));
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // now attempt to send same request but with different name
+    let url = [
+        "http://",
+        &SERVER_IP_PORT,
+        "/api/test_insert?returning_columns=id, name&conflict_action=update&conflict_target=id",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::POST, &url)
+        .json(&json!([{"id": 12, "name": "B"}, {"id": 13, "name": "C"}]))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(
+        response_body,
+        json!([{"id": 12, "name": "B"}, {"id": 13, "name": "C"}])
+    );
+    assert_eq!(res.status(), StatusCode::OK);
 }

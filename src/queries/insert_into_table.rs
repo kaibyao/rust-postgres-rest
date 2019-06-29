@@ -13,7 +13,7 @@ use super::{
 };
 use crate::Error;
 
-static INSERT_ROWS_BATCH_COUNT: usize = 2;
+static INSERT_ROWS_BATCH_COUNT: usize = 100;
 
 enum InsertResult {
     Rows(Vec<RowFields>),

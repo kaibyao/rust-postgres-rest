@@ -154,3 +154,17 @@ INSERT INTO public.company (id, name) VALUES (100, 'Stark Corporation');
 INSERT INTO public.school (id, name) VALUES (10, 'Winterfell Tower');
 INSERT INTO public.adult (id, company_id, name) VALUES (1, 100, 'Ned');
 INSERT INTO public.child (id, name, parent_id, school_id) VALUES (1000, 'Robb', 1, 10);
+
+-- For testing INSERTs
+
+DROP TABLE IF EXISTS public.test_insert;
+DROP TABLE IF EXISTS public.test_batch_insert;
+
+CREATE TABLE public.test_insert (
+  id BIGINT CONSTRAINT test_insert_id_key PRIMARY KEY,
+  name TEXT
+);
+
+CREATE TABLE public.test_batch_insert (
+  id BIGINT CONSTRAINT test_batch_insert_id_key PRIMARY KEY
+);
