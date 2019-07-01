@@ -1,207 +1,255 @@
 # experiment00
 
-Toy project for exploring Rust. Really, I'm trying to see how easy it is to recreate ServiceNow's Table API in Rust using the PostgreSQL database, as I've found that feature to be useful enough to use in future web projects.
+Use `actix-web` to serve a REST API for your PostgreSQL database.
 
-## What about PostgREST
+```rust
+use actix::System;
+use actix_web::{App, HttpServer};
+use experiment00::{generate_rest_api_scope, AppConfig};
 
-Theoretically I could just use that, but I'm doubting its performance. It’s probably worth benchmarking, but there's a good chance that it wouldn’t be very fast.
+fn main() {
+    let sys = System::new("my_app_runtime"); // create Actix runtime
 
-1. There's no Haskell web frameworks that perform that well (see [TechEmpower Benchmarks](https://www.techempower.com/benchmarks/#section=data-r17&hw=cl&test=fortune&l=yyku67-1)). PostgREST uses Warp, which is the same web framework that yesod is based on (last place in that list).
-1. I'm not interested in learning/working with Haskell.
+    let ip_address = "127.0.0.1:3000";
+
+    // start 1 server on each cpu thread
+    HttpServer::new(move || {
+        let mut config = AppConfig::new();
+        config.db_url = "postgresql://postgres@0.0.0.0:5432/postgres";
+
+        App::new().service(
+            // appends an actix-web Scope under the "/api" endpoint to app.
+            generate_rest_api_scope(config),
+        )
+    })
+    .bind(ip_address)
+    .expect("Can not bind to port 3000")
+    .start();
+
+    println!("Running server on {}", ip_address);
+    sys.run().unwrap();
+}
+```
+
+`generate_rest_api_scope()` creates the `/api/table` and `/api/{table}` endpoints, which allow for CRUD operations on table rows in your database.
+
+## Endpoints
+
+### `GET /{table}`
+
+Queries {table} with given parameters using SELECT. If no columns are provided, returns column stats for {table}.
+
+#### Query Parameters for `GET /{table}`
+
+##### columns
+
+A comma-separated list of column names for which values are retrieved. Example: `col1,col2,col_infinity`.
+
+##### distinct
+
+A comma-separated list of column names for which rows that have duplicate values are excluded. Example: `col1,col2,col_infinity`.
+
+##### where
+
+The WHERE clause of a SELECT statement. Remember to URI-encode the final result. NOTE: $1, $2, etc. can be used in combination with `prepared_values` to create prepared statements ([see PostgreSQL Docs](https://www.postgresql.org/docs/current/sql-prepare.html)). Example: `(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1`.
+
+##### group_by
+
+Comma-separated list representing the field(s) on which to group the resulting rows. Example: `name, category`.
+
+##### order_by
+
+Comma-separated list representing the field(s) on which to sort the resulting rows. Example: `date DESC, id ASC`.
+
+##### limit
+
+The maximum number of rows that can be returned. Default: `10000`.
+
+##### offset
+
+The number of rows to exclude. Default: `0`.
+
+##### prepared_values
+
+If the WHERE clause contains \${number}, this comma-separated list of values is used to substitute the numbered parameters. Example: `col2,'Test'`.
+
+#### Foreign key syntax (`.`) for easier relationship traversal
+
+You can use dots (`.`) to easily walk through foreign keys and retrieve values of rows in related tables!
+
+```postgre
+-- DB setup
+CREATE TABLE public.company (
+  id BIGINT CONSTRAINT company_id_key PRIMARY KEY,
+  name TEXT
+);
+
+CREATE TABLE public.school (
+  id BIGINT CONSTRAINT school_id_key PRIMARY KEY,
+  name TEXT
+);
+
+CREATE TABLE public.adult (
+  id BIGINT CONSTRAINT adult_id_key PRIMARY KEY,
+  company_id BIGINT,
+  name TEXT
+);
+ALTER TABLE public.adult ADD CONSTRAINT adult_company_id FOREIGN KEY (company_id) REFERENCES public.company(id);
+
+CREATE TABLE public.child (
+  id BIGINT CONSTRAINT child_id_key PRIMARY KEY,
+  parent_id BIGINT,
+  school_id BIGINT,
+  name TEXT
+);
+ALTER TABLE public.child ADD CONSTRAINT child_parent_id FOREIGN KEY (parent_id) REFERENCES public.adult(id);
+ALTER TABLE public.child ADD CONSTRAINT child_school_id FOREIGN KEY (school_id) REFERENCES public.school(id);
+
+INSERT INTO public.company (id, name) VALUES (100, 'Stark Corporation');
+INSERT INTO public.school (id, name) VALUES (10, 'Winterfell Tower');
+INSERT INTO public.adult (id, company_id, name) VALUES (1, 100, 'Ned');
+INSERT INTO public.child (id, name, parent_id, school_id) VALUES (1000, 'Robb', 1, 10);
+```
+
+Run the `GET` operation:
+
+```bash
+GET "/api/child?columns=id,name,parent_id.name,parent_id.company_id.name"
+#          |             ------------------------------------------------ column names
+#          ^^^^^ {table} value
+```
+
+Will return the following JSON:
+
+```json
+[
+  {
+    "id": 1000,
+    "name": "Robb",
+    "parent_id.name": "Ned",
+    "parent_id.company_id.name": "Stark Corporation"
+  }
+]
+```
+
+#### Alias (`AS`) syntax is supported too
+
+Changing the previous API endpoint to `/api/child?columns=id,name,parent_id.name as parent_name,parent_id.company_id.name as parent_company_name` will return the aliased fields instead:
+
+```json
+[
+  {
+    "id": 1000,
+    "name": "Robb",
+    "parent_name": "Ned",
+    "parent_company_name": "Stark Corporation"
+  }
+]
+```
+
+### `POST /{table}`
+
+Inserts new records into the table. Returns the number of rows affected. Optionally, table columns of affected rows can be returned instead using the `returning_columns` query parameter (see below).
+
+#### Query Parameters for `POST /{table}`
+
+##### conflict_action
+
+The `ON CONFLICT` action to perform (can be `update` or `nothing`).
+
+##### conflict_target
+
+Comma-separated list of columns that determine if a row being inserted conflicts with an existing row. Example: `id,name,field_2`.
+
+##### returning_columns
+
+Comma-separated list of columns to return from the INSERT operation. Example: `id,name,field_2`.
+
+#### Body schema for `POST /{table}`
+
+An array of objects where each object represents a row and whose key-values represent column names and their values.
+
+#### Examples for `POST /{table}`
+
+##### Simple insert
+
+```plaintext
+POST /api/child
+{
+  "id": 1001,
+  "name": "Sansa",
+  "parent_id": 1,
+  "school_id": 10
+}
+```
+
+returns `{ "num_rows": 1 }`.
+
+##### `ON CONFLICT DO NOTHING`
+
+Assuming the “Simple Insert” example above was run:
+
+```plaintext
+POST /api/child?conflict_action=nothing&conflict_target=id
+{
+  "id": 1001,
+  "name": "Arya",
+  "parent_id": 1,
+  "school_id": 10
+}
+```
+
+returns `{ "num_rows": 0 }`.
+
+##### `ON CONFLICT DO UPDATE`
+
+Assuming the “Simple Insert” example above was run:
+
+```plaintext
+POST /api/child?conflict_action=update&conflict_target=id
+{
+  "id": 1001,
+  "name": "Arya",
+  "parent_id": 1,
+  "school_id": 10
+}
+```
+
+returns `{ "num_rows": 1 }`. `name: "Sansa"` has been replaced with `name: "Arya"`.
+
+##### `returning_columns`
+
+```plaintext
+POST /api/child?returning_columns=id,name
+{
+  "id": 1002,
+  "name": "Arya",
+  "parent_id": 1,
+  "school_id": 10
+}
+```
+
+returns `[{ "id": 1002, "name": "Arya" }]`.
 
 ## Not supported
 
-- Bit, Unknown, and Varbit types
+- Bit and Varbit types (mostly because I'm not comfortable working with them yet)
 - Exclusion and Trigger constraints
 - `BETWEEN` (see [Postgres wiki article](https://wiki.postgresql.org/wiki/Don%27t_Do_This#Don.27t_use_BETWEEN_.28especially_with_timestamps.29))
 
 ## To dos
 
 1. Recreate the Table API.
-1. Replace r2d2 with tokio-postgres (look at techempower benchmarks code)
 1. Add security, customizability, optimizations, etc.
 1. GraphQL API
 1. Cache table stats every X minutes (default 2, make it configurable).
-1. Add each endpoint as an individual export.
 1. Optimization: Get rid of HashMap usage (convert to tuples or Serde_Json Maps)
 1. Optimization: Convert Strings to &str / statics.
 1. CSV, XML for REST API (nix for now?)
-1. gRPC, Flatbuffers (nix for now?)
-
-## Notes
-
-- Need to be able to query for foreign key values (also need to account for when the user attempts to get the foreign key values for fields that aren't actually foreign keys)
-- Dotwalking foreign keys (also see [Resource embedding](http://postgrest.org/en/v5.2/api.html#resource-embedding))
-- there should probably be an option for users to add custom API endpoint/configuration for `add_rest_api_scope()`
-- there should probably be an option to disable specific endpoints.
-- Need to add a query parser for all endpoints
+1. gRPC/Flatbuffers/Cap'n Proto (nix for now?)
 
 ## To run tests
 
 You will need `docker-compose` to run tests. In one terminal, run `docker-compose up` to start the postgres docker image.
 
 In another terminal, run `cargo test`.
-
-## Endpoints
-
-### `GET /{table}`
-
-Queries {table} with given parameters using SELECT. If no columns are provided, returns stats for {table}.
-
-#### Query Parameters for `GET /{table}`
-
-To be filled.
-
-#### Examples for `GET /{table}`
-
-##### Foreign keys
-
-`GET /a_table?columns=a_foreign_key.some_text,another_foreign_key.some_str,b&where=a_foreign_key.some_id>0ANDanother_foreign_key.id>0`
-
-Where
-
-```plaintext
-a_table.a_foreign_key references b_table.id
-a_table.another_foreign_key references c_table.id
-```
-
-Translates into the query:
-
-```postgre
-SELECT
-  a.b, b.some_text, c.some_str
-FROM
-  a_table a
-  INNER JOIN b_table b ON a.a_foreign_key = b.id
-  INNER JOIN c_table c ON a.another_foreign_key = c.id
-WHERE (
-  b.some_id > 0 AND
-  c.id > 0
-)
-```
-
-## Example 1: 1 level deep
-
-```plaintext
-/a_table
-columns=a_foreign_key.some_text,another_foreign_key.some_str,b&where=a_foreign_key.some_id>0 AND another_foreign_key.id>0
-
-a_foreign_key references b_table.id
-another_foreign_key references c_table.id
-```
-
-### becomes =>
-
-```postgre
-SELECT
-  a.b, b.some_text, c.some_str
-FROM
-  a_table a
-  INNER JOIN b_table b ON a.a_foreign_key = b.id
-  INNER JOIN c_table c ON a.another_foreign_key = c.id
-WHERE (
-  b.some_id > 0 AND
-  c.id > 0
-)
-```
-
-```rust
-get_foreign_keys_from_query_columns(
-  conn,
-  "a_table",
-  &[
-    "a_foreign_key.some_text",
-    "another_foreign_key.some_str",
-    "b"
-  ]
-);
-
-// should return
-
-Ok(Some(vec![
-  ForeignKeyReference {
-    referring_column: "a_foreign_key".to_string(),
-    table_referred: "b_table".to_string(),
-    table_column_referred: "id".to_string(),
-    nested_fks: None,
-  },
-  ForeignKeyReference {
-    referring_column: "another_foreign_key".to_string(),
-    table_referred: "c_table".to_string(),
-    table_column_referred: "id".to_string(),
-    nested_fks: None,
-  }
-]))
-```
-
-## Example 2: 2 levels deep
-
-```plaintext
-/a_table
-columns=a_foreign_key.some_text,another_foreign_key.nested_fk.some_str,another_foreign_key.different_nested_fk.some_int,b&where=a_foreign_key.some_id>0 AND another_foreign_key.id>0
-
-a_foreign_key references b_table.id
-another_foreign_key references c_table.id
-another_foreign_key.nested_fk references d_table.id
-another_foreign_key.different_nested_fk references e_table.id
-```
-
-### Becomes =>
-
-```postgre
-SELECT
-  a.b, b.some_text, d.some_str, e.some_int
-FROM
-  a_table a
-  INNER JOIN b_table b ON a.a_foreign_key = b.id
-  INNER JOIN c_table c ON a.another_foreign_key = c.id
-  INNER JOIN d_table d ON c.nested_fk = d.id
-  INNER JOIN e_table e ON c.different_nested_fk = e.id
-WHERE (
-  b.some_id > 0 AND
-  c.id > 0
-)
-```
-
-```rust
-get_foreign_keys_from_query_columns(
-  conn,
-  "a_table",
-  &[
-    "a_foreign_key.some_text",
-    "another_foreign_key.nested_fk.some_str",
-    "another_foreign_key.different_nested_fk.some_int",
-    "b"
-  ]
-);
-
-// should return
-
-Ok(Some(vec![
-  ForeignKeyReference {
-    referring_column: "a_foreign_key".to_string(),
-    table_referred: "b_table".to_string(),
-    table_column_referred: "id".to_string(),
-    nested_fks: None
-  },
-  ForeignKeyReference {
-    referring_column: "another_foreign_key".to_string(),
-    table_referred: "b_table".to_string(),
-    table_column_referred: "id".to_string(),
-    nested_fks: Some(vec![
-      ForeignKeyReference {
-        referring_column: "nested_fk".to_string(),
-        table_referred: "d_table".to_string(),
-        table_column_referred: "id".to_string(),
-        nested_fks: None
-      },
-      ForeignKeyReference {
-        referring_column: "different_nested_fk".to_string(),
-        table_referred: "e_table".to_string(),
-        table_column_referred: "id".to_string(),
-        nested_fks: None
-      }
-    ])
-  }
-]))
-```

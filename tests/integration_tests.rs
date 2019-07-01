@@ -387,6 +387,39 @@ fn post_table_records_returning_columns() {
 fn post_table_records_on_conflict_do_nothing() {
     run_setup();
 
+    let url = ["http://", &SERVER_IP_PORT, "/api/test_insert"].join("");
+    let mut res = Client::new()
+        .request(Method::POST, &url)
+        .json(&json!([{"id": 14, "name": "A"}]))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!({ "num_rows": 1 }));
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // now attempt to send same request but with different name
+    let url = [
+        "http://",
+        &SERVER_IP_PORT,
+        "/api/test_insert?conflict_action=nothing&conflict_target=id",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::POST, &url)
+        .json(&json!([{"id": 14, "name": "B"}]))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!({ "num_rows": 0 }));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn post_table_records_on_conflict_do_nothing_returning_columns() {
+    run_setup();
+
     let url = [
         "http://",
         &SERVER_IP_PORT,
