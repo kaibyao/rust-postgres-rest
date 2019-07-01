@@ -125,7 +125,7 @@ pub fn select_table_stats(
             },
         )
     })
-    .map_err(|e| Error::from(e));
+    .map_err(Error::from);
 
     Either::B(f)
 }

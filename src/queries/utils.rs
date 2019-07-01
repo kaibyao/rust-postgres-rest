@@ -56,7 +56,7 @@ pub fn validate_where_column(name: &str) -> Result<(), Error> {
         // - Only contains letters, numbers, underscores, and parentheses.
         // - Must not end in a dot (.) or asterisk (*).
         static ref VALID_REGEX: Regex = Regex::new(r"^[A-Za-z_][A-Za-z0-9_\(\)\.\*]*[^\.\*]$").unwrap();
-        // static ref AS_REGEX: Regex = Regex::new(r"(?i) AS ").unwrap();
+
     }
 
     if name == "table" {
@@ -66,32 +66,6 @@ pub fn validate_where_column(name: &str) -> Result<(), Error> {
         ));
     }
 
-    // check for " AS ", then validate both the original, non-aliased identifier, as well as the
-    // alias not supporting aliases currently. probably a good thing to implement though
-    // if AS_REGEX.is_match(name) {
-    //     let matched = AS_REGEX.find(name).unwrap();
-
-    //     let orig = &name[..matched.start()];
-    //     dbg!(orig);
-    //     if !VALID_REGEX.is_match(orig) {
-    //         return Err(Error::generate_error(
-    //             "INVALID_SQL_IDENTIFIER",
-    //             orig.to_string(),
-    //         ));
-    //     }
-
-    //     let alias = &name[matched.end()..];
-    //     dbg!(alias);
-    //     if !VALID_REGEX.is_match(alias) {
-    //         return Err(Error::generate_error(
-    //             "INVALID_SQL_IDENTIFIER",
-    //             alias.to_string(),
-    //         ));
-    //     }
-
-    //     return Ok(());
-    // }
-
     if !VALID_REGEX.is_match(name) {
         return Err(Error::generate_error(
             "INVALID_SQL_IDENTIFIER",
@@ -100,6 +74,28 @@ pub fn validate_where_column(name: &str) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+/// Check for " AS ", then validate both the original, non-aliased identifier, as well as the alias
+pub fn validate_alias_identifier(identifier: &str) -> Result<Option<(&str, &str)>, Error> {
+    lazy_static! {
+        // Searching for " AS " alias
+        static ref AS_REGEX: Regex = Regex::new(r"(?i) AS ").unwrap();
+    }
+
+    if !AS_REGEX.is_match(identifier) {
+        validate_where_column(identifier)?;
+        return Ok(None);
+    }
+
+    let matched = AS_REGEX.find(identifier).unwrap();
+    let orig = &identifier[..matched.start()];
+    let alias = &identifier[matched.end()..];
+
+    validate_where_column(orig)?;
+    validate_where_column(alias)?;
+
+    Ok(Some((orig, alias)))
 }
 
 #[cfg(test)]
@@ -166,13 +162,22 @@ mod validate_where_column_tests {
         assert!(validate_where_column("user_id.company_id.name").is_ok());
         assert!(validate_where_column("user_id.company_id.").is_err());
     }
+}
+
+#[cfg(test)]
+mod validate_alias_identifier_tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn as_alias() {
         // may change later
-        assert!(validate_where_column("arya AS arry").is_err());
-        assert!(validate_where_column(" AS arry").is_err());
-        assert!(validate_where_column("arya AS arry AS cat").is_err());
-        assert!(validate_where_column("arya AS  AS arry").is_err());
+        assert_eq!(
+            validate_alias_identifier("arya AS arry").unwrap(),
+            Some(("arya", "arry"))
+        );
+        assert!(validate_alias_identifier(" AS arry").is_err());
+        assert!(validate_alias_identifier("arya AS arry AS cat").is_err());
+        assert!(validate_alias_identifier("arya AS  AS arry").is_err());
     }
 }

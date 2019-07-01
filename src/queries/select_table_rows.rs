@@ -14,7 +14,7 @@ use super::{
     },
     postgres_types::{convert_row_fields, RowFields},
     query_types::QueryParamsSelect,
-    utils::{validate_table_name, validate_where_column},
+    utils::{validate_alias_identifier, validate_table_name, validate_where_column},
 };
 use crate::{db::connect, Error};
 
@@ -36,7 +36,17 @@ pub fn select_table_rows(
 
     // get list of every column being used in the query params (columns, where, distinct, group_by,
     // order_by). Used for finding all foreign key references
-    let mut columns = params.columns.clone();
+    let mut columns: Vec<String> = params
+        .columns
+        .iter()
+        .map(|col| {
+            if let Ok(Some((actual_column_ref, _alias))) = validate_alias_identifier(col) {
+                actual_column_ref.to_string()
+            } else {
+                col.to_string()
+            }
+        })
+        .collect();
 
     // WHERE clause foreign key references
     let where_ast = match &params.conditions {
@@ -134,12 +144,17 @@ fn build_select_statement(
     // DISTINCT clause if exists
     if let Some(distinct_columns) = &params.distinct {
         statement.push("DISTINCT ON (");
-        statement.extend(get_column_str(distinct_columns, &params.table, &fks)?);
+        statement.extend(get_column_str(
+            distinct_columns,
+            &params.table,
+            &fks,
+            false,
+        )?);
         statement.push(") ");
     }
 
     // building column selection
-    statement.extend(get_column_str(&params.columns, &params.table, &fks)?);
+    statement.extend(get_column_str(&params.columns, &params.table, &fks, true)?);
 
     statement.push(" FROM ");
     statement.push(&params.table);
@@ -203,7 +218,12 @@ fn build_select_statement(
     // GROUP BY statement
     if let Some(group_by_columns) = &params.group_by {
         statement.push(" GROUP BY ");
-        statement.extend(get_column_str(group_by_columns, &params.table, &fks)?);
+        statement.extend(get_column_str(
+            group_by_columns,
+            &params.table,
+            &fks,
+            false,
+        )?);
     }
 
     // Append ORDER BY if the param exists
@@ -284,6 +304,7 @@ fn get_column_str<'a>(
     columns: &'a [String],
     table: &'a str,
     fks: &'a [ForeignKeyReference],
+    is_use_alias: bool,
 ) -> Result<Vec<&'a str>, Error> {
     let mut statement: Vec<&str> = vec![];
     let is_fks_exist = !fks.is_empty();
@@ -291,7 +312,11 @@ fn get_column_str<'a>(
     // no FKs exist, just add columns with commas in between
     if !is_fks_exist {
         for (i, column) in columns.iter().enumerate() {
-            validate_where_column(column)?;
+            if is_use_alias {
+                let _ = validate_alias_identifier(column)?;
+            } else {
+                validate_where_column(column)?;
+            }
             statement.push(column);
 
             if i < columns.len() - 1 {
@@ -304,7 +329,15 @@ fn get_column_str<'a>(
 
     // correctly account for FK column references
     for (i, column) in columns.iter().enumerate() {
-        validate_where_column(column)?;
+        // If column is an alias (contains " AS "), de-alias and store alias for later
+        let validate_alias_result = validate_alias_identifier(column)?;
+        let (column, alias, has_alias) = if let (true, Some((actual_column_ref, alias))) =
+            (is_use_alias, validate_alias_result)
+        {
+            (actual_column_ref, alias, true)
+        } else {
+            (&column[..], "", false)
+        };
 
         if let (true, Some((fk_ref, fk_column))) = (
             !fks.is_empty(),
@@ -316,16 +349,20 @@ fn get_column_str<'a>(
 
             // AS syntax (to avoid ambiguous columns)
             statement.push(" AS \"");
-            statement.push(column);
+            statement.push(if has_alias { alias } else { column });
             statement.push("\"");
         } else {
+            // Current column is not an FK, but we still need to use actual table names to avoid
+            // ambiguous columns. Example: If I'm trying to retrieve the ID field of an employee as
+            // well as its company and they're both called "id", I would get an ambiguity error.
+
             statement.push(table);
             statement.push(".");
             statement.push(column);
 
             // AS syntax (to avoid ambiguous columns)
             statement.push(" AS \"");
-            statement.push(column);
+            statement.push(if has_alias { alias } else { column });
             statement.push("\"");
         }
 
@@ -522,6 +559,35 @@ mod build_select_statement_tests {
     }
 
     #[test]
+    fn group_by_alias() {
+        match build_select_statement(
+            QueryParamsSelect {
+                columns: vec!["COUNT(id) AS id_count".to_string(), "name".to_string()],
+                conditions: None,
+                distinct: None,
+                group_by: Some(vec!["name".to_string()]),
+                limit: 1000,
+                offset: 0,
+                order_by: None,
+                prepared_values: None,
+                table: "a_table".to_string(),
+            },
+            vec![],
+            ASTNode::SQLIdentifier("".to_string()),
+        ) {
+            Ok((sql, _)) => {
+                assert_eq!(
+                    &sql,
+                    "SELECT COUNT(id) AS id_count, name FROM a_table GROUP BY name LIMIT 1000;"
+                );
+            }
+            Err(e) => {
+                panic!(e);
+            }
+        };
+    }
+
+    #[test]
     fn conditions() {
         match build_select_statement(
             QueryParamsSelect {
@@ -658,7 +724,9 @@ mod get_column_str_tests {
         }];
         let table = "child";
 
-        let column_str = get_column_str(&columns, table, &fks).unwrap().join("");
+        let column_str = get_column_str(&columns, table, &fks, false)
+            .unwrap()
+            .join("");
         assert_eq!(
             column_str,
             r#"child.id AS "id", company.name AS "parent_id.company_id.name""#
@@ -691,10 +759,44 @@ mod get_column_str_tests {
         }];
         let table = "child";
 
-        let column_str = get_column_str(&columns, table, &fks).unwrap().join("");
+        let column_str = get_column_str(&columns, table, &fks, false)
+            .unwrap()
+            .join("");
         assert_eq!(
             column_str,
             r#"adult.name AS "parent_id.name", company.name AS "parent_id.company_id.name""#
+        );
+    }
+
+    #[test]
+    fn foreign_keys_nested_alias() {
+        let columns = vec![
+            "id".to_string(),
+            "parent_id.company_id.name AS parent_company".to_string(),
+        ];
+        let fks = [ForeignKeyReference {
+            original_refs: vec!["parent_id.company_id.name".to_string()],
+            referring_table: "child".to_string(),
+            referring_column: "parent_id".to_string(),
+            table_referred: "adult".to_string(),
+            foreign_key_column: "id".to_string(),
+            nested_fks: vec![ForeignKeyReference {
+                original_refs: vec!["company_id.name".to_string()],
+                referring_table: "adult".to_string(),
+                referring_column: "company_id".to_string(),
+                table_referred: "company".to_string(),
+                foreign_key_column: "id".to_string(),
+                nested_fks: vec![],
+            }],
+        }];
+        let table = "child";
+
+        let column_str = get_column_str(&columns, table, &fks, true)
+            .unwrap()
+            .join("");
+        assert_eq!(
+            column_str,
+            r#"child.id AS "id", company.name AS "parent_company""#
         );
     }
 }
