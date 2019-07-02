@@ -15,24 +15,24 @@ use crate::{
     queries::{
         insert_into_table, query_types, select_all_tables, select_table_rows, select_table_stats,
     },
-    AppConfig, Error,
+    AppState, Error,
 };
 use query_types::{QueryParamsInsert, QueryParamsSelect, RequestQueryStringParams};
 
 /// Retrieves a list of table names that exist in the DB.
 pub fn get_all_table_names(
-    config: web::Data<AppConfig>,
+    state: web::Data<AppState>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
-    connect(config.db_url)
+    connect(state.config.db_url)
         .map_err(Error::from)
         .and_then(|client| select_all_tables(client).map_err(Error::from))
-        .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
+        .and_then(|(rows, _client)| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }
 
 /// Inserts new rows into a table. Returns the number of rows affected.
 pub fn post_table(
     req: HttpRequest,
-    config: web::Data<AppConfig>,
+    state: web::Data<AppState>,
     body: Json<Value>,
     query_string_params: web::Query<RequestQueryStringParams>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
@@ -48,7 +48,7 @@ pub fn post_table(
         }
     };
 
-    let insert_response = connect(config.db_url)
+    let insert_response = connect(state.config.db_url)
         .map_err(Error::from)
         .and_then(|client| insert_into_table(client, params))
         .and_then(|num_rows_affected| {
@@ -61,7 +61,7 @@ pub fn post_table(
 /// Queries a table using SELECT.
 pub fn get_table(
     req: HttpRequest,
-    config: web::Data<AppConfig>,
+    state: web::Data<AppState>,
     query_string_params: web::Query<RequestQueryStringParams>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
     let params = match QueryParamsSelect::from_http_request(&req, query_string_params.into_inner())
@@ -71,25 +71,25 @@ pub fn get_table(
     };
 
     if params.columns.is_empty() {
-        Either::B(Either::A(get_table_stats(config.db_url, params.table)))
+        Either::B(Either::A(get_table_stats(state, params.table)))
     } else {
-        Either::B(Either::B(get_table_rows(config.db_url, params)))
+        Either::B(Either::B(get_table_rows(state, params)))
     }
 }
 
 fn get_table_rows(
-    db_url: &str,
+    state: web::Data<AppState>,
     params: QueryParamsSelect,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
-    select_table_rows(db_url.to_string(), params)
+    select_table_rows(state.get_ref(), params)
         .map_err(Error::from)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }
 
-fn get_table_stats(db_url: &str, table: String) -> impl Future<Item = HttpResponse, Error = Error> {
-    connect(db_url)
-        .map_err(Error::from)
-        .and_then(|conn| select_table_stats(conn, table))
-        .map_err(Error::from)
+fn get_table_stats(
+    state: web::Data<AppState>,
+    table: String,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    select_table_stats(state.get_ref(), table)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }

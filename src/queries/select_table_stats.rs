@@ -1,7 +1,12 @@
 use super::utils::validate_table_name;
-use crate::Error;
+use crate::{
+    db::connect,
+    stats_cache::{StatsCache, StatsCacheMessage, StatsCacheResponse},
+    AppState, Error,
+};
+use actix::Addr;
 use futures::{
-    future::{err, join_all, Either, Future},
+    future::{err, join_all, ok, Either, Future},
     stream::Stream,
 };
 use lazy_static::lazy_static;
@@ -13,7 +18,7 @@ use tokio_postgres::{
     Client, Error as PgError,
 };
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 /// Stats for a single column of a table
 pub struct TableColumnStat {
     /// name of column
@@ -39,7 +44,7 @@ pub struct TableColumnStat {
     pub char_octet_length: Option<i32>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 /// Details about other tables’ foreign keys that are referencing the current table
 pub struct TableReferencedBy {
     /// The table with a foreign key referencing the current table
@@ -50,7 +55,7 @@ pub struct TableReferencedBy {
     pub columns_referenced: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 /// A single index on the table.
 pub struct TableIndex {
     /// index name
@@ -64,7 +69,7 @@ pub struct TableIndex {
     pub is_unique: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Constraint {
     pub name: String,
     pub table: String,
@@ -75,7 +80,7 @@ pub struct Constraint {
     pub fk_columns: Option<Vec<String>>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 /// A table’s stats: columns, indexes, foreign + primary keys, number of rows.
 pub struct TableStats {
     pub columns: Vec<TableColumnStat>,
@@ -88,46 +93,91 @@ pub struct TableStats {
 /// Returns the requested table’s stats: number of rows, the foreign keys referring to the table,
 /// and column names + types
 pub fn select_table_stats(
-    mut conn: Client,
+    state: &AppState,
     table: String,
 ) -> impl Future<Item = TableStats, Error = Error> {
     if let Err(e) = validate_table_name(&table) {
         return Either::A(err::<TableStats, Error>(e));
     }
 
-    // run all sub-operations in "parallel"
+    // get stats from cache if it exists, otherwise make a DB call.
+    if let Some(cache_addr) = &state.stats_cache_addr {
+        Either::B(Either::A(select_table_stats_from_cache(
+            cache_addr,
+            state.config.db_url,
+            table,
+        )))
+    } else {
+        Either::B(Either::B(select_table_stats_from_db(
+            state.config.db_url,
+            table,
+        )))
+    }
+}
 
-    // create prepared statements
-    let f = join_all(vec![
-        select_constraints_statement(&mut conn, &table),
-        select_indexes_statement(&mut conn, &table),
-        select_column_stats_statement(&mut conn, &table),
-    ])
-    .and_then(move |statements| {
-        // query the statements
-        let mut queries = vec![];
-        for statement in &statements {
-            queries.push(conn.query(statement, &[]))
-        }
+fn select_table_stats_from_cache(
+    cache_addr: &Addr<StatsCache>,
+    db_url: &str,
+    table: String,
+) -> impl Future<Item = TableStats, Error = Error> {
+    let db_url = db_url.to_string();
+    let table_clone = table.clone();
 
-        // compile the results of the sub-operations into final stats
-        let column_stats_q = queries.pop().unwrap();
-        let indexes_q = queries.pop().unwrap();
-        let constraints_q = queries.pop().unwrap();
-
-        let constraints_f = select_constraints(constraints_q);
-        let indexes_f = select_indexes(indexes_q);
-        let column_stats_f = select_column_stats(column_stats_q);
-
-        constraints_f.join3(indexes_f, column_stats_f).map(
-            move |(constraints, indexes, column_stats)| {
-                compile_table_stats(&table, constraints, indexes, column_stats)
+    cache_addr
+        .send(StatsCacheMessage::FetchStatsForTable(table))
+        .map_err(Error::from)
+        .and_then(move |response_result| match response_result {
+            Ok(response) => match response {
+                StatsCacheResponse::TableStat(stats_opt) => match stats_opt {
+                    Some(stats) => Either::A(ok::<TableStats, Error>(stats)),
+                    None => Either::B(select_table_stats_from_db(&db_url, table_clone)),
+                },
+                StatsCacheResponse::OK => {
+                    unreachable!("Message of type `FetchStatsForTable` should never return an OK.")
+                }
             },
-        )
-    })
-    .map_err(Error::from);
+            Err(e) => Either::A(err::<TableStats, Error>(e)),
+        })
+}
 
-    Either::B(f)
+fn select_table_stats_from_db(
+    db_url: &str,
+    table: String,
+) -> impl Future<Item = TableStats, Error = Error> {
+    connect(db_url)
+        .map_err(Error::from)
+        .and_then(move |mut conn| {
+            // run all sub-operations in "parallel"
+            // create prepared statements
+            join_all(vec![
+                select_constraints_statement(&mut conn, &table),
+                select_indexes_statement(&mut conn, &table),
+                select_column_stats_statement(&mut conn, &table),
+            ])
+            .and_then(move |statements| {
+                // query the statements
+                let mut queries = vec![];
+                for statement in &statements {
+                    queries.push(conn.query(statement, &[]))
+                }
+
+                // compile the results of the sub-operations into final stats
+                let column_stats_q = queries.pop().unwrap();
+                let indexes_q = queries.pop().unwrap();
+                let constraints_q = queries.pop().unwrap();
+
+                let constraints_f = select_constraints(constraints_q);
+                let indexes_f = select_indexes(indexes_q);
+                let column_stats_f = select_column_stats(column_stats_q);
+
+                constraints_f.join3(indexes_f, column_stats_f).map(
+                    move |(constraints, indexes, column_stats)| {
+                        compile_table_stats(&table, constraints, indexes, column_stats)
+                    },
+                )
+            })
+            .map_err(Error::from)
+        })
 }
 
 /// Returns a given table’s column stats: column names, column types, length, default values, and
@@ -180,7 +230,7 @@ WITH foreign_keys as (
         c.contype = 'f' AND
         (tbl.relname = '{0}')
     )
-    GROUP BY c.oid, col.attname
+    GROUP BY c.oid, column_name
     ORDER BY column_name
 )
 SELECT

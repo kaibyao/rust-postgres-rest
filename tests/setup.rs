@@ -18,21 +18,37 @@ pub fn setup_db(db_url: &'static str) {
 }
 
 pub fn start_web_server(db_url: &'static str, address: &'static str) {
+    let no_cache_port = "8000";
+    let cache_port = "8001";
+
     spawn(move || {
         let sys = System::new("experiment00"); // create Actix runtime
 
-        // start 1 server on each cpu thread
+        let address_no_cache = [address, no_cache_port].join(":");
+        let address_cache = [address, cache_port].join(":");
+
         HttpServer::new(move || {
             let mut config = AppConfig::new();
             config.db_url = db_url;
 
             App::new().service(generate_rest_api_scope(config))
         })
-        .bind(address)
+        .bind(&address_no_cache)
         .expect("Can not bind to port.")
         .start();
 
-        println!("Running server on {}", address);
+        HttpServer::new(move || {
+            let mut config = AppConfig::new();
+            config.db_url = db_url;
+
+            App::new().service(generate_rest_api_scope(config))
+        })
+        .bind(&address_cache)
+        .expect("Can not bind to port.")
+        .start();
+
+        println!("Running server on {}", &address_no_cache);
+        println!("Running server on {}", &address_cache);
         sys.run().unwrap();
     });
 }

@@ -4,7 +4,8 @@ use futures::{
 };
 use lazy_static::lazy_static;
 use regex::Regex;
-use sqlparser::sqlast::ASTNode;
+use sqlparser::ast::Expr;
+use std::sync::Arc;
 use tokio_postgres::types::ToSql;
 
 use super::{
@@ -16,7 +17,7 @@ use super::{
     query_types::QueryParamsSelect,
     utils::{validate_alias_identifier, validate_table_name, validate_where_column},
 };
-use crate::{db::connect, Error};
+use crate::{db::connect, AppState, Error};
 
 #[derive(Debug, PartialEq)]
 enum PreparedStatementValue {
@@ -27,7 +28,7 @@ enum PreparedStatementValue {
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query
 pub fn select_table_rows(
-    db_url: String,
+    state: &AppState,
     params: QueryParamsSelect,
 ) -> impl Future<Item = Vec<RowFields>, Error = Error> {
     if let Err(e) = validate_table_name(&params.table) {
@@ -53,7 +54,7 @@ pub fn select_table_rows(
         Some(where_clause_str) => match where_clause_str_to_ast(where_clause_str) {
             Ok(ast_opt) => match ast_opt {
                 Some(ast) => ast,
-                None => ASTNode::SQLIdentifier("".to_string()),
+                None => Expr::Identifier("".to_string()),
             },
             Err(_e) => {
                 return Either::A(err::<Vec<RowFields>, Error>(Error::generate_error(
@@ -62,7 +63,7 @@ pub fn select_table_rows(
                 )));
             }
         },
-        None => ASTNode::SQLIdentifier("".to_string()),
+        None => Expr::Identifier("".to_string()),
     };
     let where_fk_columns = fk_columns_from_where_ast(&where_ast);
 
@@ -78,57 +79,66 @@ pub fn select_table_rows(
     }
 
     // parse columns for foreign key usage
-    let fk_future = ForeignKeyReference::from_query_columns(&db_url, params.table.clone(), columns)
-        .and_then(move |fk_columns| {
-            let (statement_str, prepared_values) =
-                match build_select_statement(params, fk_columns, where_ast) {
-                    Ok((stmt, prep_vals)) => (stmt, prep_vals),
-                    Err(e) => return Either::A(err::<Vec<RowFields>, Error>(e)),
-                };
+    let db_url_str = state.config.db_url.to_string();
+    let addr_clone = if let Some(addr) = &state.stats_cache_addr {
+        Some(addr.clone())
+    } else {
+        None
+    };
+    let fk_future = ForeignKeyReference::from_query_columns(
+        state.config.db_url,
+        Arc::new(addr_clone),
+        params.table.clone(),
+        columns,
+    )
+    .and_then(move |fk_columns| {
+        let (statement_str, prepared_values) =
+            match build_select_statement(params, fk_columns, where_ast) {
+                Ok((stmt, prep_vals)) => (stmt, prep_vals),
+                Err(e) => return Either::A(err::<Vec<RowFields>, Error>(e)),
+            };
 
-            // sending prepared statement to postgres
-            let select_rows_future = connect(&db_url)
-                .map_err(Error::from)
-                .and_then(move |mut conn| {
-                    conn.prepare(&statement_str)
-                        .map_err(Error::from)
-                        .and_then(move |statement| {
-                            let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
-                                vec![]
-                            } else {
-                                prepared_values
-                                    .iter()
-                                    .map(|val| {
-                                        let val_to_sql: &dyn ToSql = match val {
-                                            PreparedStatementValue::Int4(val_i32) => val_i32,
-                                            PreparedStatementValue::Int8(val_i64) => val_i64,
-                                            PreparedStatementValue::String(val_string) => {
-                                                val_string
-                                            }
-                                        };
-                                        val_to_sql
-                                    })
-                                    .collect()
-                            };
-
-                            conn.query(&statement, &prep_values)
+        // sending prepared statement to postgres
+        let select_rows_future = connect(&db_url_str)
+            .map_err(Error::from)
+            .and_then(move |mut conn| {
+                conn.prepare(&statement_str)
+                    .map_err(Error::from)
+                    .and_then(move |statement| {
+                        let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
+                            vec![]
+                        } else {
+                            prepared_values
+                                .iter()
+                                .map(|val| {
+                                    let val_to_sql: &dyn ToSql = match val {
+                                        PreparedStatementValue::Int4(val_i32) => val_i32,
+                                        PreparedStatementValue::Int8(val_i64) => val_i64,
+                                        PreparedStatementValue::String(val_string) => val_string,
+                                    };
+                                    val_to_sql
+                                })
                                 .collect()
-                                .map_err(Error::from)
-                        })
-                })
-                .and_then(|rows| {
-                    match rows
-                        .iter()
-                        .map(convert_row_fields)
-                        .collect::<Result<Vec<RowFields>, Error>>()
-                    {
-                        Ok(row_fields) => Ok(row_fields),
-                        Err(e) => Err(e),
-                    }
-                });
+                        };
 
-            Either::B(select_rows_future)
-        });
+                        conn.query(&statement, &prep_values)
+                            .collect()
+                            .map_err(Error::from)
+                    })
+            })
+            .and_then(|rows| {
+                match rows
+                    .iter()
+                    .map(convert_row_fields)
+                    .collect::<Result<Vec<RowFields>, Error>>()
+                {
+                    Ok(row_fields) => Ok(row_fields),
+                    Err(e) => Err(e),
+                }
+            });
+
+        Either::B(select_rows_future)
+    });
 
     Either::B(fk_future)
 }
@@ -136,7 +146,7 @@ pub fn select_table_rows(
 fn build_select_statement(
     params: QueryParamsSelect,
     fks: Vec<ForeignKeyReference>,
-    mut where_ast: ASTNode,
+    mut where_ast: Expr,
 ) -> Result<(String, Vec<PreparedStatementValue>), Error> {
     let mut statement = vec!["SELECT "];
     let is_fks_exist = !fks.is_empty();
@@ -377,7 +387,7 @@ fn get_column_str<'a>(
 /// Generates the WHERE clause after taking foreign keys into account.
 fn get_where_string<'a>(
     where_str: &str,
-    where_ast: &mut ASTNode,
+    where_ast: &mut Expr,
     table: &str,
     fks: &'a [ForeignKeyReference],
 ) -> String {
@@ -393,18 +403,14 @@ fn get_where_string<'a>(
             ForeignKeyReference::find(fks, table, &incorrect_column_name),
         ) {
             let replacement_node = match ast_node {
-                ASTNode::SQLQualifiedWildcard(_wildcard_vec) => {
-                    ASTNode::SQLQualifiedWildcard(vec![
-                        fk_ref.table_referred.clone(),
-                        fk_column.to_string(),
-                    ])
-                }
-                ASTNode::SQLCompoundIdentifier(_nested_fk_column_vec) => {
-                    ASTNode::SQLCompoundIdentifier(vec![
-                        fk_ref.table_referred.clone(),
-                        fk_column.to_string(),
-                    ])
-                }
+                Expr::QualifiedWildcard(_wildcard_vec) => Expr::QualifiedWildcard(vec![
+                    fk_ref.table_referred.clone(),
+                    fk_column.to_string(),
+                ]),
+                Expr::CompoundIdentifier(_nested_fk_column_vec) => Expr::CompoundIdentifier(vec![
+                    fk_ref.table_referred.clone(),
+                    fk_column.to_string(),
+                ]),
                 _ => unimplemented!(
                     "The WHERE clause HashMap only contains wildcards and compound identifiers."
                 ),
@@ -437,7 +443,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             vec![],
-            ASTNode::SQLIdentifier("".to_string()),
+            Expr::Identifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(&sql, "SELECT id FROM a_table LIMIT 100;");
@@ -463,7 +469,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             vec![],
-            ASTNode::SQLIdentifier("".to_string()),
+            Expr::Identifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(&sql, "SELECT id, name FROM a_table LIMIT 100;");
@@ -489,7 +495,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             vec![],
-            ASTNode::SQLIdentifier("".to_string()),
+            Expr::Identifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(
@@ -518,7 +524,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             vec![],
-            ASTNode::SQLIdentifier("".to_string()),
+            Expr::Identifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(&sql, "SELECT id FROM a_table LIMIT 1000 OFFSET 100;");
@@ -544,7 +550,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             vec![],
-            ASTNode::SQLIdentifier("".to_string()),
+            Expr::Identifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(
@@ -573,7 +579,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             vec![],
-            ASTNode::SQLIdentifier("".to_string()),
+            Expr::Identifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(
@@ -602,7 +608,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             vec![],
-            ASTNode::SQLIdentifier("".to_string()),
+            Expr::Identifier("".to_string()),
         ) {
             Ok((sql, _)) => {
                 assert_eq!(
@@ -631,7 +637,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             vec![],
-            ASTNode::SQLIdentifier("".to_string()),
+            Expr::Identifier("".to_string()),
         ) {
             Ok((sql, prepared_values)) => {
                 assert_eq!(
@@ -676,7 +682,7 @@ mod build_select_statement_tests {
                 table: "a_table".to_string(),
             },
             vec![],
-            ASTNode::SQLIdentifier("".to_string()),
+            Expr::Identifier("".to_string()),
         ) {
             Ok((sql, prepared_values)) => {
                 assert_eq!(

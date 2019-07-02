@@ -15,6 +15,8 @@ fn main() {
     HttpServer::new(move || {
         let mut config = AppConfig::new();
         config.db_url = "postgresql://kaiby@localhost:5432/crossroads";
+        config.is_cache_table_stats = true;
+        config.cache_reset_interval_seconds = 300;
 
         App::new().service(
             // appends an actix-web Scope under the "/api" endpoint to app and returns it
