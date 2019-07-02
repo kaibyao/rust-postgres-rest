@@ -33,7 +33,15 @@ fn main() {
 
 `generate_rest_api_scope()` creates the `/api/table` and `/api/{table}` endpoints, which allow for CRUD operations on table rows in your database.
 
+## Configuration
+
+The `AppConfig` struct contains the configuration options used by this library.
+
 ## Endpoints
+
+### `GET /`
+
+Displays a list of all available endpoints and their descriptions + how to use instructions.
 
 ### `GET /{table}`
 
