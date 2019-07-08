@@ -1,16 +1,26 @@
-use futures::future::{join_all, ok, Either, Future};
+use actix::Addr;
+use futures::future::{err, join_all, ok, Either, Future};
 use sqlparser::{
+    ast::{Expr, Function, SetExpr, Statement},
     dialect::Dialect,
-    sqlast::{ASTNode, SQLQuery, SQLSelect, SQLSetExpr, SQLStatement},
-    sqlparser::Parser,
+    parser::Parser,
 };
-use std::{borrow::BorrowMut, collections::HashMap};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    collections::HashMap,
+    sync::Arc,
+};
 
 use super::select_table_stats::{
     select_column_stats, select_column_stats_statement, TableColumnStat,
 };
-use crate::{db::connect, Error};
+use crate::{
+    db::connect,
+    stats_cache::{StatsCache, StatsCacheMessage, StatsCacheResponse},
+    Error,
+};
 
+#[derive(Debug)]
 struct PgDialectWithPreparedStatement;
 impl Dialect for PgDialectWithPreparedStatement {
     fn is_identifier_start(&self, ch: char) -> bool {
@@ -26,8 +36,8 @@ impl Dialect for PgDialectWithPreparedStatement {
     }
 }
 
-/// Converts a WHERE clause string into an ASTNode.
-pub fn where_clause_str_to_ast(clause: &str) -> Result<Option<ASTNode>, Error> {
+/// Converts a WHERE clause string into an Expr.
+pub fn where_clause_str_to_ast(clause: &str) -> Result<Option<Expr>, Error> {
     let full_statement = ["SELECT * FROM a_table WHERE ", clause].join("");
     let dialect = PgDialectWithPreparedStatement;
 
@@ -35,48 +45,41 @@ pub fn where_clause_str_to_ast(clause: &str) -> Result<Option<ASTNode>, Error> {
     let mut parsed = Parser::parse_sql(&dialect, full_statement)?;
     let statement_ast = parsed.remove(0);
 
-    if let SQLStatement::SQLSelect(SQLQuery {
-        body: query_body, ..
-    }) = statement_ast
-    {
-        return Ok(extract_where_ast_from_sqlsetexpr(query_body));
+    if let Statement::Query(query_box) = statement_ast {
+        return Ok(extract_where_ast_from_setexpr(query_box.to_owned().body));
     }
 
     Ok(None)
 }
 
-/// Finds and returns the ASTNode that represents the WHERE clause of a SELECT statement
-fn extract_where_ast_from_sqlsetexpr(expr: SQLSetExpr) -> Option<ASTNode> {
+/// Finds and returns the Expr that represents the WHERE clause of a SELECT statement
+fn extract_where_ast_from_setexpr(expr: SetExpr) -> Option<Expr> {
     match expr {
-        SQLSetExpr::Query(boxed_sql_query) => {
-            extract_where_ast_from_sqlsetexpr(boxed_sql_query.body)
-        }
-        SQLSetExpr::Select(SQLSelect {
-            selection: where_ast_opt,
-            ..
-        }) => where_ast_opt,
-        SQLSetExpr::SetOperation { .. } => unimplemented!("Set operations not supported"),
+        SetExpr::Query(boxed_sql_query) => extract_where_ast_from_setexpr(boxed_sql_query.body),
+        SetExpr::Select(select_box) => select_box.to_owned().selection,
+        SetExpr::SetOperation { .. } => unimplemented!("Set operations not supported"),
+        SetExpr::Values(_) => unimplemented!("Values not supported"),
     }
 }
 
-/// Extracts the foreign key ASTNodes froma WHERE ASTNode.
-pub fn fk_ast_nodes_from_where_ast(ast: &mut ASTNode) -> Vec<(String, &mut ASTNode)> {
+/// Extracts the foreign key Exprs from a WHERE Expr.
+pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
     let mut fks = vec![];
 
     match ast {
-        ASTNode::SQLQualifiedWildcard(wildcard_vec) => {
+        Expr::QualifiedWildcard(wildcard_vec) => {
             fks.push((wildcard_vec.join("."), ast));
         }
-        ASTNode::SQLCompoundIdentifier(nested_fk_column_vec) => {
+        Expr::CompoundIdentifier(nested_fk_column_vec) => {
             fks.push((nested_fk_column_vec.join("."), ast));
         }
-        ASTNode::SQLIsNull(null_ast_box) => {
+        Expr::IsNull(null_ast_box) => {
             fks.extend(fk_ast_nodes_from_where_ast(null_ast_box.borrow_mut()));
         }
-        ASTNode::SQLIsNotNull(null_ast_box) => {
+        Expr::IsNotNull(null_ast_box) => {
             fks.extend(fk_ast_nodes_from_where_ast(null_ast_box.borrow_mut()));
         }
-        ASTNode::SQLInList {
+        Expr::InList {
             expr: list_expr_ast_box_ref,
             list: list_ast_vec,
             ..
@@ -89,7 +92,7 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut ASTNode) -> Vec<(String, &mut ASTNo
                 fks.extend(fk_ast_nodes_from_where_ast(list_ast));
             }
         }
-        ASTNode::SQLBinaryExpr {
+        Expr::BinaryOp {
             left: bin_left_ast_box_ref,
             right: bin_right_ast_box_ref,
             ..
@@ -101,22 +104,22 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut ASTNode) -> Vec<(String, &mut ASTNo
                 bin_right_ast_box_ref.borrow_mut(),
             ));
         }
-        ASTNode::SQLCast {
+        Expr::Cast {
             expr: cast_expr_box_ref,
             ..
         } => {
             fks.extend(fk_ast_nodes_from_where_ast(cast_expr_box_ref.borrow_mut()));
         }
-        ASTNode::SQLNested(nested_ast_box_ref) => {
+        Expr::Nested(nested_ast_box_ref) => {
             fks.extend(fk_ast_nodes_from_where_ast(nested_ast_box_ref.borrow_mut()));
         }
-        ASTNode::SQLUnary {
+        Expr::UnaryOp {
             expr: unary_expr_box_ref,
             ..
         } => {
             fks.extend(fk_ast_nodes_from_where_ast(unary_expr_box_ref.borrow_mut()));
         }
-        ASTNode::SQLBetween {
+        Expr::Between {
             expr: between_expr_ast_box_ref,
             low: between_low_ast_box_ref,
             high: between_high_ast_box_ref,
@@ -132,17 +135,18 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut ASTNode) -> Vec<(String, &mut ASTNo
                 between_high_ast_box_ref.borrow_mut(),
             ));
         }
-        ASTNode::SQLFunction {
+        Expr::Function(Function {
             args: args_ast_vec, ..
-        } => {
+        }) => {
             for ast_arg in args_ast_vec {
                 fks.extend(fk_ast_nodes_from_where_ast(ast_arg));
             }
         }
-        ASTNode::SQLCase {
+        Expr::Case {
             conditions: case_conditions_ast_vec,
             results: case_results_ast_vec,
             else_result: case_else_results_ast_box_opt,
+            ..
         } => {
             for case_condition_ast in case_conditions_ast_vec {
                 fks.extend(fk_ast_nodes_from_where_ast(case_condition_ast));
@@ -158,36 +162,39 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut ASTNode) -> Vec<(String, &mut ASTNo
                 ));
             }
         }
+        Expr::Collate { expr, .. } => fks.extend(fk_ast_nodes_from_where_ast(expr.borrow_mut())),
+        Expr::Extract { expr, .. } => fks.extend(fk_ast_nodes_from_where_ast(expr.borrow_mut())),
         // below is unsupported
-        ASTNode::SQLIdentifier(_non_nested_column_name) => (),
-        ASTNode::SQLWildcard => (),
-        ASTNode::SQLInSubquery { .. } => (), // subqueries in WHERE statement are not supported
-        ASTNode::SQLValue(_val) => (),
-        ASTNode::SQLSubquery(_query_box) => (), // subqueries in WHERE are not supported
+        Expr::Exists(_query_box) => (), // EXISTS(subquery) not supported
+        Expr::Identifier(_non_nested_column_name) => (),
+        Expr::Wildcard => (),
+        Expr::InSubquery { .. } => (), // subqueries in WHERE statement are not supported
+        Expr::Value(_val) => (),
+        Expr::Subquery(_query_box) => (), // subqueries in WHERE are not supported
     };
 
     fks
 }
 
 /// Similar to `fk_ast_nodes_from_where_ast`. Extracts the raw/incorrect foreign key column strings
-/// from a WHERE ASTNode
-pub fn fk_columns_from_where_ast(ast: &ASTNode) -> Vec<String> {
+/// from a WHERE Expr
+pub fn fk_columns_from_where_ast(ast: &Expr) -> Vec<String> {
     let mut fks = vec![];
 
     match ast {
-        ASTNode::SQLQualifiedWildcard(wildcard_vec) => {
+        Expr::QualifiedWildcard(wildcard_vec) => {
             fks.push(wildcard_vec.join("."));
         }
-        ASTNode::SQLCompoundIdentifier(nested_fk_column_vec) => {
+        Expr::CompoundIdentifier(nested_fk_column_vec) => {
             fks.push(nested_fk_column_vec.join("."));
         }
-        ASTNode::SQLIsNull(null_ast_box) => {
+        Expr::IsNull(null_ast_box) => {
             fks.extend(fk_columns_from_where_ast(null_ast_box.as_ref()));
         }
-        ASTNode::SQLIsNotNull(null_ast_box) => {
+        Expr::IsNotNull(null_ast_box) => {
             fks.extend(fk_columns_from_where_ast(null_ast_box.as_ref()));
         }
-        ASTNode::SQLInList {
+        Expr::InList {
             expr: list_expr_ast_box_ref,
             list: list_ast_vec,
             ..
@@ -198,7 +205,7 @@ pub fn fk_columns_from_where_ast(ast: &ASTNode) -> Vec<String> {
                 fks.extend(fk_columns_from_where_ast(list_ast));
             }
         }
-        ASTNode::SQLBinaryExpr {
+        Expr::BinaryOp {
             left: bin_left_ast_box_ref,
             right: bin_right_ast_box_ref,
             ..
@@ -206,22 +213,22 @@ pub fn fk_columns_from_where_ast(ast: &ASTNode) -> Vec<String> {
             fks.extend(fk_columns_from_where_ast(bin_left_ast_box_ref.as_ref()));
             fks.extend(fk_columns_from_where_ast(bin_right_ast_box_ref.as_ref()));
         }
-        ASTNode::SQLCast {
+        Expr::Cast {
             expr: cast_expr_box_ref,
             ..
         } => {
             fks.extend(fk_columns_from_where_ast(cast_expr_box_ref.as_ref()));
         }
-        ASTNode::SQLNested(nested_ast_box_ref) => {
+        Expr::Nested(nested_ast_box_ref) => {
             fks.extend(fk_columns_from_where_ast(nested_ast_box_ref.as_ref()));
         }
-        ASTNode::SQLUnary {
+        Expr::UnaryOp {
             expr: unary_expr_box_ref,
             ..
         } => {
             fks.extend(fk_columns_from_where_ast(unary_expr_box_ref.as_ref()));
         }
-        ASTNode::SQLBetween {
+        Expr::Between {
             expr: between_expr_ast_box_ref,
             low: between_low_ast_box_ref,
             high: between_high_ast_box_ref,
@@ -231,17 +238,18 @@ pub fn fk_columns_from_where_ast(ast: &ASTNode) -> Vec<String> {
             fks.extend(fk_columns_from_where_ast(between_low_ast_box_ref.as_ref()));
             fks.extend(fk_columns_from_where_ast(between_high_ast_box_ref.as_ref()));
         }
-        ASTNode::SQLFunction {
+        Expr::Function(Function {
             args: args_ast_vec, ..
-        } => {
+        }) => {
             for ast_arg in args_ast_vec {
                 fks.extend(fk_columns_from_where_ast(ast_arg));
             }
         }
-        ASTNode::SQLCase {
+        Expr::Case {
             conditions: case_conditions_ast_vec,
             results: case_results_ast_vec,
             else_result: case_else_results_ast_box_opt,
+            ..
         } => {
             for case_condition_ast in case_conditions_ast_vec {
                 fks.extend(fk_columns_from_where_ast(case_condition_ast));
@@ -257,22 +265,28 @@ pub fn fk_columns_from_where_ast(ast: &ASTNode) -> Vec<String> {
                 ));
             }
         }
+        Expr::Collate { expr, .. } => fks.extend(fk_columns_from_where_ast(expr.as_ref())),
+        Expr::Extract { expr, .. } => fks.extend(fk_columns_from_where_ast(expr.as_ref())),
         // below is unsupported
-        ASTNode::SQLIdentifier(_non_nested_column_name) => (),
-        ASTNode::SQLWildcard => (),
-        ASTNode::SQLInSubquery { .. } => (), // subqueries in WHERE statement are not supported
-        ASTNode::SQLValue(_val) => (),
-        ASTNode::SQLSubquery(_query_box) => (), // subqueries in WHERE are not supported
+        Expr::Exists(_query_box) => (), // EXISTS(subquery) not supported
+        Expr::Identifier(_non_nested_column_name) => (),
+        Expr::Wildcard => (),
+        Expr::InSubquery { .. } => (), // subqueries in WHERE statement are not supported
+        Expr::Value(_val) => (),
+        Expr::Subquery(_query_box) => (), // subqueries in WHERE are not supported
     };
 
     fks
 }
 
+type ChildColumns = Vec<String>;
+type OriginalColumnReferences = Vec<String>;
+
 #[derive(Debug)]
 /// Represents a single foreign key, usually generated by a queried column using dot-syntax.
 pub struct ForeignKeyReference {
     /// The original column strings referencing a (possibly nested) foreign key value.
-    pub original_refs: Vec<String>,
+    pub original_refs: OriginalColumnReferences,
 
     /// The parent table name that contains the foreign key column.
     pub referring_table: String,
@@ -389,8 +403,9 @@ impl ForeignKeyReference {
     ///     ]))
     /// );
     /// ```
-    pub fn from_query_columns(
+    pub(crate) fn from_query_columns(
         db_url: &str,
+        stats_cache_addr: Arc<Option<Addr<StatsCache>>>,
         table: String,
         columns: Vec<String>,
     ) -> Box<dyn Future<Item = Vec<Self>, Error = Error> + Send> {
@@ -437,79 +452,85 @@ impl ForeignKeyReference {
         }
 
         // get column stats for table
-        let process_column_stats_future =
-            ForeignKeyReference::process_column_stats(db_url, table, fk_columns_grouped);
+        let process_column_stats_future = ForeignKeyReference::process_column_stats(
+            db_url,
+            stats_cache_addr,
+            table,
+            fk_columns_grouped,
+        );
 
         Box::new(process_column_stats_future)
     }
 
     fn process_column_stats(
         db_url: &str,
+        stats_cache_addr: Arc<Option<Addr<StatsCache>>>,
         table: String,
         fk_columns_grouped: HashMap<String, (Vec<String>, Vec<String>)>,
     ) -> impl Future<Item = Vec<Self>, Error = Error> + Send {
         // used later in futures
-        let table_str = &table;
-        let table_clone = table_str.to_string();
+        let table_clone = table.clone();
+        let table_clone_2 = table.clone();
         let db_url_str = db_url.to_string();
+        let db_url_str_2 = db_url_str.clone();
 
-        connect(db_url)
-            .map_err(Error::from)
-            .and_then(move |mut conn| {
-                select_column_stats_statement(&mut conn, &table_clone)
-                    .map_err(Error::from)
-                    .and_then(move |statement| {
-                        let q = conn.query(&statement, &[]);
-                        select_column_stats(q).then(move |results| match results {
-                            Ok(stats) => Ok((stats, fk_columns_grouped)),
-                            Err(e) => Err(Error::from(e)),
+        let get_stats_and_matched_columns_from_table_column_stats = move || {
+            connect(&db_url_str)
+                .map_err(Error::from)
+                .and_then(move |mut conn| {
+                    select_column_stats_statement(&mut conn, &table_clone)
+                        .map_err(Error::from)
+                        .and_then(move |statement| {
+                            let q = conn.query(&statement, &[]);
+                            select_column_stats(q).map_err(Error::from)
                         })
-                    })
-            })
-            .map(|(stats, fk_columns_grouped)| {
-                // contains a tuple representing the (matched parent column name, child columns, and
-                // original column strings)
-                let mut matched_columns: Vec<(String, Vec<String>, Vec<String>)> = vec![];
+                })
+        };
 
-                // filter the table column stats to just the foreign key columns that match the
-                // given columns
-                let filtered_stats: Vec<TableColumnStat> = stats
-                    .into_iter()
-                    .filter(|stat| {
-                        if !stat.is_foreign_key {
-                            return false;
-                        }
-
-                        match fk_columns_grouped
-                            .iter()
-                            .find(|(parent_col, _child_col_vec)| parent_col == &&stat.column_name)
-                        {
-                            Some((
-                                matched_parent_fk_column,
-                                (matched_child_col_vec, matched_orig_refs),
-                            )) => {
-                                matched_columns.push((
-                                    matched_parent_fk_column.to_string(),
-                                    matched_child_col_vec
-                                        .iter()
-                                        .map(|s| s.to_string())
-                                        .collect(),
-                                    matched_orig_refs.clone(),
-                                ));
-                                true
+        let column_stats_future = if let Some(cache_addr) = stats_cache_addr.borrow() {
+            // similar to select_table_stats::select_table_stats_from_cache, except we just need a
+            // subset of stats (cheaper/more lightweight to query), not the whole stat object
+            // (expensive to query)
+            let cache_future = cache_addr
+                .send(StatsCacheMessage::FetchStatsForTable(table))
+                .map_err(Error::from)
+                .and_then(move |response_result| match response_result {
+                    Ok(response) => match response {
+                        StatsCacheResponse::TableStat(stats_opt) => match stats_opt {
+                            Some(stats) => {
+                                let calculated_columns_and_stats =
+                                    Self::match_fk_column_stats(stats.columns, fk_columns_grouped);
+                                Either::A(ok(calculated_columns_and_stats))
                             }
-                            None => false,
-                        }
-                    })
-                    .collect();
+                            None => Either::B(
+                                get_stats_and_matched_columns_from_table_column_stats().map(
+                                    move |stats| {
+                                        Self::match_fk_column_stats(stats, fk_columns_grouped)
+                                    },
+                                ),
+                            ),
+                        },
+                        StatsCacheResponse::OK => unreachable!(
+                            "Message of type `FetchStatsForTable` should never return an OK."
+                        ),
+                    },
+                    Err(e) => Either::A(err(e)),
+                });
+            Either::A(cache_future)
+        } else {
+            Either::B(
+                get_stats_and_matched_columns_from_table_column_stats()
+                    .map(move |stats| Self::match_fk_column_stats(stats, fk_columns_grouped)),
+            )
+        };
 
-                (filtered_stats, matched_columns)
-            })
+        column_stats_future
             // stats and matched_columns should have the same length and their indexes should match
             .and_then(move |(filtered_stats, matched_columns)| {
                 ForeignKeyReference::stats_to_fkr_futures(
-                    db_url_str,
-                    table,
+                    &db_url_str_2,
+                    stats_cache_addr,
+                    table_clone_2,
                     filtered_stats,
                     matched_columns,
                 )
@@ -517,15 +538,67 @@ impl ForeignKeyReference {
             })
     }
 
+    /// Uses a given hashmap of parent column:(child/fk columns, original column references) and
+    /// TableColumnStats, calculate the matching column stats that are foreign keys as well as a
+    /// vector of tuples representing column matches: (parent FK column, child columns, original
+    /// references)
+    fn match_fk_column_stats(
+        stats: Vec<TableColumnStat>,
+        fk_columns_grouped: HashMap<String, (ChildColumns, OriginalColumnReferences)>,
+    ) -> (
+        Vec<TableColumnStat>,
+        Vec<(String, ChildColumns, OriginalColumnReferences)>,
+    ) {
+        // contains a tuple representing the (matched parent column name, child columns, and
+        // original column strings)
+        let mut matched_columns: Vec<(String, Vec<String>, Vec<String>)> = vec![];
+
+        // filter the table column stats to just the foreign key columns that match the
+        // given columns
+        let filtered_stats: Vec<TableColumnStat> = stats
+            .into_iter()
+            .filter(|stat| {
+                if !stat.is_foreign_key {
+                    return false;
+                }
+
+                match fk_columns_grouped
+                    .iter()
+                    .find(|(parent_col, _child_col_vec)| parent_col == &&stat.column_name)
+                {
+                    Some((
+                        matched_parent_fk_column,
+                        (matched_child_col_vec, matched_orig_refs),
+                    )) => {
+                        matched_columns.push((
+                            matched_parent_fk_column.to_string(),
+                            matched_child_col_vec
+                                .iter()
+                                .map(|s| s.to_string())
+                                .collect(),
+                            matched_orig_refs.clone(),
+                        ));
+                        true
+                    }
+                    None => false,
+                }
+            })
+            .collect();
+
+        (filtered_stats, matched_columns)
+    }
+
     /// Maps a Vec of `TableColumnStat`s to a Future wrapping a Vec of `ForeignKeyReference`s. Used
     /// by from_query_columns.
     fn stats_to_fkr_futures(
-        db_url_str: String,
+        db_url: &str,
+        stats_cache_addr: Arc<Option<Addr<StatsCache>>>,
         table: String,
         stats: Vec<TableColumnStat>,
         matched_columns: Vec<(String, Vec<String>, Vec<String>)>,
     ) -> impl Future<Item = Vec<Self>, Error = Error> {
         let mut fkr_futures = vec![];
+
         for (i, stat) in stats.into_iter().enumerate() {
             // stats.into_iter().enumerate().map(move |(i, stat)| {
             let (_parent_col_match, child_columns_match, original_refs_match) = &matched_columns[i];
@@ -569,18 +642,22 @@ impl ForeignKeyReference {
             }
 
             // child columns are all FKs, so we need to recursively call this function
-            let child_columns_future =
-                Self::from_query_columns(&db_url_str, foreign_key_table.clone(), child_fk_columns)
-                    .and_then(move |nested_fks| {
-                        Ok(ForeignKeyReference {
-                            referring_column: stat_column_name_clone,
-                            referring_table: table_clone,
-                            table_referred: foreign_key_table,
-                            foreign_key_column: stat_fk_column,
-                            nested_fks,
-                            original_refs,
-                        })
-                    });
+            let child_columns_future = Self::from_query_columns(
+                db_url,
+                Arc::clone(&stats_cache_addr),
+                foreign_key_table.clone(),
+                child_fk_columns,
+            )
+            .and_then(move |nested_fks| {
+                Ok(ForeignKeyReference {
+                    referring_column: stat_column_name_clone,
+                    referring_table: table_clone,
+                    table_referred: foreign_key_table,
+                    foreign_key_column: stat_fk_column,
+                    nested_fks,
+                    original_refs,
+                })
+            });
 
             fkr_futures.push(Either::B(child_columns_future));
         }
@@ -683,15 +760,15 @@ impl ForeignKeyReference {
 mod where_clause_str_to_ast_tests {
     use super::*;
     use pretty_assertions::assert_eq;
-    use sqlparser::sqlast::SQLOperator;
+    use sqlparser::ast::BinaryOperator;
 
     #[test]
     fn basic() {
         let clause = "a > b";
-        let expected = ASTNode::SQLBinaryExpr {
-            left: Box::new(ASTNode::SQLIdentifier("a".to_string())),
-            op: SQLOperator::Gt,
-            right: Box::new(ASTNode::SQLIdentifier("b".to_string())),
+        let expected = Expr::BinaryOp {
+            left: Box::new(Expr::Identifier("a".to_string())),
+            op: BinaryOperator::Gt,
+            right: Box::new(Expr::Identifier("b".to_string())),
         };
         assert_eq!(where_clause_str_to_ast(clause).unwrap().unwrap(), expected);
     }
@@ -699,13 +776,13 @@ mod where_clause_str_to_ast_tests {
     #[test]
     fn foreign_keys() {
         let clause = "a.b > c";
-        let expected = ASTNode::SQLBinaryExpr {
-            left: Box::new(ASTNode::SQLCompoundIdentifier(vec![
+        let expected = Expr::BinaryOp {
+            left: Box::new(Expr::CompoundIdentifier(vec![
                 "a".to_string(),
                 "b".to_string(),
             ])),
-            op: SQLOperator::Gt,
-            right: Box::new(ASTNode::SQLIdentifier("c".to_string())),
+            op: BinaryOperator::Gt,
+            right: Box::new(Expr::Identifier("c".to_string())),
         };
         assert_eq!(where_clause_str_to_ast(clause).unwrap().unwrap(), expected);
     }
@@ -737,8 +814,7 @@ mod fk_ast_nodes_from_where_ast {
 
     #[test]
     fn basic() {
-        let ast =
-            ASTNode::SQLCompoundIdentifier(vec!["a_column".to_string(), "b_column".to_string()]);
+        let ast = Expr::CompoundIdentifier(vec!["a_column".to_string(), "b_column".to_string()]);
 
         let mut borrowed = Rc::new(ast);
         let mut cloned = borrowed.clone();
@@ -753,7 +829,7 @@ mod fk_ast_nodes_from_where_ast {
 
     #[test]
     fn non_fk_nodes_return_empty_vec() {
-        let mut ast = ASTNode::SQLIdentifier("a_column".to_string());
+        let mut ast = Expr::Identifier("a_column".to_string());
         let expected = vec![];
 
         assert_eq!(fk_ast_nodes_from_where_ast(&mut ast), expected);
@@ -767,8 +843,7 @@ mod fk_columns_from_where_ast {
 
     #[test]
     fn basic() {
-        let ast =
-            ASTNode::SQLCompoundIdentifier(vec!["a_column".to_string(), "b_column".to_string()]);
+        let ast = Expr::CompoundIdentifier(vec!["a_column".to_string(), "b_column".to_string()]);
 
         let expected = vec!["a_column.b_column".to_string()];
 
@@ -777,7 +852,7 @@ mod fk_columns_from_where_ast {
 
     #[test]
     fn non_fk_nodes_return_empty_vec() {
-        let mut ast = ASTNode::SQLIdentifier("a_column".to_string());
+        let mut ast = Expr::Identifier("a_column".to_string());
         let expected = vec![];
 
         assert_eq!(fk_ast_nodes_from_where_ast(&mut ast), expected);

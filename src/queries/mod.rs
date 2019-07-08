@@ -12,7 +12,11 @@ pub use self::select_table_rows::select_table_rows;
 mod select_table_stats;
 pub use self::select_table_stats::{
     select_column_stats, select_column_stats_statement, select_table_stats, TableColumnStat,
+    TableStats,
 };
+
+mod select_table_stats_cache;
+pub use self::select_table_stats_cache::select_all_table_stats;
 
 pub mod postgres_types;
 pub mod query_types;

@@ -29,7 +29,7 @@ pub enum Error {
     },
 
     /// Describes errors that are generated due to system errors.
-    #[fail(display = "An internal error has occurred.")]
+    #[fail(display = "An internal error has occurred: {}. {}", message, details)]
     InternalError {
         category: MessageCategory,
         code: &'static str,
@@ -115,6 +115,24 @@ impl Error {
                 offender,
             },
 
+            "TABLE_STATS_CACHE_NOT_INITIALIZED" => Error::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "The Table Stats Cache has not yet started/finished fetching table stats.".to_string(),
+                http_status: 503,
+                message: "",
+                offender,
+            },
+
+            "TABLE_STATS_CACHE_NOT_AVAILABLE" => Error::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "Table stats do not exist for the referred table.".to_string(),
+                http_status: 400,
+                message: "",
+                offender,
+            },
+
             "UNSUPPORTED_DATA_TYPE" => Error::UserError {
                 category: MessageCategory::Error,
                 code: err_id,
@@ -182,11 +200,11 @@ impl From<serde_json::error::Error> for Error {
         }
     }
 }
-impl From<sqlparser::sqlparser::ParserError> for Error {
-    fn from(err: sqlparser::sqlparser::ParserError) -> Self {
+impl From<sqlparser::parser::ParserError> for Error {
+    fn from(err: sqlparser::parser::ParserError) -> Self {
         let details = match err {
-            sqlparser::sqlparser::ParserError::ParserError(err_str) => err_str,
-            sqlparser::sqlparser::ParserError::TokenizerError(err_str) => err_str,
+            sqlparser::parser::ParserError::ParserError(err_str) => err_str,
+            sqlparser::parser::ParserError::TokenizerError(err_str) => err_str,
         };
 
         Error::UserError {
@@ -196,6 +214,17 @@ impl From<sqlparser::sqlparser::ParserError> for Error {
             message: "A message occurred when parsing SQL.",
             offender: "".to_string(),
             http_status: 400,
+        }
+    }
+}
+impl<T> From<std::sync::PoisonError<T>> for Error {
+    fn from(err: std::sync::PoisonError<T>) -> Self {
+        Error::InternalError {
+            category: MessageCategory::Error,
+            code: "MEM_LOCK_ERROR",
+            details: format!("{}", err),
+            message: "A memory-locked process has failed.",
+            http_status: 500,
         }
     }
 }
