@@ -16,6 +16,7 @@ fn main() {
         let mut config = AppConfig::new();
         config.db_url = "postgresql://kaiby@localhost:5432/crossroads";
         config.is_cache_table_stats = true;
+        config.is_cache_reset_endpoint_enabled = true;
         config.cache_reset_interval_seconds = 300;
 
         App::new().service(

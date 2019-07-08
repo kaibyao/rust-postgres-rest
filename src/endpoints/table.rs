@@ -5,7 +5,7 @@ use actix_web::{
     HttpRequest, HttpResponse,
 };
 use futures::{
-    future::{err, Either},
+    future::{err, ok, Either},
     Future,
 };
 use serde_json::Value;
@@ -15,6 +15,7 @@ use crate::{
     queries::{
         insert_into_table, query_types, select_all_tables, select_table_rows, select_table_stats,
     },
+    stats_cache::StatsCacheMessage,
     AppState, Error,
 };
 use query_types::{QueryParamsInsert, QueryParamsSelect, RequestQueryStringParams};
@@ -92,4 +93,24 @@ fn get_table_stats(
 ) -> impl Future<Item = HttpResponse, Error = Error> {
     select_table_stats(state.get_ref(), table)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
+}
+
+/// Resets all caches (currently only Table Stats)
+pub fn reset_caches(state: web::Data<AppState>) -> impl Future<Item = HttpResponse, Error = Error> {
+    match &state.get_ref().stats_cache_addr {
+        Some(addr) => {
+            let reset_cache_future = addr
+                .send(StatsCacheMessage::ResetCache)
+                .map_err(Error::from)
+                .and_then(|response_result| match response_result {
+                    Ok(_response_ok) => ok(HttpResponseBuilder::new(StatusCode::OK).finish()),
+                    Err(e) => err(e),
+                });
+            Either::A(reset_cache_future)
+        }
+        None => Either::B(err(Error::generate_error(
+            "TABLE_STATS_CACHE_NOT_INITIALIZED",
+            "The cache to be reset was not found.".to_string(),
+        ))),
+    }
 }

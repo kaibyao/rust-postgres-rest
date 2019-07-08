@@ -16,7 +16,7 @@ mod error;
 mod queries;
 #[cfg(feature = "stats_cache")]
 mod stats_cache;
-use endpoints::{get_all_table_names, get_table, index, post_table};
+use endpoints::{get_all_table_names, get_table, index, post_table, reset_caches};
 
 pub use error::Error;
 use stats_cache::initialize_stats_cache;
@@ -27,21 +27,24 @@ use actix_web::{web, Scope};
 /// API Configuration
 #[derive(Clone)]
 pub struct AppConfig {
-    /// postgres-formatted URL.
+    /// The database URL. URL must be [Postgres-formatted](https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6).
     pub db_url: &'static str,
-    /// Table stats are retrieved when querying for foreign keys and on every INSERT operation.
-    /// Turning this on is suggested for production systems, as there is a noticeable improvement
-    /// to performance. Default: `false`.
+    /// Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When
+    /// set to `true`, caching of table stats is enabled, significantly speeding up API endpoings
+    /// that use `SELECT` and `INSERT` statements. Default: `false`.
     #[cfg(feature = "stats_cache")]
     pub is_cache_table_stats: bool,
-    /// Only applies when `is_cache_table_stats`. Enables another endpoint at `/stats_cache_reset`
-    /// that refreshes the table stats cache. Default: `false`.
+    /// Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When
+    /// set to `true`, an additional API endpoint is made available at
+    /// `{scope_name}/reset_table_stats_cache`, which allows for manual resetting of the Table
+    /// Stats cache. This is useful if you want a persistent cache that only needs to be reset on
+    /// upgrades, for example. Default: `false`.
     pub is_cache_reset_endpoint_enabled: bool,
-    /// Only applies when `is_cache_table_stats`. The amount of time in seconds that elapses
-    /// before the table stats cache automatically refreshes. Setting to `0` means it never
-    /// refreshes. Default: `0`.
+    /// Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When
+    /// set to a positive integer `n`, automatically refresh the Table Stats cache every `n`
+    /// seconds. Default: `0` (cache is never automatically reset).
     pub cache_reset_interval_seconds: u32,
-    /// The API endpoint that contains all of the table operation endpoints.
+    /// The API endpoint that contains all of the other API operations available in this library.
     pub scope_name: &'static str,
 }
 
@@ -85,11 +88,17 @@ impl AppState {
 pub fn generate_rest_api_scope(config: AppConfig) -> Scope {
     let mut state = AppState::new(config);
 
+    let mut scope = web::scope(state.config.scope_name);
+
     if state.config.is_cache_table_stats {
         initialize_stats_cache(&mut state);
+        scope = scope.route(
+            "/reset_table_stats_cache",
+            web::get().to_async(reset_caches),
+        );
     }
 
-    web::scope(state.config.scope_name)
+    scope
         .data(state)
         .route("", web::get().to(index))
         .route("/", web::get().to(index))

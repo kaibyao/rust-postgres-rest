@@ -37,6 +37,26 @@ fn main() {
 
 The `AppConfig` struct contains the configuration options used by this library.
 
+### `db_url: &'static str (default: "")`
+
+The database URL. URL must be [Postgres-formatted](https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6).
+
+### `is_cache_table_stats: bool (default: false)`
+
+Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to `true`, caching of table stats is enabled, significantly speeding up API endpoings that use `SELECT` and `INSERT` statements.
+
+### `is_cache_reset_endpoint_enabled: bool (default: false)`
+
+Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to `true`, an additional API endpoint is made available at `{scope_name}/reset_table_stats_cache`, which allows for manual resetting of the Table Stats cache. This is useful if you want a persistent cache that only needs to be reset on upgrades, for example.
+
+### `cache_reset_interval_seconds: u32 (default: 0)`
+
+Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to a positive integer `n`, automatically refresh the Table Stats cache every `n` seconds. When set to `0`, the cache is never automatically reset.
+
+### `scope_name: &'static str (default: "/api")`
+
+The API endpoint that contains all of the other API operations available in this library.
+
 ## Endpoints
 
 ### `GET /`
@@ -250,8 +270,6 @@ returns `[{ "id": 1002, "name": "Arya" }]`.
 1. Recreate the Table API.
 1. Add security, customizability, optimizations, etc.
 1. GraphQL API
-1. Cache table stats every X minutes (default 2, make it configurable).
-1. Optimization: Get rid of HashMap usage (convert to tuples or Serde_Json Maps)
 1. Optimization: Convert Strings to &str / statics.
 1. CSV, XML for REST API (nix for now?)
 1. gRPC/Flatbuffers/Cap'n Proto (nix for now?)

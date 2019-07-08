@@ -119,7 +119,7 @@ impl Error {
                 category: MessageCategory::Error,
                 code: err_id,
                 details: "The Table Stats Cache has not yet started/finished fetching table stats.".to_string(),
-                http_status: 400,
+                http_status: 503,
                 message: "",
                 offender,
             },
