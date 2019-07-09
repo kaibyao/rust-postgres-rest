@@ -103,8 +103,13 @@ pub fn index() -> HttpResponse {
                 },
                 "PUT|PATCH": {
                     "description": "Updates table records (not implemented).",
-                    "body": "An object whose key-values represent column names and the values to set",
+                    "body": "An object whose key-values represent column names and the values to set. String values must contain quotes or else they will be evaluated as expressions and not strings.",
                     "query_params": {
+                        "from": {
+                            "default": null,
+                            "description": "A comma-separated list of column names. Used for bulk updates.",
+                            "example": "column_a, column_b AS b, column_c c",
+                        },
                         "where": {
                             "default": null,
                             "description": "The WHERE clause of the UPDATE statement. Remember to URI-encode the final result. NOTE: $1, $2, etc. can be used in combination with `prepared_values` to create prepared statements (see https://www.postgresql.org/docs/current/sql-prepare.html).",
@@ -115,6 +120,11 @@ pub fn index() -> HttpResponse {
                             "description": "If the WHERE clause contains ${number}, this comma-separated list of values is used to substitute the numbered parameters.",
                             "example": "col2,'Test'",
                         },
+                        "returning_columns": {
+                            "default": null,
+                            "description": "Comma-separated list of columns to return from the UPDATE operation.",
+                            "example": "id,name,field_2",
+                        }
                     },
                 },
                 "DELETE": {

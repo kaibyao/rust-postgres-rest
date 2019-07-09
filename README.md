@@ -268,6 +268,7 @@ returns `[{ "id": 1002, "name": "Arya" }]`.
 ## To dos
 
 1. Recreate the Table API.
+1. Shortened alias syntax ("some_table a" vs "some_table AS a")
 1. Add security, customizability, optimizations, etc.
 1. GraphQL API
 1. Optimization: Convert Strings to &str / statics.

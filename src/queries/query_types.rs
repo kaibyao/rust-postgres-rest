@@ -20,6 +20,9 @@ pub struct RequestQueryStringParams {
     /// A comma-separated list of column names for which rows that have duplicate values are
     /// excluded (in a GET/SELECT statement).
     pub distinct: Option<String>,
+    /// The FROM clause of an UPDATE statement. Comma-separated list of columns. Does not accept
+    /// sub-queries (use /sql endpoint if more advanced expressions are needed).
+    pub from: Option<String>,
     /// The WHERE clause of the SQL statement. Remember to URI-encode the final result. NOTE: $1, $2, etc. can be used in combination with `prepared_values` to create prepared statements (see https://www.postgresql.org/docs/current/sql-prepare.html).
     pub r#where: Option<String>,
     /// Comma-separated list representing the field(s) on which to group the resulting rows (in a
@@ -170,7 +173,7 @@ impl QueryParamsInsert {
                 if columns_str == "" {
                     return Err(Error::generate_error(
                         "INCORRECT_REQUEST_BODY",
-                        "`conflict_target` must be a comma-separated list of column names and include at least one column name.".to_string(),
+                        "`returning_columns` must be a comma-separated list of column names and include at least one column name.".to_string(),
                     ));
                 }
 
@@ -206,6 +209,58 @@ impl QueryParamsInsert {
             returning_columns,
             rows,
             table: req.match_info().query("table").to_lowercase(),
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct QueryParamsUpdate {
+    pub body: Value,
+    pub from: Option<Vec<String>>,
+    pub prepared_values: Option<String>,
+    pub returning_columns: Option<Vec<String>>,
+    pub table: String,
+    pub r#where: Option<String>,
+}
+
+impl QueryParamsUpdate {
+    pub fn from_http_request(
+        req: &HttpRequest,
+        body: Value,
+        query_string_params: RequestQueryStringParams,
+    ) -> Result<Self, Error> {
+        let from = match query_string_params.from {
+            Some(from_str) => Some(normalize_columns(&from_str)?),
+            None => None,
+        };
+        let prepared_values = match query_string_params.prepared_values {
+            Some(prepared_values) => Some(prepared_values.to_string()),
+            None => None,
+        };
+        let returning_columns = match query_string_params.returning_columns {
+            Some(columns_str) => {
+                if columns_str == "" {
+                    return Err(Error::generate_error(
+                        "INCORRECT_REQUEST_BODY",
+                        "`returning_columns` must be a comma-separated list of column names and include at least one column name.".to_string(),
+                    ));
+                }
+
+                let returning_columns_vec = normalize_columns(&columns_str)?;
+                Some(returning_columns_vec)
+            }
+            None => None,
+        };
+        let table = req.match_info().query("table").to_lowercase();
+        let r#where = query_string_params.r#where;
+
+        Ok(QueryParamsUpdate {
+            body,
+            from,
+            prepared_values,
+            returning_columns,
+            table,
+            r#where,
         })
     }
 }

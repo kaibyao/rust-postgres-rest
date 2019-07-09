@@ -14,11 +14,14 @@ use crate::{
     db::connect,
     queries::{
         insert_into_table, query_types, select_all_tables, select_table_rows, select_table_stats,
+        update_table_rows,
     },
     stats_cache::StatsCacheMessage,
     AppState, Error,
 };
-use query_types::{QueryParamsInsert, QueryParamsSelect, RequestQueryStringParams};
+use query_types::{
+    QueryParamsInsert, QueryParamsSelect, QueryParamsUpdate, RequestQueryStringParams,
+};
 
 /// Retrieves a list of table names that exist in the DB.
 pub fn get_all_table_names(
@@ -28,35 +31,6 @@ pub fn get_all_table_names(
         .map_err(Error::from)
         .and_then(|client| select_all_tables(client).map_err(Error::from))
         .and_then(|(rows, _client)| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
-}
-
-/// Inserts new rows into a table. Returns the number of rows affected.
-pub fn post_table(
-    req: HttpRequest,
-    state: web::Data<AppState>,
-    body: Json<Value>,
-    query_string_params: web::Query<RequestQueryStringParams>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
-    let actual_body = body.into_inner();
-    let params = match QueryParamsInsert::from_http_request(
-        &req,
-        actual_body,
-        query_string_params.into_inner(),
-    ) {
-        Ok(insert_params) => insert_params,
-        Err(e) => {
-            return Either::A(err(e));
-        }
-    };
-
-    let insert_response = connect(state.config.db_url)
-        .map_err(Error::from)
-        .and_then(|client| insert_into_table(client, params))
-        .and_then(|num_rows_affected| {
-            Ok(HttpResponseBuilder::new(StatusCode::OK).json(num_rows_affected))
-        });
-
-    Either::B(insert_response)
 }
 
 /// Queries a table using SELECT.
@@ -93,6 +67,68 @@ fn get_table_stats(
 ) -> impl Future<Item = HttpResponse, Error = Error> {
     select_table_stats(state.get_ref(), table)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
+}
+
+/// Inserts new rows into a table. Returns the number of rows affected.
+pub fn post_table(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+    body: Option<Json<Value>>,
+    query_string_params: web::Query<RequestQueryStringParams>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    let actual_body = match body {
+        Some(body) => body.into_inner(),
+        None => return Either::A(err(Error::generate_error("INCORRECT_REQUEST_BODY", "Request body is required. Body must be a JSON array of objects where each object represents a row and whose key-values represent column names and their values.".to_string())))
+    };
+    let params = match QueryParamsInsert::from_http_request(
+        &req,
+        actual_body,
+        query_string_params.into_inner(),
+    ) {
+        Ok(insert_params) => insert_params,
+        Err(e) => {
+            return Either::A(err(e));
+        }
+    };
+
+    let insert_response = connect(state.config.db_url)
+        .map_err(Error::from)
+        .and_then(|client| insert_into_table(client, params))
+        .and_then(|num_rows_affected| {
+            Ok(HttpResponseBuilder::new(StatusCode::OK).json(num_rows_affected))
+        });
+
+    Either::B(insert_response)
+}
+
+/// Runs an UPDATE query and returns either rows affected or row columns if specified.
+pub fn put_table(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+    body: Option<Json<Value>>,
+    query_string_params: web::Query<RequestQueryStringParams>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    let actual_body = match body {
+        Some(body) => body.into_inner(),
+        None => return Either::A(err(Error::generate_error("INCORRECT_REQUEST_BODY", "Request body is required. Body must be a JSON object whose key-values represent column names and the values to set. String values must contain quotes or else they will be evaluated as expressions and not strings.".to_string())))
+    };
+
+    let params = match QueryParamsUpdate::from_http_request(
+        &req,
+        actual_body,
+        query_string_params.into_inner(),
+    ) {
+        Ok(params) => params,
+        Err(e) => {
+            return Either::A(err(e));
+        }
+    };
+
+    let response = update_table_rows(state.get_ref(), params).and_then(|num_rows_affected| {
+        Ok(HttpResponseBuilder::new(StatusCode::OK).json(num_rows_affected))
+    });
+
+    Either::B(response)
 }
 
 /// Resets all caches (currently only Table Stats)

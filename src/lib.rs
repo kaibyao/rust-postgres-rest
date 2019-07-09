@@ -16,7 +16,7 @@ mod error;
 mod queries;
 #[cfg(feature = "stats_cache")]
 mod stats_cache;
-use endpoints::{get_all_table_names, get_table, index, post_table, reset_caches};
+use endpoints::{get_all_table_names, get_table, index, post_table, put_table, reset_caches};
 
 pub use error::Error;
 use stats_cache::initialize_stats_cache;
@@ -106,6 +106,8 @@ pub fn generate_rest_api_scope(config: AppConfig) -> Scope {
         .service(
             web::resource("/{table}")
                 .route(web::get().to_async(get_table))
-                .route(web::post().to_async(post_table)),
+                .route(web::post().to_async(post_table))
+                .route(web::patch().to_async(put_table))
+                .route(web::put().to_async(put_table)),
         )
 }

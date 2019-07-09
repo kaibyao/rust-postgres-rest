@@ -18,6 +18,9 @@ pub use self::select_table_stats::{
 mod select_table_stats_cache;
 pub use self::select_table_stats_cache::select_all_table_stats;
 
+mod update_table_rows;
+pub use update_table_rows::update_table_rows;
+
 pub mod postgres_types;
 pub mod query_types;
 
