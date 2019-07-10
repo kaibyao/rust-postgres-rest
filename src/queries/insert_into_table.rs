@@ -10,15 +10,11 @@ use super::{
     postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
     query_types::{QueryParamsInsert, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement},
+    utils::{generate_returning_clause, UpsertResult},
 };
 use crate::Error;
 
 static INSERT_ROWS_BATCH_COUNT: usize = 100;
-
-enum InsertResult {
-    Rows(Vec<RowFields>),
-    NumRowsAffected(u64),
-}
 
 /// Runs an INSERT INTO <table> query
 pub fn insert_into_table(
@@ -85,10 +81,10 @@ pub fn insert_into_table(
                                 execute_insert(conn, params, column_types, &insert_batches[i])
                                     .and_then(move |(conn, params, column_types, insert_result)| {
                                         match insert_result {
-                                            InsertResult::NumRowsAffected(num_rows_affected) => {
+                                            UpsertResult::NumRowsAffected(num_rows_affected) => {
                                                 total_num_rows_affected += num_rows_affected;
                                             }
-                                            InsertResult::Rows(rows) => {
+                                            UpsertResult::Rows(rows) => {
                                                 total_rows_returned.extend(rows);
                                             }
                                         };
@@ -148,10 +144,10 @@ pub fn insert_into_table(
                 let simple_insert_future =
                     execute_insert(conn, params, column_types, &rows).then(|result| match result {
                         Ok((_conn, _params, _column_types, insert_result)) => match insert_result {
-                            InsertResult::NumRowsAffected(num_rows_affected) => {
+                            UpsertResult::NumRowsAffected(num_rows_affected) => {
                                 Ok(QueryResult::from_num_rows_affected(num_rows_affected))
                             }
-                            InsertResult::Rows(rows) => Ok(QueryResult::QueryTableResult(rows)),
+                            UpsertResult::Rows(rows) => Ok(QueryResult::QueryTableResult(rows)),
                         },
                         Err((e, _client)) => Err(e),
                     });
@@ -173,7 +169,7 @@ fn execute_insert<'a>(
         Client,
         QueryParamsInsert,
         HashMap<String, String>,
-        InsertResult,
+        UpsertResult,
     ),
     Error = (Error, Client),
 > {
@@ -181,11 +177,11 @@ fn execute_insert<'a>(
 
     // parse out the columns that have values to assign
     let columns = get_all_columns_to_insert(rows);
-    let (values_params_str, column_values) = match get_insert_params(rows, &columns, &column_types)
-    {
-        Ok((values_params_str, column_values)) => (values_params_str, column_values),
-        Err(e) => return Either::A(err((e, conn))),
-    };
+    let (values_params_str, column_values) =
+        match generate_insert_params(rows, &columns, &column_types) {
+            Ok((values_params_str, column_values)) => (values_params_str, column_values),
+            Err(e) => return Either::A(err((e, conn))),
+        };
 
     // generate the ON CONFLICT string
     let conflict_clause = match generate_conflict_str(&params, &columns) {
@@ -194,7 +190,7 @@ fn execute_insert<'a>(
     };
 
     // generate the RETURNING string
-    let returning_clause = match generate_returning_clause(&params) {
+    let returning_clause = match generate_returning_clause(&params.returning_columns) {
         Some(returning_str) => {
             is_return_rows = true;
             returning_str
@@ -262,7 +258,7 @@ fn execute_insert<'a>(
                                 .collect::<Result<Vec<RowFields>, Error>>()
                             {
                                 Ok(row_fields) => {
-                                    Ok((conn, params, column_types, InsertResult::Rows(row_fields)))
+                                    Ok((conn, params, column_types, UpsertResult::Rows(row_fields)))
                                 }
                                 Err(e) => Err((e, conn)),
                             }
@@ -280,7 +276,7 @@ fn execute_insert<'a>(
                                 conn,
                                 params,
                                 column_types,
-                                InsertResult::NumRowsAffected(num_rows),
+                                UpsertResult::NumRowsAffected(num_rows),
                             )),
                             Err(e) => Err((Error::from(e), conn)),
                         });
@@ -337,14 +333,6 @@ fn generate_conflict_str(params: &QueryParamsInsert, columns: &[&str]) -> Option
     None
 }
 
-fn generate_returning_clause(params: &QueryParamsInsert) -> Option<String> {
-    if let Some(returning_columns) = &params.returning_columns {
-        return Some([" RETURNING ", &returning_columns.join(", ")].join(""));
-    }
-
-    None
-}
-
 /// Searches all rows being inserted and returns a vector containing all of the column names
 fn get_all_columns_to_insert<'a>(rows: &'a [Map<String, Value>]) -> Vec<&'a str> {
     // parse out the columns that have values to assign
@@ -361,7 +349,7 @@ fn get_all_columns_to_insert<'a>(rows: &'a [Map<String, Value>]) -> Vec<&'a str>
 
 /// Returns a Result containing the tuple that contains (the VALUES parameter string, the array of
 /// parameter values)
-fn get_insert_params(
+fn generate_insert_params(
     rows: &[Map<String, Value>],
     columns: &[&str],
     column_types: &HashMap<String, String>,

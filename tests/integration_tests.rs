@@ -586,6 +586,23 @@ fn post_table_records() {
 }
 
 #[test]
+fn post_table_records_no_body() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/test_insert",
+    ]
+    .join("");
+    let res = Client::new().request(Method::POST, &url).send().unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
 fn post_table_records_returning_columns() {
     run_setup();
 

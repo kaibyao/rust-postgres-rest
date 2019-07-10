@@ -96,7 +96,7 @@ impl QueryParamsSelect {
                 None => default_offset,
             },
             prepared_values: match query_string_params.prepared_values {
-                Some(prepared_values) => Some(prepared_values.to_string()),
+                Some(prepared_values) => Some(prepared_values.clone()),
                 None => None,
             },
         };
@@ -214,13 +214,19 @@ impl QueryParamsInsert {
 }
 
 #[derive(Debug)]
+/// Parameters used to generate an `UPDATE` SQL statement.
 pub struct QueryParamsUpdate {
-    pub body: Value,
+    /// A JSON object whose key-values represent column names and the values to set.
+    pub column_values: Map<String, Value>,
+    /// WHERE expression.
+    pub conditions: Option<String>,
+    /// List of tables.
     pub from: Option<Vec<String>>,
     pub prepared_values: Option<String>,
+    /// List of (foreign key) columns whose values are returned.
     pub returning_columns: Option<Vec<String>>,
+    // Name of table to update.
     pub table: String,
-    pub r#where: Option<String>,
 }
 
 impl QueryParamsUpdate {
@@ -229,12 +235,19 @@ impl QueryParamsUpdate {
         body: Value,
         query_string_params: RequestQueryStringParams,
     ) -> Result<Self, Error> {
+        let column_values = match body.as_object() {
+            Some(column_values) => column_values.clone(),
+            None => return Err(Error::generate_error(
+                "INCORRECT_REQUEST_BODY",
+                "Request body must be a JSON object whose key-values represent column names and the values to set. String values must contain quotes or else they will be evaluated as expressions and not strings.".to_string(),
+            ))
+        };
         let from = match query_string_params.from {
             Some(from_str) => Some(normalize_columns(&from_str)?),
             None => None,
         };
         let prepared_values = match query_string_params.prepared_values {
-            Some(prepared_values) => Some(prepared_values.to_string()),
+            Some(prepared_values) => Some(prepared_values.clone()),
             None => None,
         };
         let returning_columns = match query_string_params.returning_columns {
@@ -252,15 +265,18 @@ impl QueryParamsUpdate {
             None => None,
         };
         let table = req.match_info().query("table").to_lowercase();
-        let r#where = query_string_params.r#where;
+        let conditions = match query_string_params.r#where {
+            Some(where_string) => Some(where_string.trim().to_lowercase()),
+            None => None,
+        };
 
         Ok(QueryParamsUpdate {
-            body,
+            column_values,
+            conditions,
             from,
             prepared_values,
             returning_columns,
             table,
-            r#where,
         })
     }
 }

@@ -5,9 +5,6 @@
 // to serialize large json (like the index)
 #![recursion_limit = "128"]
 
-/// Provides endpoints that can be used by `actix-web` to serve a REST API for a PostgreSQL
-/// database.
-
 /// Individual endpoints that can be applied to actix routes using `.to_async()`.
 pub mod endpoints;
 

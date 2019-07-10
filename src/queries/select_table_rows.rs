@@ -15,16 +15,12 @@ use super::{
     },
     postgres_types::{convert_row_fields, RowFields},
     query_types::QueryParamsSelect,
-    utils::{validate_alias_identifier, validate_table_name, validate_where_column},
+    utils::{
+        validate_alias_identifier, validate_table_name, validate_where_column,
+        PreparedStatementValue,
+    },
 };
 use crate::{db::connect, AppState, Error};
-
-#[derive(Debug, PartialEq)]
-enum PreparedStatementValue {
-    String(String),
-    Int8(i64),
-    Int4(i32),
-}
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query
 pub fn select_table_rows(
@@ -32,7 +28,7 @@ pub fn select_table_rows(
     params: QueryParamsSelect,
 ) -> impl Future<Item = Vec<RowFields>, Error = Error> {
     if let Err(e) = validate_table_name(&params.table) {
-        return Either::A(err::<Vec<RowFields>, Error>(e));
+        return Either::A(err(e));
     }
 
     // get list of every column being used in the query params (columns, where, distinct, group_by,
@@ -57,7 +53,7 @@ pub fn select_table_rows(
                 None => Expr::Identifier("".to_string()),
             },
             Err(_e) => {
-                return Either::A(err::<Vec<RowFields>, Error>(Error::generate_error(
+                return Either::A(err(Error::generate_error(
                     "INVALID_SQL_SYNTAX",
                     ["WHERE", where_clause_str].join(":"),
                 )));
@@ -65,9 +61,8 @@ pub fn select_table_rows(
         },
         None => Expr::Identifier("".to_string()),
     };
-    let where_fk_columns = fk_columns_from_where_ast(&where_ast);
+    columns.extend(fk_columns_from_where_ast(&where_ast));
 
-    columns.extend(where_fk_columns);
     if let Some(v) = &params.distinct {
         columns.extend(v.clone());
     }
@@ -95,7 +90,7 @@ pub fn select_table_rows(
         let (statement_str, prepared_values) =
             match build_select_statement(params, fk_columns, where_ast) {
                 Ok((stmt, prep_vals)) => (stmt, prep_vals),
-                Err(e) => return Either::A(err::<Vec<RowFields>, Error>(e)),
+                Err(e) => return Either::A(err(e)),
             };
 
         // sending prepared statement to postgres

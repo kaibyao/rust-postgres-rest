@@ -1,6 +1,30 @@
+use super::postgres_types::RowFields;
 use crate::Error;
 use lazy_static::lazy_static;
 use regex::Regex;
+
+#[derive(Debug, PartialEq)]
+/// Possible values that can be passed into a prepared statement Vec.
+pub enum PreparedStatementValue {
+    String(String),
+    Int8(i64),
+    Int4(i32),
+}
+
+/// Uused for returning either number of rows or actual row values in INSERT/UPDATE statements.
+pub enum UpsertResult {
+    Rows(Vec<RowFields>),
+    NumRowsAffected(u64),
+}
+
+/// Takes a string of columns and returns the RETURNING clause of an INSERT or UPDATE statement.
+pub fn generate_returning_clause(returning_columns_opt: &Option<Vec<String>>) -> Option<String> {
+    if let Some(returning_columns) = returning_columns_opt {
+        return Some([" RETURNING ", &returning_columns.join(", ")].join(""));
+    }
+
+    None
+}
 
 /// Given a string of column names separated by commas, convert and return a vector of lowercase
 /// strings.
