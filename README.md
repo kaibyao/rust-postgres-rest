@@ -79,7 +79,7 @@ A comma-separated list of column names for which rows that have duplicate values
 
 ##### where
 
-The WHERE clause of a SELECT statement. Remember to URI-encode the final result. NOTE: $1, $2, etc. can be used in combination with `prepared_values` to create prepared statements ([see PostgreSQL Docs](https://www.postgresql.org/docs/current/sql-prepare.html)). Example: `(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1`.
+The WHERE clause of a SELECT statement. Remember to URI-encode the final result. Example: `(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1`.
 
 ##### group_by
 
@@ -96,10 +96,6 @@ The maximum number of rows that can be returned. Default: `10000`.
 ##### offset
 
 The number of rows to exclude. Default: `0`.
-
-##### prepared_values
-
-If the WHERE clause contains \${number}, this comma-separated list of values is used to substitute the numbered parameters. Example: `col2,'Test'`.
 
 #### Foreign key syntax (`.`) for easier relationship traversal
 
@@ -269,6 +265,7 @@ returns `[{ "id": 1002, "name": "Arya" }]`.
 
 1. Recreate the Table API.
 1. Shortened alias syntax ("some_table a" vs "some_table AS a")
+1. parallelize all iters (with Rayon + par_iter).
 1. Add security, customizability, optimizations, etc.
 1. GraphQL API
 1. Optimization: Convert Strings to &str / statics.

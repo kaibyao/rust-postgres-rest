@@ -192,28 +192,6 @@ fn get_table_records_simple_where() {
 }
 
 #[test]
-fn get_table_records_prepared_statement() {
-    run_setup();
-    let expected_response_body = json!([{"id": 46_327_143_679_919_107i64, "test_name": "a name"}]);
-
-    // test the non-cached path
-    let url = ["http://", &SERVER_IP, ":", &NO_CACHE_PORT, "/api/test_fields?columns=id,test_name&where=id%20%3D%20%241%20AND%20test_name%20%3D%20%242&prepared_values=46327143679919107,%27a%20name%27"].join("");
-    let mut res = reqwest::get(&url).unwrap();
-    let response_body: Value = res.json().unwrap();
-
-    assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(response_body, expected_response_body);
-
-    // test the cached path
-    let url = ["http://", &SERVER_IP, ":", &CACHE_PORT, "/api/test_fields?columns=id,test_name&where=id%20%3D%20%241%20AND%20test_name%20%3D%20%242&prepared_values=46327143679919107,%27a%20name%27"].join("");
-    let mut res = reqwest::get(&url).unwrap();
-    let response_body: Value = res.json().unwrap();
-
-    assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(response_body, expected_response_body);
-}
-
-#[test]
 fn get_table_record_aggregates() {
     run_setup();
     let expected_response_body = json!([{"id": 46_327_143_679_919_107i64, "count": 1}]);

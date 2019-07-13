@@ -2,9 +2,9 @@ version: '3.1'
 
 services:
   db:
-    image: postgres
+    image: postgres:cached
     restart: always
     environment:
       POSTGRES_PASSWORD: example # user = postgres
     ports:
-    - 5433:5432
+      - 5433:5432

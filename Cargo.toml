@@ -8,10 +8,6 @@ edition = "2018"
 name = "experiment00"
 path = "src/lib.rs"
 
-[[bin]]
-name = "experiment00example"
-path = "src/main.rs"
-
 [features]
 default = ["stats_cache"]
 stats_cache = ["clokwerk", "tokio"]

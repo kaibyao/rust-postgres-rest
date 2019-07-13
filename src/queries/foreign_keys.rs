@@ -1,10 +1,6 @@
 use actix::Addr;
 use futures::future::{err, join_all, ok, Either, Future};
-use sqlparser::{
-    ast::{Expr, Function, SetExpr, Statement},
-    dialect::Dialect,
-    parser::Parser,
-};
+use sqlparser::ast::{Expr, Function};
 use std::{
     borrow::{Borrow, BorrowMut},
     collections::HashMap,
@@ -19,48 +15,6 @@ use crate::{
     stats_cache::{StatsCache, StatsCacheMessage, StatsCacheResponse},
     Error,
 };
-
-#[derive(Debug)]
-struct PgDialectWithPreparedStatement;
-impl Dialect for PgDialectWithPreparedStatement {
-    fn is_identifier_start(&self, ch: char) -> bool {
-        (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch == '@') || ch == '$'
-    }
-
-    fn is_identifier_part(&self, ch: char) -> bool {
-        (ch >= 'a' && ch <= 'z')
-            || (ch >= 'A' && ch <= 'Z')
-            || (ch >= '0' && ch <= '9')
-            || (ch == '@')
-            || ch == '_'
-    }
-}
-
-/// Converts a WHERE clause string into an Expr.
-pub fn where_clause_str_to_ast(clause: &str) -> Result<Option<Expr>, Error> {
-    let full_statement = ["SELECT * FROM a_table WHERE ", clause].join("");
-    let dialect = PgDialectWithPreparedStatement;
-
-    // convert the statement into an AST, and then extract the "WHERE" portion of the AST
-    let mut parsed = Parser::parse_sql(&dialect, full_statement)?;
-    let statement_ast = parsed.remove(0);
-
-    if let Statement::Query(query_box) = statement_ast {
-        return Ok(extract_where_ast_from_setexpr(query_box.to_owned().body));
-    }
-
-    Ok(None)
-}
-
-/// Finds and returns the Expr that represents the WHERE clause of a SELECT statement
-fn extract_where_ast_from_setexpr(expr: SetExpr) -> Option<Expr> {
-    match expr {
-        SetExpr::Query(boxed_sql_query) => extract_where_ast_from_setexpr(boxed_sql_query.body),
-        SetExpr::Select(select_box) => select_box.to_owned().selection,
-        SetExpr::SetOperation { .. } => unimplemented!("Set operations not supported"),
-        SetExpr::Values(_) => unimplemented!("Values not supported"),
-    }
-}
 
 /// Extracts the foreign key Exprs from a WHERE Expr.
 pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
@@ -753,56 +707,6 @@ impl ForeignKeyReference {
         }
 
         join_data
-    }
-}
-
-#[cfg(test)]
-mod where_clause_str_to_ast_tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-    use sqlparser::ast::BinaryOperator;
-
-    #[test]
-    fn basic() {
-        let clause = "a > b";
-        let expected = Expr::BinaryOp {
-            left: Box::new(Expr::Identifier("a".to_string())),
-            op: BinaryOperator::Gt,
-            right: Box::new(Expr::Identifier("b".to_string())),
-        };
-        assert_eq!(where_clause_str_to_ast(clause).unwrap().unwrap(), expected);
-    }
-
-    #[test]
-    fn foreign_keys() {
-        let clause = "a.b > c";
-        let expected = Expr::BinaryOp {
-            left: Box::new(Expr::CompoundIdentifier(vec![
-                "a".to_string(),
-                "b".to_string(),
-            ])),
-            op: BinaryOperator::Gt,
-            right: Box::new(Expr::Identifier("c".to_string())),
-        };
-        assert_eq!(where_clause_str_to_ast(clause).unwrap().unwrap(), expected);
-    }
-
-    #[test]
-    fn empty_string_returns_error() {
-        let clause = "";
-        assert!(where_clause_str_to_ast(clause).is_err());
-    }
-
-    #[test]
-    fn empty_parentheses_returns_err() {
-        let clause = "()";
-        assert!(where_clause_str_to_ast(clause).is_err());
-    }
-
-    #[test]
-    fn invalid_clause_returns_err() {
-        let clause = "not valid WHERE syntax";
-        assert!(where_clause_str_to_ast(clause).is_err());
     }
 }
 

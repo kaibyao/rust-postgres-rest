@@ -52,7 +52,7 @@ pub fn index() -> HttpResponse {
                         },
                         "where": {
                             "default": null,
-                            "description": "The WHERE clause of a SELECT statement. Remember to URI-encode the final result. NOTE: $1, $2, etc. can be used in combination with `prepared_values` to create prepared statements (see https://www.postgresql.org/docs/current/sql-prepare.html).",
+                            "description": "The WHERE clause of a SELECT statement. Remember to URI-encode the final result.",
                             "example": "(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1",
                         },
                         "group_by": {
@@ -72,11 +72,6 @@ pub fn index() -> HttpResponse {
                         "offset": {
                             "default": 0,
                             "description": "The number of rows to exclude.",
-                        },
-                        "prepared_values": {
-                            "default": null,
-                            "description": "If the WHERE clause contains ${number}, this comma-separated list of values is used to substitute the numbered parameters.",
-                            "example": "col2,'Test'",
                         },
                     }
                 },
@@ -103,7 +98,7 @@ pub fn index() -> HttpResponse {
                 },
                 "PUT|PATCH": {
                     "description": "Updates table records (not implemented).",
-                    "body": "An object whose key-values represent column names and the values to set. String values must contain quotes or else they will be evaluated as expressions and not strings.",
+                    "body": "An object whose key-values represent column names and the values to set. String values must contain quotes or else they will be evaluated as expressions and not strings. Example: {\"some_column\": \"\\\"some_string_value\\\"\"}",
                     "query_params": {
                         "from": {
                             "default": null,
@@ -112,13 +107,8 @@ pub fn index() -> HttpResponse {
                         },
                         "where": {
                             "default": null,
-                            "description": "The WHERE clause of the UPDATE statement. Remember to URI-encode the final result. NOTE: $1, $2, etc. can be used in combination with `prepared_values` to create prepared statements (see https://www.postgresql.org/docs/current/sql-prepare.html).",
+                            "description": "The WHERE clause of the UPDATE statement. Remember to URI-encode the final result.",
                             "example": "(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1",
-                        },
-                        "prepared_values": {
-                            "default": null,
-                            "description": "If the WHERE clause contains ${number}, this comma-separated list of values is used to substitute the numbered parameters.",
-                            "example": "col2,'Test'",
                         },
                         "returning_columns": {
                             "default": null,
@@ -132,13 +122,8 @@ pub fn index() -> HttpResponse {
                     "query_params": {
                         "where": {
                             "default": null,
-                            "description": "The WHERE clause of the DELETE statement. Remember to URI-encode the final result. NOTE: $1, $2, etc. can be used in combination with `prepared_values` to create prepared statements (see https://www.postgresql.org/docs/current/sql-prepare.html).",
+                            "description": "The WHERE clause of the DELETE statement. Remember to URI-encode the final result.",
                             "example": "(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1",
-                        },
-                        "prepared_values": {
-                            "default": null,
-                            "description": "If the WHERE clause contains ${number}, this comma-separated list of values is used to substitute the numbered parameters.",
-                            "example": "col2,'Test'",
                         },
                         "confirm_delete": {
                             "default": null,
@@ -148,7 +133,7 @@ pub fn index() -> HttpResponse {
                 },
             }},
             "/sql": {
-                "GET|POST|PUT|PATCH|DELETE": "Runs a raw SQL statement. (not implemented)",
+                "POST": "Runs a raw SQL statement. (not implemented)",
             },
         });
     }

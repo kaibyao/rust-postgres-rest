@@ -9,15 +9,12 @@ use std::sync::Arc;
 use tokio_postgres::types::ToSql;
 
 use super::{
-    foreign_keys::{
-        fk_ast_nodes_from_where_ast, fk_columns_from_where_ast, where_clause_str_to_ast,
-        ForeignKeyReference,
-    },
+    foreign_keys::{fk_ast_nodes_from_where_ast, fk_columns_from_where_ast, ForeignKeyReference},
     postgres_types::{convert_row_fields, RowFields},
     query_types::QueryParamsSelect,
     utils::{
-        validate_alias_identifier, validate_table_name, validate_where_column,
-        PreparedStatementValue,
+        generate_prepared_statement_from_ast_expr, validate_alias_identifier, validate_table_name,
+        validate_where_column, where_clause_str_to_ast, PreparedStatementValue,
     },
 };
 use crate::{db::connect, AppState, Error};
@@ -103,17 +100,7 @@ pub fn select_table_rows(
                         let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
                             vec![]
                         } else {
-                            prepared_values
-                                .iter()
-                                .map(|val| {
-                                    let val_to_sql: &dyn ToSql = match val {
-                                        PreparedStatementValue::Int4(val_i32) => val_i32,
-                                        PreparedStatementValue::Int8(val_i64) => val_i64,
-                                        PreparedStatementValue::String(val_string) => val_string,
-                                    };
-                                    val_to_sql
-                                })
-                                .collect()
+                            prepared_values.iter().map(|val| val.to_sql()).collect()
                         };
 
                         conn.query(&statement, &prep_values)
@@ -177,47 +164,57 @@ fn build_select_statement(
 
     // building WHERE string
     let where_str = params.conditions.as_ref().map_or("", |s| s.as_str());
-    let where_string = get_where_string(where_str, &mut where_ast, &params.table, &fks);
+    let mut where_string = get_where_string(where_str, &mut where_ast, &params.table, &fks);
 
     let mut prepared_values = vec![];
     if &where_string != "" {
         statement.push(" WHERE (");
+
+        // parse through the `WHERE` AST and return a tuple: (expression-with-prepared-params
+        // string, Vec of tuples (position, Value)).
+        let (where_string_with_prepared_positions, prepared_values_vec) =
+            generate_prepared_statement_from_ast_expr(&where_ast)?;
+        where_string = where_string_with_prepared_positions;
+        prepared_values = prepared_values_vec;
+
         statement.push(&where_string);
         statement.push(")");
 
-        if let Some(prepared_values_opt) = &params.prepared_values {
-            lazy_static! {
-                // need to parse integer strings as i32 or i64 so we don’t run into conversion errors
-                // (because rust-postgres attempts to convert really large integer strings as i32, which fails)
-                static ref INTEGER_RE: Regex = Regex::new(r"^\d+$").unwrap();
+        // todo: remove this block after generate_prepared_statement_from_ast is finished.
+        // if let Some(prepared_values_opt) = &params.prepared_values {
+        //     lazy_static! {
+        //         // need to parse integer strings as i32 or i64 so we don’t run into conversion
+        // errors         // (because rust-postgres attempts to convert really large integer
+        // strings as i32, which fails)         static ref INTEGER_RE: Regex =
+        // Regex::new(r"^\d+$").unwrap();
 
-                // anything in quotes should be forced as a string
-                static ref STRING_RE: Regex = Regex::new(r#"^['"](.+)['"]$"#).unwrap();
-            }
+        //         // anything in quotes should be forced as a string
+        //         static ref STRING_RE: Regex = Regex::new(r#"^['"](.+)['"]$"#).unwrap();
+        //     }
 
-            let prepared_values_vec = prepared_values_opt
-                .split(',')
-                .map(|val| {
-                    let val_str = val.trim();
+        //     let prepared_values_vec = prepared_values_opt
+        //         .split(',')
+        //         .map(|val| {
+        //             let val_str = val.trim();
 
-                    if STRING_RE.is_match(val_str) {
-                        let captures = STRING_RE.captures(val_str).unwrap();
-                        let val_string = captures.get(1).unwrap().as_str().to_string();
+        //             if STRING_RE.is_match(val_str) {
+        //                 let captures = STRING_RE.captures(val_str).unwrap();
+        //                 let val_string = captures.get(1).unwrap().as_str().to_string();
 
-                        return PreparedStatementValue::String(val_string);
-                    } else if INTEGER_RE.is_match(val_str) {
-                        if let Ok(val_i32) = val_str.parse::<i32>() {
-                            return PreparedStatementValue::Int4(val_i32);
-                        } else if let Ok(val_i64) = val_str.parse::<i64>() {
-                            return PreparedStatementValue::Int8(val_i64);
-                        }
-                    }
+        //                 return Value::String(val_string);
+        //             } else if INTEGER_RE.is_match(val_str) {
+        //                 if let Ok(val_i32) = val_str.parse::<i32>() {
+        //                     return Value::Int4(val_i32);
+        //                 } else if let Ok(val_i64) = val_str.parse::<i64>() {
+        //                     return Value::Int8(val_i64);
+        //                 }
+        //             }
 
-                    PreparedStatementValue::String(val_str.to_string())
-                })
-                .collect();
-            prepared_values = prepared_values_vec;
-        }
+        //             PreparedStatementValue::String(val_str.to_string())
+        //         })
+        //         .collect();
+        //     prepared_values = prepared_values_vec;
+        // }
     }
 
     // GROUP BY statement
@@ -434,7 +431,6 @@ mod build_select_statement_tests {
                 limit: 100,
                 offset: 0,
                 order_by: None,
-                prepared_values: None,
                 table: "a_table".to_string(),
             },
             vec![],
@@ -460,7 +456,6 @@ mod build_select_statement_tests {
                 limit: 100,
                 offset: 0,
                 order_by: None,
-                prepared_values: None,
                 table: "a_table".to_string(),
             },
             vec![],
@@ -486,7 +481,6 @@ mod build_select_statement_tests {
                 limit: 100,
                 offset: 0,
                 order_by: None,
-                prepared_values: None,
                 table: "a_table".to_string(),
             },
             vec![],
@@ -515,7 +509,6 @@ mod build_select_statement_tests {
                 limit: 1000,
                 offset: 100,
                 order_by: None,
-                prepared_values: None,
                 table: "a_table".to_string(),
             },
             vec![],
@@ -541,7 +534,6 @@ mod build_select_statement_tests {
                 limit: 1000,
                 offset: 0,
                 order_by: Some(vec!["name".to_string(), "test".to_string()]),
-                prepared_values: None,
                 table: "a_table".to_string(),
             },
             vec![],
@@ -570,7 +562,6 @@ mod build_select_statement_tests {
                 limit: 1000,
                 offset: 0,
                 order_by: None,
-                prepared_values: None,
                 table: "a_table".to_string(),
             },
             vec![],
@@ -590,61 +581,33 @@ mod build_select_statement_tests {
 
     #[test]
     fn conditions() {
-        match build_select_statement(
-            QueryParamsSelect {
-                columns: vec!["id".to_string()],
-                conditions: Some("(id > 10 OR id < 20) AND name = 'test'".to_string()),
-                distinct: None,
-                group_by: None,
-                limit: 10,
-                offset: 0,
-                order_by: None,
-                prepared_values: None,
-                table: "a_table".to_string(),
-            },
-            vec![],
-            Expr::Identifier("".to_string()),
-        ) {
-            Ok((sql, _)) => {
-                assert_eq!(
-                    &sql,
-                    "SELECT id FROM a_table WHERE ((id > 10 OR id < 20) AND name = 'test') LIMIT 10;"
-                );
-            }
-            Err(e) => {
-                panic!(e);
-            }
-        };
-    }
+        let conditions = "(id > 10 OR id < 20) AND name = 'test'".to_string();
+        let where_ast = where_clause_str_to_ast(&conditions).unwrap().unwrap();
 
-    #[test]
-    fn prepared_values() {
         match build_select_statement(
             QueryParamsSelect {
                 columns: vec!["id".to_string()],
-                conditions: Some("(id > $1 OR id < $2) AND name = $3".to_string()),
+                conditions: Some(conditions),
                 distinct: None,
                 group_by: None,
                 limit: 10,
                 offset: 0,
                 order_by: None,
-                prepared_values: Some("10,20,'test'".to_string()),
                 table: "a_table".to_string(),
             },
             vec![],
-            Expr::Identifier("".to_string()),
+            where_ast,
         ) {
             Ok((sql, prepared_values)) => {
                 assert_eq!(
                     &sql,
                     "SELECT id FROM a_table WHERE ((id > $1 OR id < $2) AND name = $3) LIMIT 10;"
                 );
-
                 assert_eq!(
                     prepared_values,
                     vec![
-                        PreparedStatementValue::Int4(10),
-                        PreparedStatementValue::Int4(20),
+                        PreparedStatementValue::Int8(10),
+                        PreparedStatementValue::Int8(20),
                         PreparedStatementValue::String("test".to_string()),
                     ]
                 );
@@ -657,6 +620,9 @@ mod build_select_statement_tests {
 
     #[test]
     fn complex_query() {
+        let conditions = "id = 46327143679919107 AND test_name = 'a name'".to_string();
+        let where_ast = where_clause_str_to_ast(&conditions).unwrap().unwrap();
+
         match build_select_statement(
             QueryParamsSelect {
                 columns: vec![
@@ -664,7 +630,7 @@ mod build_select_statement_tests {
                     "test_bigint".to_string(),
                     "test_bigserial".to_string(),
                 ],
-                conditions: Some("id = $1 AND test_name = $2".to_string()),
+                conditions: Some(conditions),
                 distinct: Some(vec![
                     "test_date".to_string(),
                     "test_timestamptz".to_string(),
@@ -673,11 +639,10 @@ mod build_select_statement_tests {
                 limit: 10000,
                 offset: 2000,
                 order_by: Some(vec!["due_date desc".to_string()]),
-                prepared_values: Some("46327143679919107,'a name'".to_string()),
                 table: "a_table".to_string(),
             },
             vec![],
-            Expr::Identifier("".to_string()),
+            where_ast,
         ) {
             Ok((sql, prepared_values)) => {
                 assert_eq!(

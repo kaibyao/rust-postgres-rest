@@ -1,14 +1,11 @@
 use super::{
-    foreign_keys::{
-        fk_ast_nodes_from_where_ast, fk_columns_from_where_ast, where_clause_str_to_ast,
-        ForeignKeyReference,
-    },
+    foreign_keys::{fk_ast_nodes_from_where_ast, fk_columns_from_where_ast, ForeignKeyReference},
     postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
     query_types::{QueryParamsUpdate, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement},
     utils::{
         generate_returning_clause, validate_alias_identifier, validate_table_name,
-        validate_where_column, PreparedStatementValue, UpsertResult,
+        validate_where_column, where_clause_str_to_ast, PreparedStatementValue, UpsertResult,
     },
 };
 use crate::{db::connect, AppState, Error};
@@ -16,8 +13,8 @@ use futures::{
     future::{err, loop_fn, Either, Future, Loop},
     stream::Stream,
 };
-use serde_json::{Map, Value};
-use sqlparser::ast::Expr;
+use serde_json::{Map, Value as JsonValue};
+use sqlparser::ast::{Expr, Value as SqlValue};
 use std::{collections::HashMap, sync::Arc};
 use tokio_postgres::{types::ToSql, Client};
 
@@ -100,19 +97,7 @@ pub fn update_table_rows(
                             let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
                                 vec![]
                             } else {
-                                prepared_values
-                                    .iter()
-                                    .map(|val| {
-                                        let val_to_sql: &dyn ToSql = match val {
-                                            PreparedStatementValue::Int4(val_i32) => val_i32,
-                                            PreparedStatementValue::Int8(val_i64) => val_i64,
-                                            PreparedStatementValue::String(val_string) => {
-                                                val_string
-                                            }
-                                        };
-                                        val_to_sql
-                                    })
-                                    .collect()
+                                prepared_values.iter().map(|val| val.to_sql()).collect()
                             };
 
                             if is_return_rows {

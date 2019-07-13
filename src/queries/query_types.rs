@@ -23,7 +23,7 @@ pub struct RequestQueryStringParams {
     /// The FROM clause of an UPDATE statement. Comma-separated list of columns. Does not accept
     /// sub-queries (use /sql endpoint if more advanced expressions are needed).
     pub from: Option<String>,
-    /// The WHERE clause of the SQL statement. Remember to URI-encode the final result. NOTE: $1, $2, etc. can be used in combination with `prepared_values` to create prepared statements (see https://www.postgresql.org/docs/current/sql-prepare.html).
+    /// The WHERE clause of the SQL statement. Remember to URI-encode the final result.
     pub r#where: Option<String>,
     /// Comma-separated list representing the field(s) on which to group the resulting rows (in a
     /// GET/SELECT statement).
@@ -35,9 +35,6 @@ pub struct RequestQueryStringParams {
     pub limit: Option<usize>,
     /// The number of rows to exclude (in a GET/SELECT statement).
     pub offset: Option<usize>,
-    /// If the WHERE clause contains ${number}, this comma-separated list of values is used to
-    /// substitute the numbered parameters.
-    pub prepared_values: Option<String>,
     /// Comma-separated list of columns to return from the POST/INSERT operation.
     pub returning_columns: Option<String>,
 }
@@ -53,7 +50,6 @@ pub struct QueryParamsSelect {
     pub order_by: Option<Vec<String>>,
     pub limit: usize,
     pub offset: usize,
-    pub prepared_values: Option<String>,
 }
 
 impl QueryParamsSelect {
@@ -94,10 +90,6 @@ impl QueryParamsSelect {
             offset: match query_string_params.offset {
                 Some(offset) => offset,
                 None => default_offset,
-            },
-            prepared_values: match query_string_params.prepared_values {
-                Some(prepared_values) => Some(prepared_values.clone()),
-                None => None,
             },
         };
 
@@ -222,7 +214,6 @@ pub struct QueryParamsUpdate {
     pub conditions: Option<String>,
     /// List of tables.
     pub from: Option<Vec<String>>,
-    pub prepared_values: Option<String>,
     /// List of (foreign key) columns whose values are returned.
     pub returning_columns: Option<Vec<String>>,
     // Name of table to update.
@@ -244,10 +235,6 @@ impl QueryParamsUpdate {
         };
         let from = match query_string_params.from {
             Some(from_str) => Some(normalize_columns(&from_str)?),
-            None => None,
-        };
-        let prepared_values = match query_string_params.prepared_values {
-            Some(prepared_values) => Some(prepared_values.clone()),
             None => None,
         };
         let returning_columns = match query_string_params.returning_columns {
@@ -274,7 +261,6 @@ impl QueryParamsUpdate {
             column_values,
             conditions,
             from,
-            prepared_values,
             returning_columns,
             table,
         })
