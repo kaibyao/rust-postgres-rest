@@ -18,23 +18,27 @@ use tokio_postgres::{
     Client, Error as PgError,
 };
 
+// TODO: column_types can probably be a static &'str, now that i think about it.
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 /// Stats for a single column of a table
 pub struct TableColumnStat {
-    /// name of column
+    /// Name of column.
     pub column_name: String,
-    /// type of column
+    /// Type of column.
     pub column_type: String,
-    /// default value of column
+    /// Default value of column.
     pub default_value: Option<String>,
-    /// if null can be a column value
+    /// If null can be a column value.
     pub is_nullable: bool,
-    /// whether the column is a foreign key referencing another table
+    /// Whether the column is a foreign key referencing another table.
     pub is_foreign_key: bool,
-    /// table being referenced (if is_foreign_key)
+    /// Table being referenced (if is_foreign_key).
     pub foreign_key_table: Option<String>,
-    /// table column being referenced (if is_foreign_key)
+    /// Table columns being referenced (if is_foreign_key).
     pub foreign_key_column: Option<String>,
+    /// Types of table column being referenced (if is_foreign_key).
+    pub foreign_key_column_type: Option<String>,
     /// If data_type identifies a character or bit string type, the declared maximum length; null
     /// for all other data types or if no maximum length was declared.
     pub char_max_length: Option<i32>,
@@ -42,6 +46,19 @@ pub struct TableColumnStat {
     /// a datum; null for all other data types. The maximum octet length depends on the declared
     /// character maximum length (see above) and the server encoding.
     pub char_octet_length: Option<i32>,
+}
+
+impl TableColumnStat {
+    /// Takes a Vec of stats and returns a HashMap of column name:type.
+    pub fn stats_to_column_types(stats: Vec<Self>) -> HashMap<String, String> {
+        let mut column_types: HashMap<String, String> = HashMap::new();
+
+        for stat in stats.into_iter() {
+            column_types.insert(stat.column_name, stat.column_type);
+        }
+
+        column_types
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -198,6 +215,7 @@ pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>,
             is_foreign_key: row.get(6),
             foreign_key_table: row.get(7),
             foreign_key_column: row.get(8),
+            foreign_key_column_type: row.get(9),
             char_max_length: row.get(3),
             char_octet_length: row.get(4),
         }
@@ -215,9 +233,31 @@ WITH foreign_keys as (
             pg_get_constraintdef(c.oid), position(' REFERENCES ' in pg_get_constraintdef(c.oid))+12, position('(' in substring(pg_get_constraintdef(c.oid), 14))-position(' REFERENCES ' in pg_get_constraintdef(c.oid))+1
         ) AS fk_table,
 
-        substring(
-            pg_get_constraintdef(c.oid), position('(' in substring(pg_get_constraintdef(c.oid), 14))+14, position(')' in substring(pg_get_constraintdef(c.oid), position('(' in substring(pg_get_constraintdef(c.oid), 14))+14))-1
-        ) AS fk_column
+        (string_to_array(
+            substring( -- Referenced column names in parentheses
+                pg_get_constraintdef(c.oid),
+                position('(' in substring(pg_get_constraintdef(c.oid), 14)) + 14,
+                position(
+                    ')' in substring(
+                        pg_get_constraintdef(c.oid),
+                        position('(' in substring(pg_get_constraintdef(c.oid), 14)) + 14
+                    )
+                ) - 1
+            ),
+            ', '
+        ))[
+            array_position( -- index of matching referencing column, used to find the matching referenced column name
+            string_to_array(
+                substring( -- Just the referencing column names in parentheses
+                    pg_get_constraintdef(c.oid),
+                    position('(' in pg_get_constraintdef(c.oid)) + 1,
+                    position(' REFERENCES ' in pg_get_constraintdef(c.oid)) - 15
+                ),
+                ', '
+            ),
+            col.attname::text
+            )
+        ] AS fk_column
 
     FROM
         pg_constraint c
@@ -232,24 +272,43 @@ WITH foreign_keys as (
     )
     GROUP BY c.oid, column_name
     ORDER BY column_name
+),
+base_column_stats as (
+    SELECT
+        c.column_name,
+        c.udt_name as column_type,
+        c.column_default as default_value,
+        c.character_maximum_length,
+        c.character_octet_length,
+        c.is_nullable,
+        EXISTS(SELECT column_name from foreign_keys WHERE column_name = c.column_name) AS is_foreign_key,
+        f.fk_table,
+        f.fk_column
+    FROM
+        information_schema.columns c
+        LEFT JOIN foreign_keys f ON c.column_name = f.column_name
+    WHERE
+        table_schema = 'public' AND
+        table_name = '{0}'
+    ORDER BY column_name
 )
 SELECT
-    c.column_name,
-    c.udt_name as column_type,
-    c.column_default as default_value,
-    c.character_maximum_length,
-    c.character_octet_length,
-    c.is_nullable,
-    EXISTS(SELECT column_name from foreign_keys WHERE column_name = c.column_name) AS is_foreign_key,
-    f.fk_table,
-    f.fk_column
+    base.column_name,
+    base.column_type,
+    base.default_value,
+    base.character_maximum_length,
+    base.character_octet_length,
+    base.is_nullable,
+    base.is_foreign_key,
+    base.fk_table,
+    base.fk_column,
+    fk.udt_name as fk_column_type
 FROM
-    information_schema.columns c
-    LEFT JOIN foreign_keys f ON c.column_name = f.column_name
-WHERE
-    table_schema = 'public' AND
-    table_name = '{0}'
-ORDER BY table_name, column_name;", table);
+    base_column_stats base
+    LEFT JOIN information_schema.columns fk ON (
+        fk.column_name = base.fk_column AND
+        fk.table_name = base.fk_table
+    );", table);
 
     conn.prepare(&statement_str)
 }

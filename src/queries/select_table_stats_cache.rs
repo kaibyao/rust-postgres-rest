@@ -148,9 +148,31 @@ WITH foreign_keys as (
             pg_get_constraintdef(c.oid), position(' REFERENCES ' in pg_get_constraintdef(c.oid))+12, position('(' in substring(pg_get_constraintdef(c.oid), 14))-position(' REFERENCES ' in pg_get_constraintdef(c.oid))+1
         ) AS fk_table,
 
-        substring(
-            pg_get_constraintdef(c.oid), position('(' in substring(pg_get_constraintdef(c.oid), 14))+14, position(')' in substring(pg_get_constraintdef(c.oid), position('(' in substring(pg_get_constraintdef(c.oid), 14))+14))-1
-        ) AS fk_column
+        (string_to_array(
+            substring( -- Referenced column names in parentheses
+                pg_get_constraintdef(c.oid),
+                position('(' in substring(pg_get_constraintdef(c.oid), 14)) + 14,
+                position(
+                    ')' in substring(
+                        pg_get_constraintdef(c.oid),
+                        position('(' in substring(pg_get_constraintdef(c.oid), 14)) + 14
+                    )
+                ) - 1
+            ),
+            ', '
+        ))[
+            array_position( -- index of matching referencing column, used to find the matching referenced column name
+            string_to_array(
+                substring( -- Just the referencing column names in parentheses
+                    pg_get_constraintdef(c.oid),
+                    position('(' in pg_get_constraintdef(c.oid)) + 1,
+                    position(' REFERENCES ' in pg_get_constraintdef(c.oid)) - 15
+                ),
+                ', '
+            ),
+            col.attname::text
+            )
+        ] AS fk_column
     FROM
         pg_constraint c
         JOIN LATERAL UNNEST(c.conkey) WITH ORDINALITY AS u(attnum, attposition) ON TRUE
@@ -164,25 +186,45 @@ WITH foreign_keys as (
     )
     GROUP BY c.oid, table_name, column_name
     ORDER BY table_name, column_name
+),
+base_column_stats as (
+    SELECT
+        c.table_name,
+        c.column_name,
+        c.udt_name as column_type,
+        c.column_default as default_value,
+        c.character_maximum_length,
+        c.character_octet_length,
+        c.is_nullable,
+        EXISTS(SELECT column_name from foreign_keys WHERE column_name = c.column_name) AS is_foreign_key,
+        f.fk_table,
+        f.fk_column
+    FROM
+        information_schema.columns c
+        LEFT JOIN foreign_keys f ON c.column_name = f.column_name AND c.table_name = f.table_name
+    WHERE
+        table_schema = 'public' AND
+        c.table_name IN ({0})
+    ORDER BY c.table_name, column_name
 )
 SELECT
-    c.table_name,
-    c.column_name,
-    c.udt_name as column_type,
-    c.column_default as default_value,
-    c.character_maximum_length,
-    c.character_octet_length,
-    c.is_nullable,
-    EXISTS(SELECT column_name from foreign_keys WHERE column_name = c.column_name) AS is_foreign_key,
-    f.fk_table,
-    f.fk_column
+    base.table_name,
+    base.column_name,
+    base.column_type,
+    base.default_value,
+    base.character_maximum_length,
+    base.character_octet_length,
+    base.is_nullable,
+    base.is_foreign_key,
+    base.fk_table,
+    base.fk_column,
+    fk.udt_name as fk_column_type
 FROM
-    information_schema.columns c
-    LEFT JOIN foreign_keys f ON c.column_name = f.column_name AND c.table_name = f.table_name
-WHERE
-    table_schema = 'public' AND
-    c.table_name IN ({0})
-ORDER BY c.table_name, column_name;", tables_str);
+    base_column_stats base
+    LEFT JOIN information_schema.columns fk ON (
+        fk.column_name = base.fk_column AND
+        fk.table_name = base.fk_table
+    )", tables_str);
 
     conn.prepare(&statement_str)
 }
@@ -207,6 +249,7 @@ fn process_column_stats(rows: Vec<Row>) -> HashMap<String, Vec<TableColumnStat>>
             is_foreign_key: row.get(7),
             foreign_key_table: row.get(8),
             foreign_key_column: row.get(9),
+            foreign_key_column_type: row.get(10),
             char_max_length: row.get(4),
             char_octet_length: row.get(5),
         };

@@ -26,8 +26,4 @@ pub mod query_types;
 
 pub mod utils;
 
-// pub fn upsert_into_table(conn: &Connection) {}
-
 // pub fn delete_table_rows(conn: &Connection) {}
-
-// fn update_table_rows(conn: &Connection) {}

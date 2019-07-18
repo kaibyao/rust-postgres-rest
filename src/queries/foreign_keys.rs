@@ -17,7 +17,12 @@ use crate::{
 };
 
 /// Extracts the foreign key Exprs from a WHERE Expr.
-pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
+pub fn fk_ast_nodes_from_where_ast(
+    ast: &mut Expr,
+    is_include_non_fk_columns: bool,
+) -> Vec<(String, &mut Expr)> {
+    // TODO: step 6: if after we are done with the UPDATE endpoint and there are no situations where
+    // is_include_non_fk_columns == false, remove that parameter
     let mut fks = vec![];
 
     match ast {
@@ -27,11 +32,22 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
         Expr::CompoundIdentifier(nested_fk_column_vec) => {
             fks.push((nested_fk_column_vec.join("."), ast));
         }
+        Expr::Identifier(non_nested_column_name) => {
+            if is_include_non_fk_columns {
+                fks.push((non_nested_column_name.clone(), ast))
+            }
+        }
         Expr::IsNull(null_ast_box) => {
-            fks.extend(fk_ast_nodes_from_where_ast(null_ast_box.borrow_mut()));
+            fks.extend(fk_ast_nodes_from_where_ast(
+                null_ast_box.borrow_mut(),
+                is_include_non_fk_columns,
+            ));
         }
         Expr::IsNotNull(null_ast_box) => {
-            fks.extend(fk_ast_nodes_from_where_ast(null_ast_box.borrow_mut()));
+            fks.extend(fk_ast_nodes_from_where_ast(
+                null_ast_box.borrow_mut(),
+                is_include_non_fk_columns,
+            ));
         }
         Expr::InList {
             expr: list_expr_ast_box_ref,
@@ -40,10 +56,14 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
         } => {
             fks.extend(fk_ast_nodes_from_where_ast(
                 list_expr_ast_box_ref.borrow_mut(),
+                is_include_non_fk_columns,
             ));
 
             for list_ast in list_ast_vec {
-                fks.extend(fk_ast_nodes_from_where_ast(list_ast));
+                fks.extend(fk_ast_nodes_from_where_ast(
+                    list_ast,
+                    is_include_non_fk_columns,
+                ));
             }
         }
         Expr::BinaryOp {
@@ -53,25 +73,36 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
         } => {
             fks.extend(fk_ast_nodes_from_where_ast(
                 bin_left_ast_box_ref.borrow_mut(),
+                is_include_non_fk_columns,
             ));
             fks.extend(fk_ast_nodes_from_where_ast(
                 bin_right_ast_box_ref.borrow_mut(),
+                is_include_non_fk_columns,
             ));
         }
         Expr::Cast {
             expr: cast_expr_box_ref,
             ..
         } => {
-            fks.extend(fk_ast_nodes_from_where_ast(cast_expr_box_ref.borrow_mut()));
+            fks.extend(fk_ast_nodes_from_where_ast(
+                cast_expr_box_ref.borrow_mut(),
+                is_include_non_fk_columns,
+            ));
         }
         Expr::Nested(nested_ast_box_ref) => {
-            fks.extend(fk_ast_nodes_from_where_ast(nested_ast_box_ref.borrow_mut()));
+            fks.extend(fk_ast_nodes_from_where_ast(
+                nested_ast_box_ref.borrow_mut(),
+                is_include_non_fk_columns,
+            ));
         }
         Expr::UnaryOp {
             expr: unary_expr_box_ref,
             ..
         } => {
-            fks.extend(fk_ast_nodes_from_where_ast(unary_expr_box_ref.borrow_mut()));
+            fks.extend(fk_ast_nodes_from_where_ast(
+                unary_expr_box_ref.borrow_mut(),
+                is_include_non_fk_columns,
+            ));
         }
         Expr::Between {
             expr: between_expr_ast_box_ref,
@@ -81,19 +112,25 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
         } => {
             fks.extend(fk_ast_nodes_from_where_ast(
                 between_expr_ast_box_ref.borrow_mut(),
+                is_include_non_fk_columns,
             ));
             fks.extend(fk_ast_nodes_from_where_ast(
                 between_low_ast_box_ref.borrow_mut(),
+                is_include_non_fk_columns,
             ));
             fks.extend(fk_ast_nodes_from_where_ast(
                 between_high_ast_box_ref.borrow_mut(),
+                is_include_non_fk_columns,
             ));
         }
         Expr::Function(Function {
             args: args_ast_vec, ..
         }) => {
             for ast_arg in args_ast_vec {
-                fks.extend(fk_ast_nodes_from_where_ast(ast_arg));
+                fks.extend(fk_ast_nodes_from_where_ast(
+                    ast_arg,
+                    is_include_non_fk_columns,
+                ));
             }
         }
         Expr::Case {
@@ -103,24 +140,36 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
             ..
         } => {
             for case_condition_ast in case_conditions_ast_vec {
-                fks.extend(fk_ast_nodes_from_where_ast(case_condition_ast));
+                fks.extend(fk_ast_nodes_from_where_ast(
+                    case_condition_ast,
+                    is_include_non_fk_columns,
+                ));
             }
 
             for case_results_ast_vec in case_results_ast_vec {
-                fks.extend(fk_ast_nodes_from_where_ast(case_results_ast_vec));
+                fks.extend(fk_ast_nodes_from_where_ast(
+                    case_results_ast_vec,
+                    is_include_non_fk_columns,
+                ));
             }
 
             if let Some(case_else_results_ast_box) = case_else_results_ast_box_opt {
                 fks.extend(fk_ast_nodes_from_where_ast(
                     case_else_results_ast_box.borrow_mut(),
+                    is_include_non_fk_columns,
                 ));
             }
         }
-        Expr::Collate { expr, .. } => fks.extend(fk_ast_nodes_from_where_ast(expr.borrow_mut())),
-        Expr::Extract { expr, .. } => fks.extend(fk_ast_nodes_from_where_ast(expr.borrow_mut())),
+        Expr::Collate { expr, .. } => fks.extend(fk_ast_nodes_from_where_ast(
+            expr.borrow_mut(),
+            is_include_non_fk_columns,
+        )),
+        Expr::Extract { expr, .. } => fks.extend(fk_ast_nodes_from_where_ast(
+            expr.borrow_mut(),
+            is_include_non_fk_columns,
+        )),
         // below is unsupported
         Expr::Exists(_query_box) => (), // EXISTS(subquery) not supported
-        Expr::Identifier(_non_nested_column_name) => (),
         Expr::Wildcard => (),
         Expr::InSubquery { .. } => (), // subqueries in WHERE statement are not supported
         Expr::Value(_val) => (),
@@ -248,11 +297,17 @@ pub struct ForeignKeyReference {
     /// The parent table’s column name that is the foreign key.
     pub referring_column: String,
 
+    // The Postgres type of the referring column.
+    pub referring_column_type: String,
+
     /// The table being referred by the foreign key.
     pub table_referred: String,
 
-    /// The column of the table being referred by the foreign key
+    /// The column of the table being referred by the foreign key.
     pub foreign_key_column: String,
+
+    // The Postgres type of the column of the table being referred by the foreign key.
+    pub foreign_key_column_type: String,
 
     /// Any child foreign key columns that are part of the original_ref string.
     pub nested_fks: Vec<ForeignKeyReference>,
@@ -287,6 +342,7 @@ impl ForeignKeyReference {
     ///             referring_column: "a_foreign_key".to_string(),
     ///             table_referred: "b_table".to_string(),
     ///             foreign_key_column: "id".to_string(),
+    ///             foreign_key_column_type: "id".to_string(),
     ///             nested_fks: vec![],
     ///         },
     ///         ForeignKeyReference {
@@ -295,6 +351,7 @@ impl ForeignKeyReference {
     ///             referring_column: "another_foreign_key".to_string(),
     ///             table_referred: "c_table".to_string(),
     ///             foreign_key_column: "id".to_string(),
+    ///             foreign_key_column_type: "id".to_string(),
     ///             nested_fks: vec![],
     ///         }
     ///     ]))
@@ -327,6 +384,7 @@ impl ForeignKeyReference {
     ///             referring_column: "a_foreign_key".to_string(),
     ///             table_referred: "b_table".to_string(),
     ///             foreign_key_column: "id".to_string(),
+    ///             foreign_key_column_type: "id".to_string(),
     ///             nested_fks: vec![]
     ///         },
     ///         ForeignKeyReference {
@@ -335,6 +393,7 @@ impl ForeignKeyReference {
     ///             referring_column: "another_foreign_key".to_string(),
     ///             table_referred: "b_table".to_string(),
     ///             foreign_key_column: "id".to_string(),
+    ///             foreign_key_column_type: "id".to_string(),
     ///             nested_fks: vec![
     ///                 ForeignKeyReference {
     ///                     original_refs: vec!["nested_fk.some_str".to_string()],
@@ -342,6 +401,7 @@ impl ForeignKeyReference {
     ///                     referring_column: "nested_fk".to_string(),
     ///                     table_referred: "d_table".to_string(),
     ///                     foreign_key_column: "id".to_string(),
+    ///                     foreign_key_column_type: "id".to_string(),
     ///                     nested_fks: vec![]
     ///                 },
     ///                 ForeignKeyReference {
@@ -350,6 +410,7 @@ impl ForeignKeyReference {
     ///                     referring_column: "different_nested_fk".to_string(),
     ///                     table_referred: "e_table".to_string(),
     ///                     foreign_key_column: "id".to_string(),
+    ///                     foreign_key_column_type: "id".to_string(),
     ///                     nested_fks: vec![]
     ///                 }
     ///             ]
@@ -578,15 +639,22 @@ impl ForeignKeyReference {
 
             let table_clone = table.clone();
             let stat_column_name_clone = stat.column_name.clone();
+            let stat_column_type_clone = stat.column_type.clone();
             let stat_fk_column = stat.foreign_key_column.clone().unwrap_or_else(String::new);
+            let stat_fk_column_type = stat
+                .foreign_key_column_type
+                .clone()
+                .unwrap_or_else(String::new);
 
             // child column is not a foreign key, return future with ForeignKeyReference
             if child_fk_columns.is_empty() {
                 let no_child_columns_fut = ok::<ForeignKeyReference, Error>(ForeignKeyReference {
                     referring_column: stat_column_name_clone,
+                    referring_column_type: stat_column_type_clone,
                     referring_table: table_clone,
                     table_referred: foreign_key_table,
                     foreign_key_column: stat_fk_column,
+                    foreign_key_column_type: stat_fk_column_type,
                     nested_fks: vec![],
                     original_refs,
                 });
@@ -605,9 +673,11 @@ impl ForeignKeyReference {
             .and_then(move |nested_fks| {
                 Ok(ForeignKeyReference {
                     referring_column: stat_column_name_clone,
+                    referring_column_type: stat_column_type_clone,
                     referring_table: table_clone,
                     table_referred: foreign_key_table,
                     foreign_key_column: stat_fk_column,
+                    foreign_key_column_type: stat_fk_column_type,
                     nested_fks,
                     original_refs,
                 })
@@ -668,7 +738,7 @@ impl ForeignKeyReference {
         let join_data = Self::inner_join_expr_calc(fk_refs);
 
         join_data
-            .iter()
+            .into_iter()
             .map(
                 |(referring_table, referring_column, referred_table, referred_column)| {
                     // generate the INNER JOIN column equality expression
@@ -724,9 +794,9 @@ mod fk_ast_nodes_from_where_ast {
         let mut cloned = borrowed.clone();
 
         let expected = vec![("a_column.b_column".to_string(), Rc::make_mut(&mut borrowed))];
-
+        // step 7: alter these tests
         assert_eq!(
-            fk_ast_nodes_from_where_ast(Rc::make_mut(&mut cloned)),
+            fk_ast_nodes_from_where_ast(Rc::make_mut(&mut cloned), false),
             expected
         );
     }
@@ -736,7 +806,7 @@ mod fk_ast_nodes_from_where_ast {
         let mut ast = Expr::Identifier("a_column".to_string());
         let expected = vec![];
 
-        assert_eq!(fk_ast_nodes_from_where_ast(&mut ast), expected);
+        assert_eq!(fk_ast_nodes_from_where_ast(&mut ast, false), expected);
     }
 }
 
@@ -756,10 +826,10 @@ mod fk_columns_from_where_ast {
 
     #[test]
     fn non_fk_nodes_return_empty_vec() {
-        let mut ast = Expr::Identifier("a_column".to_string());
-        let expected = vec![];
+        let ast = Expr::Identifier("a_column".to_string());
+        let expected: Vec<String> = vec![];
 
-        assert_eq!(fk_ast_nodes_from_where_ast(&mut ast), expected);
+        assert_eq!(fk_columns_from_where_ast(&ast), expected);
     }
 }
 
@@ -774,8 +844,10 @@ mod fkr_find {
             original_refs: vec!["a_foreign_key.some_text".to_string()],
             referring_table: "a_table".to_string(),
             referring_column: "a_foreign_key".to_string(),
+            referring_column_type: "int8".to_string(),
             table_referred: "b_table".to_string(),
             foreign_key_column: "id".to_string(),
+            foreign_key_column_type: "int8".to_string(),
             nested_fks: vec![],
         }];
 
@@ -792,14 +864,18 @@ mod fkr_find {
             original_refs: vec!["another_foreign_key.nested_fk.some_str".to_string()],
             referring_table: "a_table".to_string(),
             referring_column: "another_foreign_key".to_string(),
+            referring_column_type: "int8".to_string(),
             table_referred: "b_table".to_string(),
             foreign_key_column: "id".to_string(),
+            foreign_key_column_type: "int8".to_string(),
             nested_fks: vec![ForeignKeyReference {
                 original_refs: vec!["nested_fk.some_str".to_string()],
                 referring_table: "b_table".to_string(),
                 referring_column: "nested_fk".to_string(),
+                referring_column_type: "int8".to_string(),
                 table_referred: "c_table".to_string(),
                 foreign_key_column: "id".to_string(),
+                foreign_key_column_type: "int8".to_string(),
                 nested_fks: vec![],
             }],
         }];
@@ -827,14 +903,18 @@ mod fkr_inner_join_expr {
                 original_refs: vec!["another_foreign_key.nested_fk.some_str".to_string()],
                 referring_table: "a_table".to_string(),
                 referring_column: "another_foreign_key".to_string(),
+                referring_column_type: "int8".to_string(),
                 table_referred: "b_table".to_string(),
                 foreign_key_column: "id".to_string(),
+                foreign_key_column_type: "int8".to_string(),
                 nested_fks: vec![ForeignKeyReference {
                     original_refs: vec!["nested_fk.some_str".to_string()],
                     referring_table: "b_table".to_string(),
                     referring_column: "nested_fk".to_string(),
+                    referring_column_type: "int8".to_string(),
                     table_referred: "d_table".to_string(),
                     foreign_key_column: "id".to_string(),
+                    foreign_key_column_type: "int8".to_string(),
                     nested_fks: vec![],
                 }],
             },
@@ -842,8 +922,10 @@ mod fkr_inner_join_expr {
                 original_refs: vec!["fk.another_field".to_string()],
                 referring_table: "b_table".to_string(),
                 referring_column: "b_table_fk".to_string(),
+                referring_column_type: "int8".to_string(),
                 table_referred: "e_table".to_string(),
                 foreign_key_column: "id".to_string(),
+                foreign_key_column_type: "int8".to_string(),
                 nested_fks: vec![],
             },
         ];

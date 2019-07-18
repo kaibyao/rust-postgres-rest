@@ -119,29 +119,30 @@ INSERT INTO public.test_fields (
 );
 
 -- For testing foreign keys
+DROP TABLE IF EXISTS public.sibling;
 DROP TABLE IF EXISTS public.child;
 DROP TABLE IF EXISTS public.adult;
 DROP TABLE IF EXISTS public.school;
 DROP TABLE IF EXISTS public.company;
 
-CREATE TABLE public.company (
+CREATE TABLE IF NOT EXISTS public.company (
   id BIGINT CONSTRAINT company_id_key PRIMARY KEY,
   name TEXT
 );
 
-CREATE TABLE public.school (
+CREATE TABLE IF NOT EXISTS public.school (
   id BIGINT CONSTRAINT school_id_key PRIMARY KEY,
   name TEXT
 );
 
-CREATE TABLE public.adult (
+CREATE TABLE IF NOT EXISTS public.adult (
   id BIGINT CONSTRAINT adult_id_key PRIMARY KEY,
   company_id BIGINT,
   name TEXT
 );
 ALTER TABLE public.adult ADD CONSTRAINT adult_company_id FOREIGN KEY (company_id) REFERENCES public.company(id);
 
-CREATE TABLE public.child (
+CREATE TABLE IF NOT EXISTS public.child (
   id BIGINT CONSTRAINT child_id_key PRIMARY KEY,
   parent_id BIGINT,
   school_id BIGINT,
@@ -149,22 +150,33 @@ CREATE TABLE public.child (
 );
 ALTER TABLE public.child ADD CONSTRAINT child_parent_id FOREIGN KEY (parent_id) REFERENCES public.adult(id);
 ALTER TABLE public.child ADD CONSTRAINT child_school_id FOREIGN KEY (school_id) REFERENCES public.school(id);
+ALTER TABLE public.child ADD CONSTRAINT child_unique_id_parent_id UNIQUE (id, parent_id);
+
+-- for specifically testing multi-column foreign keys
+CREATE TABLE IF NOT EXISTS public.sibling(
+  id BIGINT CONSTRAINT sibling_id_key PRIMARY KEY,
+  parent_id BIGINT,
+  sibling_id BIGINT,
+  name TEXT
+);
+ALTER TABLE public.sibling ADD CONSTRAINT sibling_reference FOREIGN KEY (parent_id, sibling_id) REFERENCES public.child(parent_id, id);
 
 INSERT INTO public.company (id, name) VALUES (100, 'Stark Corporation');
 INSERT INTO public.school (id, name) VALUES (10, 'Winterfell Tower');
 INSERT INTO public.adult (id, company_id, name) VALUES (1, 100, 'Ned');
 INSERT INTO public.child (id, name, parent_id, school_id) VALUES (1000, 'Robb', 1, 10);
+INSERT INTO public.sibling(id, name, parent_id, sibling_id) VALUES(2, 'Sansa', 1, 1000);
 
 -- For testing INSERTs
 
 DROP TABLE IF EXISTS public.test_insert;
 DROP TABLE IF EXISTS public.test_batch_insert;
 
-CREATE TABLE public.test_insert (
+CREATE TABLE IF NOT EXISTS public.test_insert (
   id BIGINT CONSTRAINT test_insert_id_key PRIMARY KEY,
   name TEXT
 );
 
-CREATE TABLE public.test_batch_insert (
+CREATE TABLE IF NOT EXISTS public.test_batch_insert (
   id BIGINT CONSTRAINT test_batch_insert_id_key PRIMARY KEY
 );

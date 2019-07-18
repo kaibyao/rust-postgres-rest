@@ -5,17 +5,6 @@ use serde_json::{json, Value};
 /// Displays a list of available endpoints and their descriptions.
 pub fn index() -> HttpResponse {
     lazy_static! {
-        // static ref TABLE_COLUMN_STAT_HELP: Value = json!({
-        //     "column_name": "column_name_string",
-        //     "column_type": "valid PostgreSQL type",
-        //     "default_value": "default value (use single quote for string value)",
-        //     "is_nullable": "whether NULL can be a column value (default true)",
-        //     "is_foreign_key": "whether this column references another table column (default false)",
-        //     "foreign_key_table": "table being referenced (if is_foreign_key). Default null",
-        //     "foreign_key_column": "table column being referenced (if is_foreign_key). Default null",
-        //     "char_max_length": "If data_type identifies a character or bit string type, the declared maximum length; null for all other data types or if no maximum length was declared.",
-        //     "char_octet_length": "If data_type identifies a character type, the maximum possible length in octets (bytes) of a datum; null for all other data types. The maximum octet length depends on the declared character maximum length (see above) and the server encoding.",
-        // });
         static ref ENDPOINTS_JSON: Value = json!({
             "endpoints": {
             "/": {
@@ -23,18 +12,6 @@ pub fn index() -> HttpResponse {
             },
             "/table": {
                 "GET": "Displays list of tables.",
-                // "POST": {
-                //     "description": "Create table.",
-                //     "body": {
-                //         "description": "A JSON object describing the table name, columns, and constraints",
-                //         "schema": {
-                //             "table_name": "The table name.",
-                //             "columns": [*TABLE_COLUMN_STAT_HELP],
-                //         },
-                //     },
-                // },
-                // "PUT|PATCH": "Update table (not implemented)",
-                // "DELETE": "Delete table (not implemented)",
             },
             "/{table}": {
                 "GET": {
@@ -77,7 +54,13 @@ pub fn index() -> HttpResponse {
                 },
                 "POST": {
                     "description": "Inserts new records into the table. Returns the number of rows affected.",
-                    "body": "An array of objects where each object represents a row and whose key-values represent column names and their values.",
+                    "body": {
+                        "description": "An array of objects where each object represents a row and whose key-values represent column names and their values.",
+                        "example": [{
+                            "column_a": "a string value",
+                            "column_b": 123,
+                        }]
+                    },
                     "query_params": {
                         "conflict_action": {
                             "default": null,
@@ -98,13 +81,14 @@ pub fn index() -> HttpResponse {
                 },
                 "PUT|PATCH": {
                     "description": "Updates table records (not implemented).",
-                    "body": "An object whose key-values represent column names and the values to set. String values must contain quotes or else they will be evaluated as expressions and not strings. Example: {\"some_column\": \"\\\"some_string_value\\\"\"}",
+                    "body": {
+                        "description": "An object whose key-values represent column names and the values to set. String values must contain quotes or else they will be evaluated as expressions and not strings.",
+                        "example": {
+                            "column_a": "'some_string_value (notice the quotes)'",
+                            "column_b": "foreign_key_example_id.foreign_key_column",
+                            "column_c": 123,
+                        }},
                     "query_params": {
-                        "from": {
-                            "default": null,
-                            "description": "A comma-separated list of column names. Used for bulk updates.",
-                            "example": "column_a, column_b AS b, column_c c",
-                        },
                         "where": {
                             "default": null,
                             "description": "The WHERE clause of the UPDATE statement. Remember to URI-encode the final result.",

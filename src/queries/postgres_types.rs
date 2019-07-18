@@ -1,13 +1,14 @@
 use crate::Error;
-
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use eui48::MacAddress as Eui48MacAddress;
-
-use postgres_protocol::types::{macaddr_from_sql, macaddr_to_sql};
+use failure::Fail;
+use fallible_iterator::FallibleIterator;
+use postgres_protocol::types::{hstore_from_sql, macaddr_from_sql, macaddr_to_sql};
 use rust_decimal::Decimal;
 use serde::Serialize;
-use serde_json::Value;
-use std::{collections::HashMap, error::Error as StdError, str::FromStr};
+use serde_json::Value as JsonValue;
+use sqlparser::ast::{Expr, Function, UnaryOperator, Value as SqlValue};
+use std::{borrow::BorrowMut, collections::HashMap, error::Error as StdError, fmt, str::FromStr};
 use tokio_postgres::{
     accepts,
     row::Row,
@@ -118,8 +119,8 @@ pub enum ColumnTypeValue {
     Float8(ColumnValue<f64>),
     HStore(ColumnValue<HashMap<String, Option<String>>>),
     Int(ColumnValue<i32>),
-    Json(ColumnValue<serde_json::Value>),
-    JsonB(ColumnValue<serde_json::Value>),
+    Json(ColumnValue<JsonValue>),
+    JsonB(ColumnValue<JsonValue>),
     MacAddr(ColumnValue<MacAddress>),
     Name(ColumnValue<String>),
     Oid(ColumnValue<u32>),
@@ -135,9 +136,196 @@ pub enum ColumnTypeValue {
     VarChar(ColumnValue<String>),
 }
 
+impl<'a> FromSql<'a> for ColumnTypeValue {
+    fn accepts(ty: &Type) -> bool {
+        match ty.name() {
+            "int8" => <ColumnValue<i64> as FromSql>::accepts(ty),
+            "bool" => <ColumnValue<bool> as FromSql>::accepts(ty),
+            "bytea" => <ColumnValue<Vec<u8>> as FromSql>::accepts(ty),
+            "bpchar" => <ColumnValue<String> as FromSql>::accepts(ty),
+            "citext" => <ColumnValue<String> as FromSql>::accepts(ty),
+            "date" => <ColumnValue<NaiveDate> as FromSql>::accepts(ty),
+            "float4" => <ColumnValue<f32> as FromSql>::accepts(ty),
+            "float8" => <ColumnValue<f64> as FromSql>::accepts(ty),
+            "hstore" => <ColumnValue<HashMap<String, Option<String>>> as FromSql>::accepts(ty),
+            "int2" => <ColumnValue<i16> as FromSql>::accepts(ty),
+            "int4" => <ColumnValue<i32> as FromSql>::accepts(ty),
+            "json" => <ColumnValue<JsonValue> as FromSql>::accepts(ty),
+            "jsonb" => <ColumnValue<JsonValue> as FromSql>::accepts(ty),
+            "macaddr" => <ColumnValue<MacAddress> as FromSql>::accepts(ty),
+            "name" => <ColumnValue<String> as FromSql>::accepts(ty),
+            "numeric" => <ColumnValue<Decimal> as FromSql>::accepts(ty),
+            "oid" => <ColumnValue<u32> as FromSql>::accepts(ty),
+            "text" => <ColumnValue<String> as FromSql>::accepts(ty),
+            "time" => <ColumnValue<NaiveTime> as FromSql>::accepts(ty),
+            "timestamp" => <ColumnValue<NaiveDateTime> as FromSql>::accepts(ty),
+            "timestamptz" => <ColumnValue<DateTime<Utc>> as FromSql>::accepts(ty),
+            "uuid" => <ColumnValue<Uuid> as FromSql>::accepts(ty),
+            "varchar" => <ColumnValue<String> as FromSql>::accepts(ty),
+            &_ => false,
+        }
+    }
+
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn StdError + 'static + Send + Sync>> {
+        match ty.name() {
+            "int8" => Ok(Self::BigInt(<ColumnValue<i64> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "bool" => Ok(Self::Bool(<ColumnValue<bool> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "bytea" => Ok(Self::ByteA(<ColumnValue<Vec<u8>> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "bpchar" => Ok(Self::Char(<ColumnValue<String> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "citext" => Ok(Self::Citext(<ColumnValue<String> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "date" => Ok(Self::Date(<ColumnValue<NaiveDate> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "float4" => Ok(Self::Real(<ColumnValue<f32> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "float8" => Ok(Self::Float8(<ColumnValue<f64> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "hstore" => Ok(Self::HStore(
+                <ColumnValue<HashMap<String, Option<String>>> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "int2" => Ok(Self::SmallInt(<ColumnValue<i16> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "int4" => Ok(Self::Int(<ColumnValue<i32> as FromSql>::from_sql(ty, raw)?)),
+            "json" => Ok(Self::Json(<ColumnValue<JsonValue> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "jsonb" => Ok(Self::JsonB(<ColumnValue<JsonValue> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "macaddr" => Ok(Self::MacAddr(
+                <ColumnValue<MacAddress> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "name" => Ok(Self::Name(<ColumnValue<String> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "numeric" => Ok(Self::Decimal(<ColumnValue<Decimal> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "oid" => Ok(Self::Oid(<ColumnValue<u32> as FromSql>::from_sql(ty, raw)?)),
+            "text" => Ok(Self::Text(<ColumnValue<String> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "time" => Ok(Self::Time(<ColumnValue<NaiveTime> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "timestamp" => Ok(Self::Timestamp(
+                <ColumnValue<NaiveDateTime> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "timestamptz" => Ok(Self::TimestampTz(
+                <ColumnValue<DateTime<Utc>> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "uuid" => Ok(Self::Uuid(<ColumnValue<Uuid> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            "varchar" => Ok(Self::VarChar(<ColumnValue<String> as FromSql>::from_sql(
+                ty, raw,
+            )?)),
+            &_ => Err(Box::new(
+                Error::generate_error("TABLE_COLUMN_TYPE_NOT_FOUND", ty.name().to_string())
+                    .compat(),
+            )),
+        }
+    }
+
+    fn from_sql_null(_: &Type) -> Result<Self, Box<dyn StdError + Sync + Send>> {
+        Ok(Self::BigInt(ColumnValue::Nullable(None)))
+    }
+
+    fn from_sql_nullable(
+        ty: &Type,
+        raw: Option<&'a [u8]>,
+    ) -> Result<Self, Box<dyn StdError + 'static + Send + Sync>> {
+        match raw {
+            Some(raw_inner) => Self::from_sql(ty, raw_inner),
+            None => Self::from_sql_null(ty),
+        }
+    }
+}
+
+impl ToSql for ColumnTypeValue {
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut Vec<u8>,
+    ) -> Result<IsNull, Box<dyn StdError + 'static + Send + Sync>> {
+        match self {
+            Self::BigInt(col_val) => col_val.to_sql(ty, out),
+            Self::Bool(col_val) => col_val.to_sql(ty, out),
+            Self::ByteA(col_val) => col_val.to_sql(ty, out),
+            Self::Char(col_val) => col_val.to_sql(ty, out),
+            Self::Citext(col_val) => col_val.to_sql(ty, out),
+            Self::Date(col_val) => col_val.to_sql(ty, out),
+            Self::Decimal(col_val) => col_val.to_sql(ty, out),
+            Self::Float8(col_val) => col_val.to_sql(ty, out),
+            Self::HStore(col_val) => col_val.to_sql(ty, out),
+            Self::Int(col_val) => col_val.to_sql(ty, out),
+            Self::Json(col_val) => col_val.to_sql(ty, out),
+            Self::JsonB(col_val) => col_val.to_sql(ty, out),
+            Self::MacAddr(col_val) => col_val.to_sql(ty, out),
+            Self::Name(col_val) => col_val.to_sql(ty, out),
+            Self::Oid(col_val) => col_val.to_sql(ty, out),
+            Self::Real(col_val) => col_val.to_sql(ty, out),
+            Self::SmallInt(col_val) => col_val.to_sql(ty, out),
+            Self::Text(col_val) => col_val.to_sql(ty, out),
+            Self::Time(col_val) => col_val.to_sql(ty, out),
+            Self::Timestamp(col_val) => col_val.to_sql(ty, out),
+            Self::TimestampTz(col_val) => col_val.to_sql(ty, out),
+            Self::Uuid(col_val) => col_val.to_sql(ty, out),
+            Self::VarChar(col_val) => col_val.to_sql(ty, out),
+        }
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        match ty.name() {
+            "int8" => <ColumnValue<i64> as ToSql>::accepts(ty),
+            "bool" => <ColumnValue<bool> as ToSql>::accepts(ty),
+            "bytea" => <ColumnValue<Vec<u8>> as ToSql>::accepts(ty),
+            "bpchar" => <ColumnValue<String> as ToSql>::accepts(ty),
+            "citext" => <ColumnValue<String> as ToSql>::accepts(ty),
+            "date" => <ColumnValue<NaiveDate> as ToSql>::accepts(ty),
+            "float4" => <ColumnValue<f32> as ToSql>::accepts(ty),
+            "float8" => <ColumnValue<f64> as ToSql>::accepts(ty),
+            "hstore" => <ColumnValue<HashMap<String, Option<String>>> as ToSql>::accepts(ty),
+            "int2" => <ColumnValue<i16> as ToSql>::accepts(ty),
+            "int4" => <ColumnValue<i32> as ToSql>::accepts(ty),
+            "json" => <ColumnValue<JsonValue> as ToSql>::accepts(ty),
+            "jsonb" => <ColumnValue<JsonValue> as ToSql>::accepts(ty),
+            "macaddr" => <ColumnValue<MacAddress> as ToSql>::accepts(ty),
+            "name" => <ColumnValue<String> as ToSql>::accepts(ty),
+            "numeric" => <ColumnValue<Decimal> as ToSql>::accepts(ty),
+            "oid" => <ColumnValue<u32> as ToSql>::accepts(ty),
+            "text" => <ColumnValue<String> as ToSql>::accepts(ty),
+            "time" => <ColumnValue<NaiveTime> as ToSql>::accepts(ty),
+            "timestamp" => <ColumnValue<NaiveDateTime> as ToSql>::accepts(ty),
+            "timestamptz" => <ColumnValue<DateTime<Utc>> as ToSql>::accepts(ty),
+            "uuid" => <ColumnValue<Uuid> as ToSql>::accepts(ty),
+            "varchar" => <ColumnValue<String> as ToSql>::accepts(ty),
+            &_ => false,
+        }
+    }
+
+    to_sql_checked!();
+}
+
 impl ColumnTypeValue {
-    /// Parses a serde_json::Value and returns the Rust-Typed version.
-    pub fn from_json(column_type: &str, value: &Value) -> Result<Self, Error> {
+    /// Parses a Value and returns the Rust-Typed version.
+    pub fn from_json(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match column_type {
             "int8" => Self::convert_json_value_to_bigint(column_type, value),
             "bool" => Self::convert_json_value_to_bool(column_type, value),
@@ -169,7 +357,247 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_bigint(column_type: &str, value: &Value) -> Result<Self, Error> {
+    pub fn from_prepared_statement_value(
+        column_type: &str,
+        value: PreparedStatementValue,
+    ) -> Result<Self, Error> {
+        match column_type {
+            "int8" => Ok(ColumnTypeValue::BigInt(match value {
+                PreparedStatementValue::Int8(val) => ColumnValue::NotNullable(val),
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to int8.",
+                    value
+                ),
+            })),
+            "bool" => Ok(ColumnTypeValue::Bool(match value {
+                PreparedStatementValue::Boolean(val) => ColumnValue::NotNullable(val),
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to bool.",
+                    value
+                ),
+            })),
+            "bytea" => Ok(ColumnTypeValue::ByteA(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => ColumnValue::NotNullable(val.into_bytes()),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to bytea.",
+                    value
+                ),
+            })),
+            "bpchar" => Ok(ColumnTypeValue::Char(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => ColumnValue::NotNullable(val),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to bpchar.",
+                    value
+                ),
+            })),
+            "citext" => Ok(ColumnTypeValue::Citext(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => ColumnValue::NotNullable(val),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to citext.",
+                    value
+                ),
+            })),
+            "date" => Ok(ColumnTypeValue::Date(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => {
+                    ColumnValue::NotNullable(NaiveDate::from_str(&val)?)
+                }
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to date.",
+                    value
+                ),
+            })),
+            "float4" => Ok(ColumnTypeValue::Real(match value {
+                PreparedStatementValue::Float(val) => ColumnValue::NotNullable(val as f32),
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to float4.",
+                    value
+                ),
+            })),
+            "float8" => Ok(ColumnTypeValue::Float8(match value {
+                PreparedStatementValue::Float(val) => ColumnValue::NotNullable(val),
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to float8.",
+                    value
+                ),
+            })),
+            "hstore" => Ok(ColumnTypeValue::HStore(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => {
+                    let map = match hstore_from_sql(val.as_bytes()) {
+                        Ok(hstore) => {
+                            match hstore
+                                .map(|(k, v)| Ok((k.to_owned(), v.map(str::to_owned))))
+                                .collect()
+                            {
+                                Ok(hstore_map) => hstore_map,
+                                Err(e) => {
+                                    return Err(Error::generate_error(
+                                        "INVALID_PREPARED_VALUE_TYPE_CONVERSION",
+                                        val,
+                                    ))
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            return Err(Error::generate_error(
+                                "INVALID_PREPARED_VALUE_TYPE_CONVERSION",
+                                val,
+                            ))
+                        }
+                    };
+
+                    ColumnValue::NotNullable(map)
+                }
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to hstore.",
+                    value
+                ),
+            })),
+            "int2" => Ok(ColumnTypeValue::SmallInt(match value {
+                PreparedStatementValue::Int8(val) => ColumnValue::NotNullable(val as i16),
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to int2.",
+                    value
+                ),
+            })),
+            "int4" => Ok(ColumnTypeValue::Int(match value {
+                PreparedStatementValue::Int8(val) => ColumnValue::NotNullable(val as i32),
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to int4.",
+                    value
+                ),
+            })),
+            "json" => Ok(ColumnTypeValue::Json(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => {
+                    ColumnValue::NotNullable(serde_json::from_str(&val)?)
+                }
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to json.",
+                    value
+                ),
+            })),
+            "jsonb" => Ok(ColumnTypeValue::JsonB(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => {
+                    ColumnValue::NotNullable(serde_json::from_str(&val)?)
+                }
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to json.",
+                    value
+                ),
+            })),
+            "macaddr" => Ok(ColumnTypeValue::MacAddr(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => {
+                    ColumnValue::NotNullable(MacAddress(Eui48MacAddress::from_str(&val)?))
+                }
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to macaddr.",
+                    value
+                ),
+            })),
+            "name" => Ok(ColumnTypeValue::Name(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => ColumnValue::NotNullable(val),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to name.",
+                    value
+                ),
+            })),
+            "numeric" => Ok(ColumnTypeValue::Decimal(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => {
+                    ColumnValue::NotNullable(Decimal::from_str(&val)?)
+                }
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to numeric.",
+                    value
+                ),
+            })),
+            "oid" => Ok(ColumnTypeValue::Oid(match value {
+                PreparedStatementValue::Int8(val) => ColumnValue::NotNullable(val as u32),
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to oid.",
+                    value
+                ),
+            })),
+            "text" => Ok(ColumnTypeValue::Text(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => ColumnValue::NotNullable(val),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to text.",
+                    value
+                ),
+            })),
+            "time" => Ok(ColumnTypeValue::Time(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => {
+                    ColumnValue::NotNullable(NaiveTime::from_str(&val)?)
+                }
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to time.",
+                    value
+                ),
+            })),
+            "timestamp" => Ok(ColumnTypeValue::Timestamp(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => {
+                    ColumnValue::NotNullable(NaiveDateTime::from_str(&val)?)
+                }
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to timestamp.",
+                    value
+                ),
+            })),
+            "timestamptz" => Ok(ColumnTypeValue::TimestampTz(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => {
+                    let timestamp = DateTime::from_str(&val)?;
+                    ColumnValue::NotNullable(timestamp)
+                }
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to timestamptz.",
+                    value
+                ),
+            })),
+            "uuid" => Ok(ColumnTypeValue::Uuid(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => {
+                    ColumnValue::NotNullable(Uuid::from_str(&val)?)
+                }
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to uuid.",
+                    value
+                ),
+            })),
+            "varchar" => Ok(ColumnTypeValue::VarChar(match value {
+                PreparedStatementValue::Null => ColumnValue::Nullable(None),
+                PreparedStatementValue::String(val) => ColumnValue::NotNullable(val),
+                _ => unimplemented!(
+                    "Cannot convert from PreparedStatementValue: `{}` to varchar.",
+                    value
+                ),
+            })),
+            _ => Err(Error::generate_error(
+                "UNSUPPORTED_DATA_TYPE",
+                format!("Value {} has unsupported type: {}", value, column_type),
+            )),
+        }
+    }
+
+    fn convert_json_value_to_bigint(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_i64() {
             Some(val) => Ok(ColumnTypeValue::BigInt(ColumnValue::NotNullable(val))),
             None => Err(Error::generate_error(
@@ -179,7 +607,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_bool(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_bool(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_bool() {
             Some(val) => Ok(ColumnTypeValue::Bool(ColumnValue::NotNullable(val))),
             None => Err(Error::generate_error(
@@ -189,7 +617,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_bytea(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_bytea(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_array() {
             Some(raw_bytea_json_vec) => {
                 let bytea_conversion: Result<Vec<u8>, Error> = raw_bytea_json_vec
@@ -217,7 +645,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_char(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_char(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => Ok(ColumnTypeValue::Char(ColumnValue::NotNullable(
                 val.to_string(),
@@ -229,7 +657,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_citext(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_citext(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => Ok(ColumnTypeValue::Citext(ColumnValue::NotNullable(
                 val.to_string(),
@@ -241,7 +669,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_date(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_date(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match NaiveDate::from_str(val) {
                 Ok(date) => Ok(ColumnTypeValue::Date(ColumnValue::NotNullable(date))),
@@ -260,7 +688,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_decimal(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_decimal(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match Decimal::from_str(val) {
                 Ok(decimal) => Ok(ColumnTypeValue::Decimal(ColumnValue::NotNullable(decimal))),
@@ -279,7 +707,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_float8(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_float8(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_f64() {
             Some(n) => Ok(ColumnTypeValue::Float8(ColumnValue::NotNullable(n))),
             None => Err(Error::generate_error(
@@ -289,7 +717,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_hstore(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_hstore(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_object() {
             Some(val_obj) => {
                 let mut val_hash: HashMap<String, Option<String>> = HashMap::new();
@@ -319,7 +747,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_int(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_int(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_i64() {
             Some(n) => Ok(ColumnTypeValue::Int(ColumnValue::NotNullable(n as i32))),
             None => Err(Error::generate_error(
@@ -329,19 +757,19 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_json(value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_json(value: &JsonValue) -> Result<Self, Error> {
         Ok(ColumnTypeValue::Json(ColumnValue::NotNullable(
             value.clone(),
         )))
     }
 
-    fn convert_json_value_to_jsonb(value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_jsonb(value: &JsonValue) -> Result<Self, Error> {
         Ok(ColumnTypeValue::JsonB(ColumnValue::NotNullable(
             value.clone(),
         )))
     }
 
-    fn convert_json_value_to_macaddr(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_macaddr(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match Eui48MacAddress::from_str(val) {
                 Ok(mac) => Ok(ColumnTypeValue::MacAddr(ColumnValue::NotNullable(
@@ -362,7 +790,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_name(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_name(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => Ok(ColumnTypeValue::Name(ColumnValue::NotNullable(
                 val.to_string(),
@@ -374,7 +802,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_oid(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_oid(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_u64() {
             Some(val) => Ok(ColumnTypeValue::Oid(ColumnValue::NotNullable(val as u32))),
             None => Err(Error::generate_error(
@@ -384,7 +812,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_real(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_real(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_f64() {
             Some(n) => Ok(ColumnTypeValue::Real(ColumnValue::NotNullable(n as f32))),
             None => Err(Error::generate_error(
@@ -394,7 +822,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_smallint(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_smallint(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_i64() {
             Some(n) => Ok(ColumnTypeValue::SmallInt(ColumnValue::NotNullable(
                 n as i16,
@@ -406,7 +834,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_text(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_text(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => Ok(ColumnTypeValue::Text(ColumnValue::NotNullable(
                 val.to_string(),
@@ -418,7 +846,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_time(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_time(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match NaiveTime::from_str(val) {
                 Ok(time) => Ok(ColumnTypeValue::Time(ColumnValue::NotNullable(time))),
@@ -437,7 +865,10 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_timestamp(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_timestamp(
+        column_type: &str,
+        value: &JsonValue,
+    ) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match NaiveDateTime::from_str(val) {
                 Ok(timestamp) => Ok(ColumnTypeValue::Timestamp(ColumnValue::NotNullable(
@@ -458,7 +889,10 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_timestamptz(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_timestamptz(
+        column_type: &str,
+        value: &JsonValue,
+    ) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match DateTime::from_str(val) {
                 Ok(timestamptz) => Ok(ColumnTypeValue::TimestampTz(ColumnValue::NotNullable(
@@ -479,7 +913,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_uuid(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_uuid(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match Uuid::parse_str(val) {
                 Ok(uuid_val) => Ok(ColumnTypeValue::Uuid(ColumnValue::NotNullable(uuid_val))),
@@ -498,7 +932,7 @@ impl ColumnTypeValue {
         }
     }
 
-    fn convert_json_value_to_varchar(column_type: &str, value: &Value) -> Result<Self, Error> {
+    fn convert_json_value_to_varchar(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => Ok(ColumnTypeValue::VarChar(ColumnValue::NotNullable(
                 val.to_string(),
@@ -569,4 +1003,286 @@ pub fn convert_row_fields(row: &Row) -> Result<RowFields, Error> {
     }
 
     Ok(row_fields)
+}
+
+#[derive(Debug, PartialEq)]
+/// Possible values that can be passed into a prepared statement Vec.
+pub enum PreparedStatementValue {
+    Boolean(bool),
+    Float(f64),
+    Int8(i64),
+    Null,
+    String(String),
+}
+
+impl fmt::Display for PreparedStatementValue {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Boolean(v) => write!(f, "{}", v,),
+            Self::Float(v) => write!(f, "{}", v,),
+            Self::Int8(v) => write!(f, "{}", v,),
+            Self::Null => write!(f, "null",),
+            Self::String(v) => write!(f, "{}", v,),
+        }
+    }
+}
+
+impl From<SqlValue> for PreparedStatementValue {
+    fn from(v: SqlValue) -> Self {
+        match v {
+            SqlValue::Boolean(v) => Self::Boolean(v),
+            SqlValue::Date(v) => Self::String(v),
+            SqlValue::Double(v) => Self::Float(v.into_inner()),
+            SqlValue::HexStringLiteral(v) => Self::String(v),
+            SqlValue::Interval { .. } => unimplemented!("Interval type not supported"),
+            SqlValue::Long(v) => Self::Int8(v as i64),
+            SqlValue::NationalStringLiteral(v) => Self::String(v),
+            SqlValue::Null => Self::Null,
+            SqlValue::SingleQuotedString(v) => Self::String(v),
+            SqlValue::Time(v) => Self::String(v),
+            SqlValue::Timestamp(v) => Self::String(v),
+        }
+    }
+}
+
+impl PreparedStatementValue {
+    /// Converts a negative number to positive and vice versa. If the value is a boolean, inverts
+    /// the boolean.
+    pub fn invert(&mut self) {
+        match self {
+            Self::Boolean(v) => {
+                *self = Self::Boolean(!*v);
+            }
+            Self::Float(v) => {
+                *self = Self::Float(0.0 - *v);
+            }
+            Self::Int8(v) => {
+                *self = Self::Int8(0 - *v);
+            }
+            Self::Null => (),
+            Self::String(_v) => (),
+        };
+    }
+
+    pub fn to_sql(&self) -> &dyn ToSql {
+        match self {
+            Self::Boolean(v) => v,
+            Self::Float(v) => v,
+            Self::Int8(v) => v,
+            Self::Null => &None::<String>,
+            Self::String(v) => v,
+        }
+    }
+
+    // Parses a given AST and returns a tuple: (String [the converted expression that uses PREPARE
+    // parameters], Vec<PreparedStatementValue>).
+    pub fn generate_prepared_statement_from_ast_expr(
+        ast: &Expr,
+        starting_pos: Option<&mut usize>,
+    ) -> Result<(String, Vec<PreparedStatementValue>), Error> {
+        // TODO: step 4: send identifiers/FKRs:column types hash
+        let mut ast = ast.clone();
+        // mutates `ast`
+        let prepared_values = Self::generate_prepared_values(&mut ast, starting_pos);
+
+        Ok((ast.to_string(), prepared_values))
+    }
+
+    /// Extracts the values being assigned and replaces them with prepared statement position
+    /// parameters (like `$1`, `$2`, etc.). Returns a Vec of prepared values.
+    fn generate_prepared_values(
+        ast: &mut Expr,
+        prepared_param_pos_opt: Option<&mut usize>,
+    ) -> Vec<PreparedStatementValue> {
+        // TODO: step 5: update this code so that identifiers & compound identifiers are matched to
+        // column types, so that we can return a ColumnTypeValues instead of
+        // PreparedStatementValues.
+        let mut prepared_statement_values = vec![];
+        let mut default_pos = 1;
+        let prepared_param_pos = if let Some(pos) = prepared_param_pos_opt {
+            pos
+        } else {
+            &mut default_pos
+        };
+
+        // every time there's a BinaryOp, InList, or UnaryOp extract the value
+        match ast {
+            Expr::Between {
+                expr: between_expr_ast_box,
+                low: between_low_ast_box,
+                high: between_high_ast_box,
+                ..
+            } => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    between_expr_ast_box.borrow_mut(),
+                    Some(prepared_param_pos),
+                ));
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    between_low_ast_box.borrow_mut(),
+                    Some(prepared_param_pos),
+                ));
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    between_high_ast_box.borrow_mut(),
+                    Some(prepared_param_pos),
+                ));
+            }
+            Expr::BinaryOp {
+                left: bin_left_ast_box,
+                right: bin_right_ast_box,
+                ..
+            } => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    bin_left_ast_box.borrow_mut(),
+                    Some(prepared_param_pos),
+                ));
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    bin_right_ast_box.borrow_mut(),
+                    Some(prepared_param_pos),
+                ));
+            }
+            Expr::Case {
+                conditions: case_conditions_ast_vec,
+                results: case_results_ast_vec,
+                else_result: case_else_results_ast_box_opt,
+                ..
+            } => {
+                for case_condition_ast in case_conditions_ast_vec {
+                    prepared_statement_values.extend(Self::generate_prepared_values(
+                        case_condition_ast,
+                        Some(prepared_param_pos),
+                    ));
+                }
+
+                for case_results_ast_vec in case_results_ast_vec {
+                    prepared_statement_values.extend(Self::generate_prepared_values(
+                        case_results_ast_vec,
+                        Some(prepared_param_pos),
+                    ));
+                }
+
+                if let Some(case_else_results_ast_box) = case_else_results_ast_box_opt {
+                    prepared_statement_values.extend(Self::generate_prepared_values(
+                        case_else_results_ast_box.borrow_mut(),
+                        Some(prepared_param_pos),
+                    ));
+                }
+            }
+            Expr::Cast {
+                expr: cast_expr_box,
+                ..
+            } => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    cast_expr_box,
+                    Some(prepared_param_pos),
+                ));
+            }
+            Expr::Collate { expr, .. } => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    expr,
+                    Some(prepared_param_pos),
+                ));
+            }
+            Expr::Extract { expr, .. } => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    expr,
+                    Some(prepared_param_pos),
+                ));
+            }
+            Expr::Function(Function {
+                args: args_ast_vec, ..
+            }) => {
+                for expr in args_ast_vec {
+                    prepared_statement_values.extend(Self::generate_prepared_values(
+                        expr,
+                        Some(prepared_param_pos),
+                    ));
+                }
+            }
+            Expr::InList {
+                expr: list_expr_ast_box,
+                list: list_ast_vec,
+                ..
+            } => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    list_expr_ast_box.borrow_mut(),
+                    Some(prepared_param_pos),
+                ));
+
+                for expr in list_ast_vec {
+                    prepared_statement_values.extend(Self::generate_prepared_values(
+                        expr,
+                        Some(prepared_param_pos),
+                    ));
+                }
+            }
+            Expr::InSubquery { expr: expr_box, .. } => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    expr_box.borrow_mut(),
+                    Some(prepared_param_pos),
+                ));
+            }
+            Expr::IsNotNull(null_ast_box) => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    null_ast_box.borrow_mut(),
+                    Some(prepared_param_pos),
+                ));
+            }
+            Expr::IsNull(null_ast_box) => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    null_ast_box.borrow_mut(),
+                    Some(prepared_param_pos),
+                ));
+            }
+            Expr::Nested(nested_ast_box) => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    nested_ast_box.borrow_mut(),
+                    Some(prepared_param_pos),
+                ));
+            }
+            Expr::Value(val) => {
+                prepared_statement_values.push(PreparedStatementValue::from(val.clone()));
+                *ast = Expr::Identifier(format!("${}", prepared_param_pos));
+                *prepared_param_pos += 1;
+            }
+            Expr::UnaryOp {
+                expr: unary_expr_box,
+                op,
+            } => {
+                let borrowed_expr = unary_expr_box.borrow_mut();
+                if let Expr::Value(val) = borrowed_expr {
+                    let mut prepared_val = PreparedStatementValue::from(val.clone());
+                    match op {
+                        UnaryOperator::Minus => prepared_val.invert(),
+                        UnaryOperator::Not => prepared_val.invert(),
+                        _ => (),
+                    };
+
+                    prepared_statement_values.push(prepared_val);
+                    *ast = Expr::Identifier(format!("${}", prepared_param_pos));
+                    *prepared_param_pos += 1;
+                } else {
+                    prepared_statement_values.extend(Self::generate_prepared_values(
+                        borrowed_expr,
+                        Some(prepared_param_pos),
+                    ));
+                }
+            }
+
+            // Not supported
+            Expr::CompoundIdentifier(_nested_fk_column_vec) => (),
+            Expr::Exists(_query_box) => (),
+            Expr::Identifier(_non_nested_column_name) => (),
+            Expr::QualifiedWildcard(_wildcard_vec) => (),
+            Expr::Subquery(_query_box) => (),
+            Expr::Wildcard => (),
+        };
+
+        prepared_statement_values
+    }
+}
+
+/// Used for returning either number of rows or actual row values in INSERT/UPDATE statements.
+pub enum UpsertResult {
+    Rows(Vec<RowFields>),
+    NumRowsAffected(u64),
 }

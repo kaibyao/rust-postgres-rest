@@ -1,280 +1,17 @@
-use super::postgres_types::RowFields;
+use super::{
+    foreign_keys::{fk_ast_nodes_from_where_ast, ForeignKeyReference},
+    postgres_types::RowFields,
+    select_table_stats::TableColumnStat,
+};
 use crate::Error;
 use lazy_static::lazy_static;
 use regex::Regex;
 use sqlparser::{
-    ast::{Expr, Function, SetExpr, Statement, UnaryOperator, Value},
+    ast::{Expr, SetExpr, Statement},
     dialect::PostgreSqlDialect,
     parser::Parser,
 };
-use std::{borrow::BorrowMut, string::ToString};
-use tokio_postgres::types::ToSql;
-
-#[derive(Debug, PartialEq)]
-/// Possible values that can be passed into a prepared statement Vec.
-pub enum PreparedStatementValue {
-    Boolean(bool),
-    Float(f64),
-    Int8(i64),
-    Null,
-    String(String),
-}
-
-impl From<Value> for PreparedStatementValue {
-    fn from(v: Value) -> Self {
-        match v {
-            Value::Boolean(v) => Self::Boolean(v),
-            Value::Date(v) => Self::String(v),
-            Value::Double(v) => Self::Float(v.into_inner()),
-            Value::HexStringLiteral(v) => Self::String(v),
-            Value::Interval { .. } => unimplemented!("Interval type not supported"),
-            Value::Long(v) => Self::Int8(v as i64),
-            Value::NationalStringLiteral(v) => Self::String(v),
-            Value::Null => Self::Null,
-            Value::SingleQuotedString(v) => Self::String(v),
-            Value::Time(v) => Self::String(v),
-            Value::Timestamp(v) => Self::String(v),
-        }
-    }
-}
-
-impl PreparedStatementValue {
-    /// Converts a negative number to positive and vice versa. If the value is a boolean, inverts
-    /// the boolean.
-    pub fn invert(&mut self) {
-        match self {
-            Self::Boolean(v) => {
-                *self = Self::Boolean(!*v);
-            }
-            Self::Float(v) => {
-                *self = Self::Float(0.0 - *v);
-            }
-            Self::Int8(v) => {
-                *self = Self::Int8(0 - *v);
-            }
-            Self::Null => (),
-            Self::String(_v) => (),
-        };
-    }
-
-    pub fn to_sql(&self) -> &dyn ToSql {
-        match self {
-            Self::Boolean(v) => v,
-            Self::Float(v) => v,
-            Self::Int8(v) => v,
-            Self::Null => &None::<String>,
-            Self::String(v) => v,
-        }
-    }
-}
-
-/// Used for returning either number of rows or actual row values in INSERT/UPDATE statements.
-pub enum UpsertResult {
-    Rows(Vec<RowFields>),
-    NumRowsAffected(u64),
-}
-
-// Parses a given AST and returns a tuple: (String [the converted expression that uses PREPARE
-// parameters], Vec<Value>).
-pub fn generate_prepared_statement_from_ast_expr(
-    ast: &Expr,
-) -> Result<(String, Vec<PreparedStatementValue>), Error> {
-    lazy_static! {
-        // need to parse integer strings as i32 or i64 so we don’t run into conversion errors
-        // (because rust-postgres attempts to convert really large integer strings as i32, which fails)
-        static ref INTEGER_RE: Regex = Regex::new(r"^\d+$").unwrap();
-
-        // anything in quotes should be forced as a string
-        static ref STRING_RE: Regex = Regex::new(r#"^['"](.+)['"]$"#).unwrap();
-    }
-
-    let mut ast = ast.clone();
-    // mutates `ast`
-    let prepared_values = generate_prepared_values(&mut ast, None);
-
-    Ok((ast.to_string(), prepared_values))
-}
-
-/// Extracts the values being assigned and replaces them with prepared statement position parameters
-/// (like `$1`, `$2`, etc.). Returns a Vec of prepared values.
-fn generate_prepared_values(
-    ast: &mut Expr,
-    prepared_param_pos_opt: Option<&mut usize>,
-) -> Vec<PreparedStatementValue> {
-    let mut prepared_statement_values = vec![];
-    let mut default_pos = 1;
-    let prepared_param_pos = if let Some(pos) = prepared_param_pos_opt {
-        pos
-    } else {
-        &mut default_pos
-    };
-
-    // every time there's a BinaryOp, InList, or UnaryOp extract the value
-    match ast {
-        Expr::Between {
-            expr: between_expr_ast_box,
-            low: between_low_ast_box,
-            high: between_high_ast_box,
-            ..
-        } => {
-            prepared_statement_values.extend(generate_prepared_values(
-                between_expr_ast_box.borrow_mut(),
-                Some(prepared_param_pos),
-            ));
-            prepared_statement_values.extend(generate_prepared_values(
-                between_low_ast_box.borrow_mut(),
-                Some(prepared_param_pos),
-            ));
-            prepared_statement_values.extend(generate_prepared_values(
-                between_high_ast_box.borrow_mut(),
-                Some(prepared_param_pos),
-            ));
-        }
-        Expr::BinaryOp {
-            left: bin_left_ast_box,
-            right: bin_right_ast_box,
-            ..
-        } => {
-            prepared_statement_values.extend(generate_prepared_values(
-                bin_left_ast_box.borrow_mut(),
-                Some(prepared_param_pos),
-            ));
-            prepared_statement_values.extend(generate_prepared_values(
-                bin_right_ast_box.borrow_mut(),
-                Some(prepared_param_pos),
-            ));
-        }
-        Expr::Case {
-            conditions: case_conditions_ast_vec,
-            results: case_results_ast_vec,
-            else_result: case_else_results_ast_box_opt,
-            ..
-        } => {
-            for case_condition_ast in case_conditions_ast_vec {
-                prepared_statement_values.extend(generate_prepared_values(
-                    case_condition_ast,
-                    Some(prepared_param_pos),
-                ));
-            }
-
-            for case_results_ast_vec in case_results_ast_vec {
-                prepared_statement_values.extend(generate_prepared_values(
-                    case_results_ast_vec,
-                    Some(prepared_param_pos),
-                ));
-            }
-
-            if let Some(case_else_results_ast_box) = case_else_results_ast_box_opt {
-                prepared_statement_values.extend(generate_prepared_values(
-                    case_else_results_ast_box.borrow_mut(),
-                    Some(prepared_param_pos),
-                ));
-            }
-        }
-        Expr::Cast {
-            expr: cast_expr_box,
-            ..
-        } => {
-            prepared_statement_values.extend(generate_prepared_values(
-                cast_expr_box,
-                Some(prepared_param_pos),
-            ));
-        }
-        Expr::Collate { expr, .. } => {
-            prepared_statement_values
-                .extend(generate_prepared_values(expr, Some(prepared_param_pos)));
-        }
-        Expr::Extract { expr, .. } => {
-            prepared_statement_values
-                .extend(generate_prepared_values(expr, Some(prepared_param_pos)));
-        }
-        Expr::Function(Function {
-            args: args_ast_vec, ..
-        }) => {
-            for expr in args_ast_vec {
-                prepared_statement_values
-                    .extend(generate_prepared_values(expr, Some(prepared_param_pos)));
-            }
-        }
-        Expr::InList {
-            expr: list_expr_ast_box,
-            list: list_ast_vec,
-            ..
-        } => {
-            prepared_statement_values.extend(generate_prepared_values(
-                list_expr_ast_box.borrow_mut(),
-                Some(prepared_param_pos),
-            ));
-
-            for expr in list_ast_vec {
-                prepared_statement_values
-                    .extend(generate_prepared_values(expr, Some(prepared_param_pos)));
-            }
-        }
-        Expr::InSubquery { expr: expr_box, .. } => {
-            prepared_statement_values.extend(generate_prepared_values(
-                expr_box.borrow_mut(),
-                Some(prepared_param_pos),
-            ));
-        }
-        Expr::IsNotNull(null_ast_box) => {
-            prepared_statement_values.extend(generate_prepared_values(
-                null_ast_box.borrow_mut(),
-                Some(prepared_param_pos),
-            ));
-        }
-        Expr::IsNull(null_ast_box) => {
-            prepared_statement_values.extend(generate_prepared_values(
-                null_ast_box.borrow_mut(),
-                Some(prepared_param_pos),
-            ));
-        }
-        Expr::Nested(nested_ast_box) => {
-            prepared_statement_values.extend(generate_prepared_values(
-                nested_ast_box.borrow_mut(),
-                Some(prepared_param_pos),
-            ));
-        }
-        Expr::Value(val) => {
-            prepared_statement_values.push(PreparedStatementValue::from(val.clone()));
-            *ast = Expr::Identifier(format!("${}", prepared_param_pos));
-            *prepared_param_pos += 1;
-        }
-        Expr::UnaryOp {
-            expr: unary_expr_box,
-            op,
-        } => {
-            let borrowed_expr = unary_expr_box.borrow_mut();
-            if let Expr::Value(val) = borrowed_expr {
-                let mut prepared_val = PreparedStatementValue::from(val.clone());
-                match op {
-                    UnaryOperator::Minus => prepared_val.invert(),
-                    UnaryOperator::Not => prepared_val.invert(),
-                    _ => (),
-                };
-
-                prepared_statement_values.push(prepared_val);
-                *ast = Expr::Identifier(format!("${}", prepared_param_pos));
-                *prepared_param_pos += 1;
-            } else {
-                prepared_statement_values.extend(generate_prepared_values(
-                    borrowed_expr,
-                    Some(prepared_param_pos),
-                ));
-            }
-        }
-
-        // Not supported
-        Expr::CompoundIdentifier(_nested_fk_column_vec) => (),
-        Expr::Exists(_query_box) => (),
-        Expr::Identifier(_non_nested_column_name) => (),
-        Expr::QualifiedWildcard(_wildcard_vec) => (),
-        Expr::Subquery(_query_box) => (),
-        Expr::Wildcard => (),
-    };
-
-    prepared_statement_values
-}
+use std::{collections::HashMap, string::ToString};
 
 /// Takes a string of columns and returns the RETURNING clause of an INSERT or UPDATE statement.
 pub fn generate_returning_clause(returning_columns_opt: &Option<Vec<String>>) -> Option<String> {
@@ -283,6 +20,114 @@ pub fn generate_returning_clause(returning_columns_opt: &Option<Vec<String>>) ->
     }
 
     None
+}
+
+/// Generates the WHERE clause and a HashMap of column name : column type after taking foreign keys
+/// into account. Mutates the original AST.
+pub fn get_where_string<'a>(
+    where_ast: &mut Expr,
+    table: &str,
+    stats: &[TableColumnStat],
+    fks: &'a [ForeignKeyReference],
+) -> (String, HashMap<String, String>) {
+    let where_ast_nodes = fk_ast_nodes_from_where_ast(where_ast, true);
+    let mut column_types = HashMap::new();
+
+    for (ast_column_name, ast_node) in where_ast_nodes {
+        if let (true, Some((fk_ref, fk_column))) = (
+            !fks.is_empty(),
+            ForeignKeyReference::find(fks, table, &ast_column_name),
+        ) {
+            let replacement_node = match ast_node {
+                Expr::QualifiedWildcard(_wildcard_vec) => {
+                    let actual_column_name =
+                        vec![fk_ref.table_referred.clone(), fk_column.to_string()];
+                    column_types.insert(
+                        actual_column_name.join("."),
+                        fk_ref.foreign_key_column_type.clone(),
+                    );
+                    Expr::QualifiedWildcard(actual_column_name)
+                }
+                Expr::CompoundIdentifier(_nested_fk_column_vec) => {
+                    let actual_column_name =
+                        vec![fk_ref.table_referred.clone(), fk_column.to_string()];
+                    column_types.insert(
+                        actual_column_name.join("."),
+                        fk_ref.foreign_key_column_type.clone(),
+                    );
+                    Expr::CompoundIdentifier(actual_column_name)
+                }
+                _ => unimplemented!(
+                    "The WHERE clause HashMap only contains wildcards and compound identifiers."
+                ),
+            };
+
+            *ast_node = replacement_node;
+        } else if let Some(stat) = stats.iter().find(|s| s.column_name == ast_column_name) {
+            column_types.insert(ast_column_name, stat.column_type.clone());
+        }
+    }
+
+    (where_ast.to_string(), column_types)
+}
+
+/// Extracts the "real" column name (taking foreign keys and aliases into account).
+/// Returns a Vec of &str tokens that can later be used in `.extend()` or `.join("")`.
+pub fn get_db_column_str<'a>(
+    column: &'a str,
+    table: &'a str,
+    fks: &'a [ForeignKeyReference],
+    is_use_alias: bool,
+) -> Result<Vec<&'a str>, Error> {
+    if fks.is_empty() {
+        if is_use_alias {
+            let _ = validate_alias_identifier(column)?;
+        } else {
+            validate_where_column(column)?;
+        }
+
+        Ok(vec![column])
+    } else {
+        let validate_alias_result = validate_alias_identifier(column)?;
+        let (column, alias, has_alias) = if let (true, Some((actual_column_ref, alias))) =
+            (is_use_alias, validate_alias_result)
+        {
+            (actual_column_ref, alias, true)
+        } else {
+            (&column[..], "", false)
+        };
+
+        let mut tokens = vec![];
+
+        if let (true, Some((fk_ref, fk_column))) = (
+            !fks.is_empty(),
+            ForeignKeyReference::find(fks, table, column),
+        ) {
+            tokens.push(fk_ref.table_referred.as_str());
+            tokens.push(".");
+            tokens.push(fk_column);
+
+            // AS syntax (to avoid ambiguous columns)
+            tokens.push(" AS \"");
+            tokens.push(if has_alias { alias } else { column });
+            tokens.push("\"");
+        } else {
+            // Current column is not an FK, but we still need to use actual table names to avoid
+            // ambiguous columns. Example: If I'm trying to retrieve the ID field of an employee as
+            // well as its company and they're both called "id", I would get an ambiguity error.
+
+            tokens.push(table);
+            tokens.push(".");
+            tokens.push(column);
+
+            // AS syntax (to avoid ambiguous columns)
+            tokens.push(" AS \"");
+            tokens.push(if has_alias { alias } else { column });
+            tokens.push("\"");
+        }
+
+        Ok(tokens)
+    }
 }
 
 /// Given a string of column names separated by commas, convert and return a vector of lowercase
@@ -404,6 +249,72 @@ fn extract_where_ast_from_setexpr(expr: SetExpr) -> Option<Expr> {
         SetExpr::Select(select_box) => select_box.to_owned().selection,
         SetExpr::SetOperation { .. } => unimplemented!("Set operations not supported"),
         SetExpr::Values(_) => unimplemented!("Values not supported"),
+    }
+}
+
+#[cfg(test)]
+mod get_db_column_str_tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn foreign_keys_nested() {
+        let column = "parent_id.company_id.name".to_string();
+        let fks = [ForeignKeyReference {
+            original_refs: vec!["parent_id.company_id.name".to_string()],
+            referring_table: "child".to_string(),
+            referring_column: "parent_id".to_string(),
+            referring_column_type: "int8".to_string(),
+            table_referred: "adult".to_string(),
+            foreign_key_column: "id".to_string(),
+            foreign_key_column_type: "int8".to_string(),
+            nested_fks: vec![ForeignKeyReference {
+                original_refs: vec!["company_id.name".to_string()],
+                referring_table: "adult".to_string(),
+                referring_column: "company_id".to_string(),
+                referring_column_type: "int8".to_string(),
+                table_referred: "company".to_string(),
+                foreign_key_column: "id".to_string(),
+                foreign_key_column_type: "int8".to_string(),
+                nested_fks: vec![],
+            }],
+        }];
+        let table = "child";
+
+        let column_str = get_db_column_str(&column, table, &fks, false)
+            .unwrap()
+            .join("");
+        assert_eq!(column_str, r#"company.name AS "parent_id.company_id.name""#);
+    }
+
+    #[test]
+    fn foreign_keys_nested_alias() {
+        let column = "parent_id.company_id.name AS parent_company".to_string();
+        let fks = [ForeignKeyReference {
+            original_refs: vec!["parent_id.company_id.name".to_string()],
+            referring_table: "child".to_string(),
+            referring_column: "parent_id".to_string(),
+            referring_column_type: "int8".to_string(),
+            table_referred: "adult".to_string(),
+            foreign_key_column: "id".to_string(),
+            foreign_key_column_type: "int8".to_string(),
+            nested_fks: vec![ForeignKeyReference {
+                original_refs: vec!["company_id.name".to_string()],
+                referring_table: "adult".to_string(),
+                referring_column: "company_id".to_string(),
+                referring_column_type: "int8".to_string(),
+                table_referred: "company".to_string(),
+                foreign_key_column: "id".to_string(),
+                foreign_key_column_type: "int8".to_string(),
+                nested_fks: vec![],
+            }],
+        }];
+        let table = "child";
+
+        let column_str = get_db_column_str(&column, table, &fks, true)
+            .unwrap()
+            .join("");
+        assert_eq!(column_str, r#"company.name AS "parent_company""#);
     }
 }
 

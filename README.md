@@ -264,8 +264,10 @@ returns `[{ "id": 1002, "name": "Arya" }]`.
 ## To dos
 
 1. Recreate the Table API.
+1. Consider moving PreparedStatementValue to postgres_types.
 1. Shortened alias syntax ("some_table a" vs "some_table AS a")
 1. parallelize all iters (with Rayon + par_iter).
+1. RETURNING clause should also return foreign key columns.
 1. Add security, customizability, optimizations, etc.
 1. GraphQL API
 1. Optimization: Convert Strings to &str / statics.

@@ -26,6 +26,7 @@ chrono = { version = "0.4.7", features = ["serde"] }
 clokwerk = { version = "0.2.1", optional = true }
 eui48 = { version = "0.4.6", features = ["serde"] }
 failure = "0.1.5"
+fallible-iterator = "0.2.0"
 futures = "0.1.28"
 futures03 = { package = "futures-preview", version = "0.3.0-alpha.17", features = ["compat"] }
 lazy_static = "1.3"

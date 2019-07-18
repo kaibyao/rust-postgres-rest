@@ -7,10 +7,10 @@ use std::collections::HashMap;
 use tokio_postgres::{types::ToSql, Client};
 
 use super::{
-    postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
+    postgres_types::{convert_row_fields, ColumnTypeValue, RowFields, UpsertResult},
     query_types::{QueryParamsInsert, QueryResult},
-    select_table_stats::{select_column_stats, select_column_stats_statement},
-    utils::{generate_returning_clause, UpsertResult},
+    select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
+    utils::generate_returning_clause,
 };
 use crate::Error;
 
@@ -38,11 +38,8 @@ pub fn insert_into_table(
                 .map(|stats| (stats, conn))
         })
         .and_then(move |(stats, mut conn)| {
-            let mut column_types: HashMap<String, String> = HashMap::new();
-
-            for stat in stats.into_iter() {
-                column_types.insert(stat.column_name, stat.column_type);
-            }
+            let column_types: HashMap<String, String> =
+                TableColumnStat::stats_to_column_types(stats);
 
             let num_rows = params.rows.len();
             if num_rows > INSERT_ROWS_BATCH_COUNT {
@@ -221,31 +218,7 @@ fn execute_insert<'a>(
             // execution
             let mut prep_values: Vec<&dyn ToSql> = vec![];
             for column_value in column_values.iter() {
-                match column_value {
-                    ColumnTypeValue::BigInt(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Bool(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::ByteA(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Char(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Citext(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Date(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Decimal(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Float8(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::HStore(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Int(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Json(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::JsonB(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::MacAddr(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Name(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Oid(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Real(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::SmallInt(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Text(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Time(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Timestamp(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::TimestampTz(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Uuid(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::VarChar(col_val) => prep_values.push(col_val),
-                };
+                prep_values.push(column_value);
             }
 
             if is_return_rows {
