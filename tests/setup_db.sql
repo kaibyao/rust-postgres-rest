@@ -9,7 +9,6 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
-CREATE EXTENSION IF NOT EXISTS hstore WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
 -- For testing fields
@@ -26,7 +25,6 @@ CREATE TABLE IF NOT EXISTS public.test_fields (
     test_citext public.citext,
     test_date date,
     test_float8 double precision,
-    test_hstore public.hstore,
     test_int integer,
     test_json json,
     test_jsonb jsonb,
@@ -63,7 +61,6 @@ INSERT INTO public.test_fields (
   test_citext,
   test_date,
   test_float8,
-  test_hstore,
   test_int,
   test_json,
   test_jsonb,
@@ -95,7 +92,6 @@ INSERT INTO public.test_fields (
   'test citext',
   '2018-12-31',
   123.456000000000003,
-  '"a"=>"1.0", "b"=>"2.4"',
   -123,
   '{"a": 123,"b": "cde"}',
   '{"a": 456,"c": "def"}',

@@ -117,10 +117,8 @@ pub fn update_table_rows(
                     .and_then(move |mut conn| {
                         conn.prepare(&statement_str).map_err(Error::from).and_then(
                             move |statement| {
-                                let mut prep_values: Vec<&dyn ToSql> = vec![];
-                                for val in prepared_values.iter() {
-                                    prep_values.push(val);
-                                }
+                                let prep_values: Vec<&dyn ToSql> =
+                                    prepared_values.iter().map(|v| v as _).collect();
 
                                 if is_return_rows {
                                     let return_rows_future = conn
@@ -251,8 +249,9 @@ fn build_update_statement(
         // parse through the `WHERE` AST and return a tuple: (expression-with-prepared-params
         // string, Vec of tuples (position, Value)).
         let (where_string_with_prepared_positions, prepared_values_vec) =
-            PreparedStatementValue::generate_prepared_statement_from_ast_expr(
+            ColumnTypeValue::generate_prepared_statement_from_ast_expr(
                 &where_ast,
+                &column_types,
                 Some(&mut prepared_value_pos),
             )?;
         where_string = where_string_with_prepared_positions;

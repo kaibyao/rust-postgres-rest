@@ -10,7 +10,7 @@ use tokio_postgres::types::ToSql;
 
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
-    postgres_types::{convert_row_fields, PreparedStatementValue, RowFields},
+    postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
     query_types::QueryParamsSelect,
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
@@ -113,19 +113,8 @@ pub fn select_table_rows(
                 conn.prepare(&statement_str)
                     .map_err(Error::from)
                     .and_then(move |statement| {
-                        let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
-                            vec![]
-                        } else {
-                            // TODO: this actually isn't going to work because of things like HStore
-                            // being a string (need to convert the string value to a hashmap first)
-                            // we need to get the column type of each prepared value so we can
-                            // convert it to a ColumnTypeValue
-
-                            // I think the idea to go with for now is to get the stats of the table
-                            // (which contain column type information), create a hashmap of all
-                            // column names to their column type + foreign key column types
-                            prepared_values.iter().map(|val| val.to_sql()).collect()
-                        };
+                        let prep_values: Vec<&dyn ToSql> =
+                            prepared_values.iter().map(|v| v as _).collect();
 
                         conn.query(&statement, &prep_values)
                             .collect()
@@ -154,7 +143,7 @@ fn build_select_statement(
     stats: Vec<TableColumnStat>,
     fks: Vec<ForeignKeyReference>,
     mut where_ast: Expr,
-) -> Result<(String, Vec<PreparedStatementValue>), Error> {
+) -> Result<(String, Vec<ColumnTypeValue>), Error> {
     let mut statement = vec!["SELECT "];
     let is_fks_exist = !fks.is_empty();
 
@@ -192,16 +181,18 @@ fn build_select_statement(
     // building WHERE string
     let (mut where_string, column_types) =
         get_where_string(&mut where_ast, &params.table, &stats, &fks);
-    // TODO: step 2: we also have a hash of all identifiers/FKRs and their column types.
     let mut prepared_values = vec![];
     if &where_string != "" {
         statement.push(" WHERE (");
 
         // parse through the `WHERE` AST and return a tuple: (expression-with-prepared-params
         // string, Vec of tuples (position, Value)).
-        // TODO: step 3: send the hash of identifiers/FKRs -> column types
         let (where_string_with_prepared_positions, prepared_values_vec) =
-            PreparedStatementValue::generate_prepared_statement_from_ast_expr(&where_ast, None)?;
+            ColumnTypeValue::generate_prepared_statement_from_ast_expr(
+                &where_ast,
+                &column_types,
+                None,
+            )?;
         where_string = where_string_with_prepared_positions;
         prepared_values = prepared_values_vec;
 
@@ -316,7 +307,8 @@ fn get_column_str<'a>(
 
 #[cfg(test)]
 mod build_select_statement_tests {
-    use super::{super::query_types::QueryParamsSelect, *};
+    use super::*;
+    use crate::queries::{postgres_types::ColumnValue, query_types::QueryParamsSelect};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -500,7 +492,32 @@ mod build_select_statement_tests {
                 order_by: None,
                 table: "a_table".to_string(),
             },
-            vec![],
+            vec![
+                TableColumnStat {
+                    column_name: "id".to_string(),
+                    column_type: "int8".to_string(),
+                    default_value: None,
+                    is_nullable: false,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "name".to_string(),
+                    column_type: "text".to_string(),
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+            ],
             vec![],
             where_ast,
         ) {
@@ -512,9 +529,9 @@ mod build_select_statement_tests {
                 assert_eq!(
                     prepared_values,
                     vec![
-                        PreparedStatementValue::Int8(10),
-                        PreparedStatementValue::Int8(20),
-                        PreparedStatementValue::String("test".to_string()),
+                        ColumnTypeValue::BigInt(ColumnValue::NotNullable(10)),
+                        ColumnTypeValue::BigInt(ColumnValue::NotNullable(20)),
+                        ColumnTypeValue::Text(ColumnValue::NotNullable("test".to_string())),
                     ]
                 );
             }
@@ -547,7 +564,92 @@ mod build_select_statement_tests {
                 order_by: Some(vec!["due_date desc".to_string()]),
                 table: "a_table".to_string(),
             },
-            vec![],
+            vec![
+                TableColumnStat {
+                    column_name: "id".to_string(),
+                    column_type: "int8".to_string(),
+                    default_value: None,
+                    is_nullable: false,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "test_bigint".to_string(),
+                    column_type: "int8".to_string(),
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "test_bigserial".to_string(),
+                    column_type: "int8".to_string(),
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "test_name".to_string(),
+                    column_type: "text".to_string(),
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "test_date".to_string(),
+                    column_type: "date".to_string(),
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "test_timestamptz".to_string(),
+                    column_type: "timestamptz".to_string(),
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "due_date".to_string(),
+                    column_type: "date".to_string(),
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+            ],
             vec![],
             where_ast,
         ) {
@@ -560,8 +662,10 @@ mod build_select_statement_tests {
                 assert_eq!(
                     prepared_values,
                     vec![
-                        PreparedStatementValue::Int8(46_327_143_679_919_107i64),
-                        PreparedStatementValue::String("a name".to_string()),
+                        ColumnTypeValue::BigInt(ColumnValue::NotNullable(
+                            46_327_143_679_919_107i64
+                        )),
+                        ColumnTypeValue::Text(ColumnValue::NotNullable("a name".to_string())),
                     ]
                 );
             }

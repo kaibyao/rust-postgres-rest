@@ -257,6 +257,7 @@ returns `[{ "id": 1002, "name": "Arya" }]`.
 
 ## Not supported
 
+- HStore (`rust-sqlparser` doesn't support it). Use JSON/JSONB instead.
 - Bit and Varbit types (mostly because I'm not comfortable working with them yet)
 - Exclusion and Trigger constraints
 - `BETWEEN` (see [Postgres wiki article](https://wiki.postgresql.org/wiki/Don%27t_Do_This#Don.27t_use_BETWEEN_.28especially_with_timestamps.29))

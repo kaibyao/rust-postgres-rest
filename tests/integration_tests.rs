@@ -88,7 +88,7 @@ fn get_table_stats() {
     let url = ["http://", &SERVER_IP, ":", &NO_CACHE_PORT, "/api/child"].join("");
     let mut res = reqwest::get(&url).unwrap();
     let response_body: Value = res.json().unwrap();
-    dbg!(serde_json::to_string(&response_body).unwrap());
+
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(response_body, expected_response_body);
 

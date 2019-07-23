@@ -2,13 +2,18 @@ use crate::Error;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use eui48::MacAddress as Eui48MacAddress;
 use failure::Fail;
-use fallible_iterator::FallibleIterator;
-use postgres_protocol::types::{hstore_from_sql, macaddr_from_sql, macaddr_to_sql};
+use postgres_protocol::types::macaddr_to_sql;
 use rust_decimal::Decimal;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use sqlparser::ast::{Expr, Function, UnaryOperator, Value as SqlValue};
-use std::{borrow::BorrowMut, collections::HashMap, error::Error as StdError, fmt, str::FromStr};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    collections::HashMap,
+    error::Error as StdError,
+    fmt, mem,
+    str::FromStr,
+};
 use tokio_postgres::{
     accepts,
     row::Row,
@@ -18,14 +23,14 @@ use tokio_postgres::{
 use uuid::Uuid;
 
 /// we have to define our own MacAddress type in order for Serde to serialize it properly.
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 pub struct MacAddress(Eui48MacAddress);
 
 // mostly copied from the postgres-protocol and postgres-shared libraries
 impl<'a> FromSql<'a> for MacAddress {
-    fn from_sql(_: &Type, raw: &[u8]) -> Result<MacAddress, Box<dyn StdError + Sync + Send>> {
-        let bytes = macaddr_from_sql(raw)?;
-        Ok(MacAddress(Eui48MacAddress::new(bytes)))
+    fn from_sql(typ: &Type, raw: &[u8]) -> Result<MacAddress, Box<dyn StdError + Sync + Send>> {
+        let mac = <Eui48MacAddress as FromSql>::from_sql(typ, raw)?;
+        Ok(MacAddress(mac))
     }
 
     accepts!(MACADDR);
@@ -43,7 +48,7 @@ impl ToSql for MacAddress {
     to_sql_checked!();
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 /// Represents a single column value for a returned row. We have to have an Enum describing column
 /// data that is non-nullable vs nullable
@@ -104,7 +109,7 @@ where
     to_sql_checked!();
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 /// Represents a postgres column's type
 pub enum ColumnTypeValue {
@@ -117,7 +122,6 @@ pub enum ColumnTypeValue {
     Date(ColumnValue<NaiveDate>),
     Decimal(ColumnValue<Decimal>),
     Float8(ColumnValue<f64>),
-    HStore(ColumnValue<HashMap<String, Option<String>>>),
     Int(ColumnValue<i32>),
     Json(ColumnValue<JsonValue>),
     JsonB(ColumnValue<JsonValue>),
@@ -147,7 +151,6 @@ impl<'a> FromSql<'a> for ColumnTypeValue {
             "date" => <ColumnValue<NaiveDate> as FromSql>::accepts(ty),
             "float4" => <ColumnValue<f32> as FromSql>::accepts(ty),
             "float8" => <ColumnValue<f64> as FromSql>::accepts(ty),
-            "hstore" => <ColumnValue<HashMap<String, Option<String>>> as FromSql>::accepts(ty),
             "int2" => <ColumnValue<i16> as FromSql>::accepts(ty),
             "int4" => <ColumnValue<i32> as FromSql>::accepts(ty),
             "json" => <ColumnValue<JsonValue> as FromSql>::accepts(ty),
@@ -195,9 +198,6 @@ impl<'a> FromSql<'a> for ColumnTypeValue {
             "float8" => Ok(Self::Float8(<ColumnValue<f64> as FromSql>::from_sql(
                 ty, raw,
             )?)),
-            "hstore" => Ok(Self::HStore(
-                <ColumnValue<HashMap<String, Option<String>>> as FromSql>::from_sql(ty, raw)?,
-            )),
             "int2" => Ok(Self::SmallInt(<ColumnValue<i16> as FromSql>::from_sql(
                 ty, raw,
             )?)),
@@ -273,7 +273,6 @@ impl ToSql for ColumnTypeValue {
             Self::Date(col_val) => col_val.to_sql(ty, out),
             Self::Decimal(col_val) => col_val.to_sql(ty, out),
             Self::Float8(col_val) => col_val.to_sql(ty, out),
-            Self::HStore(col_val) => col_val.to_sql(ty, out),
             Self::Int(col_val) => col_val.to_sql(ty, out),
             Self::Json(col_val) => col_val.to_sql(ty, out),
             Self::JsonB(col_val) => col_val.to_sql(ty, out),
@@ -301,7 +300,6 @@ impl ToSql for ColumnTypeValue {
             "date" => <ColumnValue<NaiveDate> as ToSql>::accepts(ty),
             "float4" => <ColumnValue<f32> as ToSql>::accepts(ty),
             "float8" => <ColumnValue<f64> as ToSql>::accepts(ty),
-            "hstore" => <ColumnValue<HashMap<String, Option<String>>> as ToSql>::accepts(ty),
             "int2" => <ColumnValue<i16> as ToSql>::accepts(ty),
             "int4" => <ColumnValue<i32> as ToSql>::accepts(ty),
             "json" => <ColumnValue<JsonValue> as ToSql>::accepts(ty),
@@ -335,7 +333,6 @@ impl ColumnTypeValue {
             "date" => Self::convert_json_value_to_date(column_type, value),
             "float4" => Self::convert_json_value_to_real(column_type, value),
             "float8" => Self::convert_json_value_to_float8(column_type, value),
-            "hstore" => Self::convert_json_value_to_hstore(column_type, value),
             "int2" => Self::convert_json_value_to_smallint(column_type, value),
             "int4" => Self::convert_json_value_to_int(column_type, value),
             "json" => Self::convert_json_value_to_json(value),
@@ -425,39 +422,6 @@ impl ColumnTypeValue {
                 PreparedStatementValue::Null => ColumnValue::Nullable(None),
                 _ => unimplemented!(
                     "Cannot convert from PreparedStatementValue: `{}` to float8.",
-                    value
-                ),
-            })),
-            "hstore" => Ok(ColumnTypeValue::HStore(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => {
-                    let map = match hstore_from_sql(val.as_bytes()) {
-                        Ok(hstore) => {
-                            match hstore
-                                .map(|(k, v)| Ok((k.to_owned(), v.map(str::to_owned))))
-                                .collect()
-                            {
-                                Ok(hstore_map) => hstore_map,
-                                Err(e) => {
-                                    return Err(Error::generate_error(
-                                        "INVALID_PREPARED_VALUE_TYPE_CONVERSION",
-                                        val,
-                                    ))
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            return Err(Error::generate_error(
-                                "INVALID_PREPARED_VALUE_TYPE_CONVERSION",
-                                val,
-                            ))
-                        }
-                    };
-
-                    ColumnValue::NotNullable(map)
-                }
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to hstore.",
                     value
                 ),
             })),
@@ -597,6 +561,273 @@ impl ColumnTypeValue {
         }
     }
 
+    // Parses a given AST and returns a tuple: (String [the converted expression that uses PREPARE
+    // parameters], Vec<ColumnTypeValue>).
+    pub fn generate_prepared_statement_from_ast_expr(
+        ast: &Expr,
+        column_types: &HashMap<String, String>,
+        starting_pos: Option<&mut usize>,
+    ) -> Result<(String, Vec<ColumnTypeValue>), Error> {
+        let mut ast = ast.clone();
+        // mutates `ast`
+        let prepared_values = Self::generate_prepared_values(&mut ast, column_types, starting_pos)?;
+
+        Ok((ast.to_string(), prepared_values))
+    }
+
+    /// Extracts the values being assigned and replaces them with prepared statement position
+    /// parameters (like `$1`, `$2`, etc.). Returns a Vec of prepared values.
+    fn generate_prepared_values(
+        ast: &mut Expr,
+        column_types: &HashMap<String, String>,
+        prepared_param_pos_opt: Option<&mut usize>,
+    ) -> Result<Vec<ColumnTypeValue>, Error> {
+        let mut prepared_statement_values = vec![];
+        let mut default_pos = 1;
+        let prepared_param_pos = if let Some(pos) = prepared_param_pos_opt {
+            pos
+        } else {
+            &mut default_pos
+        };
+
+        // Attempts to get the column name from an Expr
+        let mut get_column_name =
+            |possible_column_name_expr: &mut Expr| -> Result<Option<String>, Error> {
+                match possible_column_name_expr {
+                    Expr::Identifier(non_nested_column_name) => {
+                        Ok(Some(non_nested_column_name.clone()))
+                    }
+                    Expr::CompoundIdentifier(nested_fk_column_vec) => {
+                        Ok(Some(nested_fk_column_vec.join(".")))
+                    }
+                    _ => {
+                        prepared_statement_values.extend(Self::generate_prepared_values(
+                            possible_column_name_expr,
+                            column_types,
+                            Some(prepared_param_pos),
+                        )?);
+                        Ok(None)
+                    }
+                }
+            };
+
+        // every time there's a BinaryOp, InList, or UnaryOp extract the value
+        let mut ast_temp_replace = mem::replace(ast, Expr::Wildcard);
+        match &mut ast_temp_replace {
+            Expr::BinaryOp {
+                left: bin_left_ast_box,
+                right: bin_right_ast_box,
+                ..
+            } => {
+                let column_name_opt = get_column_name(bin_left_ast_box.borrow_mut())?;
+                let expr = bin_right_ast_box.borrow_mut();
+                if let Some(ast_replacement) = Self::attempt_prepared_value_extraction(
+                    column_types,
+                    prepared_param_pos,
+                    &column_name_opt,
+                    expr,
+                    &mut prepared_statement_values,
+                )? {
+                    *expr = ast_replacement;
+                };
+            }
+            Expr::InList {
+                expr: list_expr_ast_box,
+                list: list_ast_vec,
+                ..
+            } => {
+                let column_name_opt = get_column_name(list_expr_ast_box.borrow_mut())?;
+
+                for expr in list_ast_vec {
+                    if let Some(ast_replacement) = Self::attempt_prepared_value_extraction(
+                        column_types,
+                        prepared_param_pos,
+                        &column_name_opt,
+                        expr,
+                        &mut prepared_statement_values,
+                    )? {
+                        *expr = ast_replacement;
+                    };
+                }
+            }
+
+            Expr::Between {
+                expr: between_expr_ast_box,
+                low: between_low_ast_box,
+                high: between_high_ast_box,
+                ..
+            } => {
+                let column_name_opt = get_column_name(between_expr_ast_box.borrow_mut())?;
+
+                let between_low_ast = between_low_ast_box.borrow_mut();
+                if let Some(ast_replacement) = Self::attempt_prepared_value_extraction(
+                    column_types,
+                    prepared_param_pos,
+                    &column_name_opt,
+                    between_low_ast,
+                    &mut prepared_statement_values,
+                )? {
+                    *between_low_ast = ast_replacement;
+                }
+
+                let between_high_ast = between_high_ast_box.borrow_mut();
+                if let Some(ast_replacement) = Self::attempt_prepared_value_extraction(
+                    column_types,
+                    prepared_param_pos,
+                    &column_name_opt,
+                    between_high_ast,
+                    &mut prepared_statement_values,
+                )? {
+                    *between_high_ast = ast_replacement;
+                }
+            }
+            Expr::Case {
+                conditions: case_conditions_ast_vec,
+                results: case_results_ast_vec,
+                else_result: case_else_results_ast_box_opt,
+                ..
+            } => {
+                for case_condition_ast in case_conditions_ast_vec {
+                    prepared_statement_values.extend(Self::generate_prepared_values(
+                        case_condition_ast,
+                        column_types,
+                        Some(prepared_param_pos),
+                    )?);
+                }
+
+                for case_results_ast_vec in case_results_ast_vec {
+                    prepared_statement_values.extend(Self::generate_prepared_values(
+                        case_results_ast_vec,
+                        column_types,
+                        Some(prepared_param_pos),
+                    )?);
+                }
+
+                if let Some(case_else_results_ast_box) = case_else_results_ast_box_opt {
+                    prepared_statement_values.extend(Self::generate_prepared_values(
+                        case_else_results_ast_box.borrow_mut(),
+                        column_types,
+                        Some(prepared_param_pos),
+                    )?);
+                }
+            }
+            Expr::Cast {
+                expr: cast_expr_box,
+                ..
+            } => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    cast_expr_box,
+                    column_types,
+                    Some(prepared_param_pos),
+                )?);
+            }
+            Expr::Collate { expr, .. } => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    expr,
+                    column_types,
+                    Some(prepared_param_pos),
+                )?);
+            }
+            Expr::Extract { expr, .. } => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    expr,
+                    column_types,
+                    Some(prepared_param_pos),
+                )?);
+            }
+            Expr::Function(Function {
+                args: args_ast_vec, ..
+            }) => {
+                for expr in args_ast_vec {
+                    prepared_statement_values.extend(Self::generate_prepared_values(
+                        expr,
+                        column_types,
+                        Some(prepared_param_pos),
+                    )?);
+                }
+            }
+            Expr::InSubquery { expr: expr_box, .. } => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    expr_box.borrow_mut(),
+                    column_types,
+                    Some(prepared_param_pos),
+                )?);
+            }
+            Expr::IsNotNull(null_ast_box) => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    null_ast_box.borrow_mut(),
+                    column_types,
+                    Some(prepared_param_pos),
+                )?);
+            }
+            Expr::IsNull(null_ast_box) => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    null_ast_box.borrow_mut(),
+                    column_types,
+                    Some(prepared_param_pos),
+                )?);
+            }
+            Expr::Nested(nested_ast_box) => {
+                prepared_statement_values.extend(Self::generate_prepared_values(
+                    nested_ast_box.borrow_mut(),
+                    column_types,
+                    Some(prepared_param_pos),
+                )?);
+            }
+
+            // Not supported
+            Expr::Identifier(_non_nested_column_name) => (),
+            Expr::CompoundIdentifier(_nested_fk_column_vec) => (),
+            Expr::Exists(_query_box) => (),
+            Expr::QualifiedWildcard(_wildcard_vec) => (),
+            Expr::Subquery(_query_box) => (),
+            Expr::UnaryOp {
+                expr: _unary_expr_box,
+                ..
+            } => (),
+            Expr::Value(_val) => (),
+            Expr::Wildcard => (),
+        };
+
+        // move the mutated AST back into the main AST tree
+        *ast = ast_temp_replace;
+
+        Ok(prepared_statement_values)
+    }
+
+    /// Attempts to swap a Value with a prepared parameter string ($1, $2, etc.) and extract that
+    /// value as a ColumnTypeValue.
+    fn attempt_prepared_value_extraction(
+        column_types: &HashMap<String, String>,
+        prepared_param_pos: &mut usize,
+        column_name_opt: &Option<String>,
+        expr: &mut Expr,
+        prepared_statement_values: &mut Vec<ColumnTypeValue>,
+    ) -> Result<Option<Expr>, Error> {
+        let val_opt = PreparedStatementValue::attempt_extract_prepared_value_from_expr(expr);
+
+        if let (Some(column_name), true) = (column_name_opt, val_opt.is_some()) {
+            if let Some(column_type) = column_types.get(column_name) {
+                prepared_statement_values.push(Self::from_prepared_statement_value(
+                    column_type,
+                    val_opt.unwrap(),
+                )?);
+                let new_node = Expr::Identifier(format!("${}", prepared_param_pos));
+                *prepared_param_pos += 1;
+
+                return Ok(Some(new_node));
+            }
+        }
+
+        prepared_statement_values.extend(Self::generate_prepared_values(
+            expr,
+            column_types,
+            Some(prepared_param_pos),
+        )?);
+
+        Ok(None)
+    }
+
     fn convert_json_value_to_bigint(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_i64() {
             Some(val) => Ok(ColumnTypeValue::BigInt(ColumnValue::NotNullable(val))),
@@ -710,36 +941,6 @@ impl ColumnTypeValue {
     fn convert_json_value_to_float8(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match value.as_f64() {
             Some(n) => Ok(ColumnTypeValue::Float8(ColumnValue::NotNullable(n))),
-            None => Err(Error::generate_error(
-                "INVALID_JSON_TYPE_CONVERSION",
-                format!("Value: `{}`. Column type: `{}`.", value, column_type),
-            )),
-        }
-    }
-
-    fn convert_json_value_to_hstore(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
-        match value.as_object() {
-            Some(val_obj) => {
-                let mut val_hash: HashMap<String, Option<String>> = HashMap::new();
-                for key in val_obj.keys() {
-                    match val_obj.get(key) {
-                        Some(val) => match val.as_str() {
-                            Some(val_str) => {
-                                val_hash.insert(key.clone(), Some(val_str.to_string()))
-                            }
-                            None => {
-                                return Err(Error::generate_error(
-                                    "INVALID_JSON_TYPE_CONVERSION",
-                                    format!("Value: `{}`. Column type: `{}`.", value, column_type),
-                                ))
-                            }
-                        },
-                        None => val_hash.insert(key.clone(), None),
-                    };
-                }
-
-                Ok(ColumnTypeValue::HStore(ColumnValue::NotNullable(val_hash)))
-            }
             None => Err(Error::generate_error(
                 "INVALID_JSON_TYPE_CONVERSION",
                 format!("Value: `{}`. Column type: `{}`.", value, column_type),
@@ -968,7 +1169,6 @@ pub fn convert_row_fields(row: &Row) -> Result<RowFields, Error> {
                 "date" => ColumnTypeValue::Date(row.get(i)),
                 "float4" => ColumnTypeValue::Real(row.get(i)),
                 "float8" => ColumnTypeValue::Float8(row.get(i)),
-                "hstore" => ColumnTypeValue::HStore(row.get(i)),
                 "int2" => ColumnTypeValue::SmallInt(row.get(i)),
                 "int4" => ColumnTypeValue::Int(row.get(i)), // int
                 "json" => ColumnTypeValue::Json(row.get(i)),
@@ -1046,6 +1246,33 @@ impl From<SqlValue> for PreparedStatementValue {
 }
 
 impl PreparedStatementValue {
+    /// Tries to extract a prepared statement value from an Expr.
+    pub fn attempt_extract_prepared_value_from_expr(expr: &Expr) -> Option<Self> {
+        match expr {
+            Expr::Value(val) => Some(PreparedStatementValue::from(val.clone())),
+            Expr::UnaryOp {
+                expr: unary_expr_box,
+                op,
+            } => {
+                let borrowed_expr = unary_expr_box.borrow();
+
+                if let Expr::Value(val) = borrowed_expr {
+                    let mut prepared_val = PreparedStatementValue::from(val.clone());
+                    match op {
+                        UnaryOperator::Minus => prepared_val.invert(),
+                        UnaryOperator::Not => prepared_val.invert(),
+                        _ => (),
+                    };
+
+                    Some(prepared_val)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Converts a negative number to positive and vice versa. If the value is a boolean, inverts
     /// the boolean.
     pub fn invert(&mut self) {
@@ -1062,222 +1289,6 @@ impl PreparedStatementValue {
             Self::Null => (),
             Self::String(_v) => (),
         };
-    }
-
-    pub fn to_sql(&self) -> &dyn ToSql {
-        match self {
-            Self::Boolean(v) => v,
-            Self::Float(v) => v,
-            Self::Int8(v) => v,
-            Self::Null => &None::<String>,
-            Self::String(v) => v,
-        }
-    }
-
-    // Parses a given AST and returns a tuple: (String [the converted expression that uses PREPARE
-    // parameters], Vec<PreparedStatementValue>).
-    pub fn generate_prepared_statement_from_ast_expr(
-        ast: &Expr,
-        starting_pos: Option<&mut usize>,
-    ) -> Result<(String, Vec<PreparedStatementValue>), Error> {
-        // TODO: step 4: send identifiers/FKRs:column types hash
-        let mut ast = ast.clone();
-        // mutates `ast`
-        let prepared_values = Self::generate_prepared_values(&mut ast, starting_pos);
-
-        Ok((ast.to_string(), prepared_values))
-    }
-
-    /// Extracts the values being assigned and replaces them with prepared statement position
-    /// parameters (like `$1`, `$2`, etc.). Returns a Vec of prepared values.
-    fn generate_prepared_values(
-        ast: &mut Expr,
-        prepared_param_pos_opt: Option<&mut usize>,
-    ) -> Vec<PreparedStatementValue> {
-        // TODO: step 5: update this code so that identifiers & compound identifiers are matched to
-        // column types, so that we can return a ColumnTypeValues instead of
-        // PreparedStatementValues.
-        let mut prepared_statement_values = vec![];
-        let mut default_pos = 1;
-        let prepared_param_pos = if let Some(pos) = prepared_param_pos_opt {
-            pos
-        } else {
-            &mut default_pos
-        };
-
-        // every time there's a BinaryOp, InList, or UnaryOp extract the value
-        match ast {
-            Expr::Between {
-                expr: between_expr_ast_box,
-                low: between_low_ast_box,
-                high: between_high_ast_box,
-                ..
-            } => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    between_expr_ast_box.borrow_mut(),
-                    Some(prepared_param_pos),
-                ));
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    between_low_ast_box.borrow_mut(),
-                    Some(prepared_param_pos),
-                ));
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    between_high_ast_box.borrow_mut(),
-                    Some(prepared_param_pos),
-                ));
-            }
-            Expr::BinaryOp {
-                left: bin_left_ast_box,
-                right: bin_right_ast_box,
-                ..
-            } => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    bin_left_ast_box.borrow_mut(),
-                    Some(prepared_param_pos),
-                ));
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    bin_right_ast_box.borrow_mut(),
-                    Some(prepared_param_pos),
-                ));
-            }
-            Expr::Case {
-                conditions: case_conditions_ast_vec,
-                results: case_results_ast_vec,
-                else_result: case_else_results_ast_box_opt,
-                ..
-            } => {
-                for case_condition_ast in case_conditions_ast_vec {
-                    prepared_statement_values.extend(Self::generate_prepared_values(
-                        case_condition_ast,
-                        Some(prepared_param_pos),
-                    ));
-                }
-
-                for case_results_ast_vec in case_results_ast_vec {
-                    prepared_statement_values.extend(Self::generate_prepared_values(
-                        case_results_ast_vec,
-                        Some(prepared_param_pos),
-                    ));
-                }
-
-                if let Some(case_else_results_ast_box) = case_else_results_ast_box_opt {
-                    prepared_statement_values.extend(Self::generate_prepared_values(
-                        case_else_results_ast_box.borrow_mut(),
-                        Some(prepared_param_pos),
-                    ));
-                }
-            }
-            Expr::Cast {
-                expr: cast_expr_box,
-                ..
-            } => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    cast_expr_box,
-                    Some(prepared_param_pos),
-                ));
-            }
-            Expr::Collate { expr, .. } => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    expr,
-                    Some(prepared_param_pos),
-                ));
-            }
-            Expr::Extract { expr, .. } => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    expr,
-                    Some(prepared_param_pos),
-                ));
-            }
-            Expr::Function(Function {
-                args: args_ast_vec, ..
-            }) => {
-                for expr in args_ast_vec {
-                    prepared_statement_values.extend(Self::generate_prepared_values(
-                        expr,
-                        Some(prepared_param_pos),
-                    ));
-                }
-            }
-            Expr::InList {
-                expr: list_expr_ast_box,
-                list: list_ast_vec,
-                ..
-            } => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    list_expr_ast_box.borrow_mut(),
-                    Some(prepared_param_pos),
-                ));
-
-                for expr in list_ast_vec {
-                    prepared_statement_values.extend(Self::generate_prepared_values(
-                        expr,
-                        Some(prepared_param_pos),
-                    ));
-                }
-            }
-            Expr::InSubquery { expr: expr_box, .. } => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    expr_box.borrow_mut(),
-                    Some(prepared_param_pos),
-                ));
-            }
-            Expr::IsNotNull(null_ast_box) => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    null_ast_box.borrow_mut(),
-                    Some(prepared_param_pos),
-                ));
-            }
-            Expr::IsNull(null_ast_box) => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    null_ast_box.borrow_mut(),
-                    Some(prepared_param_pos),
-                ));
-            }
-            Expr::Nested(nested_ast_box) => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
-                    nested_ast_box.borrow_mut(),
-                    Some(prepared_param_pos),
-                ));
-            }
-            Expr::Value(val) => {
-                prepared_statement_values.push(PreparedStatementValue::from(val.clone()));
-                *ast = Expr::Identifier(format!("${}", prepared_param_pos));
-                *prepared_param_pos += 1;
-            }
-            Expr::UnaryOp {
-                expr: unary_expr_box,
-                op,
-            } => {
-                let borrowed_expr = unary_expr_box.borrow_mut();
-                if let Expr::Value(val) = borrowed_expr {
-                    let mut prepared_val = PreparedStatementValue::from(val.clone());
-                    match op {
-                        UnaryOperator::Minus => prepared_val.invert(),
-                        UnaryOperator::Not => prepared_val.invert(),
-                        _ => (),
-                    };
-
-                    prepared_statement_values.push(prepared_val);
-                    *ast = Expr::Identifier(format!("${}", prepared_param_pos));
-                    *prepared_param_pos += 1;
-                } else {
-                    prepared_statement_values.extend(Self::generate_prepared_values(
-                        borrowed_expr,
-                        Some(prepared_param_pos),
-                    ));
-                }
-            }
-
-            // Not supported
-            Expr::CompoundIdentifier(_nested_fk_column_vec) => (),
-            Expr::Exists(_query_box) => (),
-            Expr::Identifier(_non_nested_column_name) => (),
-            Expr::QualifiedWildcard(_wildcard_vec) => (),
-            Expr::Subquery(_query_box) => (),
-            Expr::Wildcard => (),
-        };
-
-        prepared_statement_values
     }
 }
 

@@ -1,6 +1,5 @@
 use super::{
     foreign_keys::{fk_ast_nodes_from_where_ast, ForeignKeyReference},
-    postgres_types::RowFields,
     select_table_stats::TableColumnStat,
 };
 use crate::Error;
