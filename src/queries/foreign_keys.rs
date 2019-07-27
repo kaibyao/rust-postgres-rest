@@ -730,37 +730,30 @@ impl ForeignKeyReference {
         None
     }
 
-    /// Given a list of foreign key references, construct the `INNER JOIN` SQL string to be used in
-    /// a query.
-    pub fn inner_join_expr(fk_refs: &[Self]) -> String {
+    /// Given a list of foreign key references, construct a SQL string to be used in a query (INNER
+    /// JOIN, for example). Accepts 1) a closure that operates on a tuple argument: (referring
+    /// table, referring column, table referred, foreign key column referred), and returns a String,
+    /// and 2) a string that is used to join the strings emitted the function.
+    pub fn join_foreign_key_references<F>(
+        fk_refs: &[Self],
+        str_conversion_fn: F,
+        join_str: &str,
+    ) -> String
+    where
+        F: FnMut((&str, &str, &str, &str)) -> String,
+    {
         // a vec of tuples where each tuple contains: referring table name, referring table column
         // to equate, fk table name to join with, fk table column to equate
-        let join_data = Self::inner_join_expr_calc(fk_refs);
+        let join_data = Self::fk_join_expr_calc(fk_refs);
 
         join_data
             .into_iter()
-            .map(
-                |(referring_table, referring_column, referred_table, referred_column)| {
-                    // generate the INNER JOIN column equality expression
-                    [
-                        referred_table,
-                        " ON ",
-                        referring_table,
-                        ".",
-                        referring_column,
-                        " = ",
-                        referred_table,
-                        ".",
-                        referred_column,
-                    ]
-                    .join("")
-                },
-            )
+            .map(str_conversion_fn)
             .collect::<Vec<String>>()
-            .join("\nINNER JOIN ")
+            .join(join_str)
     }
 
-    fn inner_join_expr_calc(fk_refs: &[Self]) -> Vec<(&str, &str, &str, &str)> {
+    fn fk_join_expr_calc(fk_refs: &[Self]) -> Vec<(&str, &str, &str, &str)> {
         // a vec of tuples where each tuple contains: referring table name, referring table column
         // to equate, fk table name to join with, fk table column to equate
         let mut join_data: Vec<(&str, &str, &str, &str)> = vec![];
@@ -773,7 +766,7 @@ impl ForeignKeyReference {
                 &fk.foreign_key_column,
             ));
 
-            join_data.extend(Self::inner_join_expr_calc(&fk.nested_fks));
+            join_data.extend(Self::fk_join_expr_calc(&fk.nested_fks));
         }
 
         join_data
@@ -892,7 +885,7 @@ mod fkr_find {
 }
 
 #[cfg(test)]
-mod fkr_inner_join_expr {
+mod fkr_join_foreign_key_references {
     use super::*;
     use pretty_assertions::assert_eq;
 
@@ -930,6 +923,20 @@ mod fkr_inner_join_expr {
             },
         ];
 
-        assert_eq!(ForeignKeyReference::inner_join_expr(&refs), "b_table ON a_table.another_foreign_key = b_table.id\nINNER JOIN d_table ON b_table.nested_fk = d_table.id\nINNER JOIN e_table ON b_table.b_table_fk = e_table.id".to_string());
+        assert_eq!(ForeignKeyReference::join_foreign_key_references(&refs, |(referring_table, referring_column, referred_table, referred_column)| {
+            // generate the INNER JOIN column equality expression
+            [
+                referred_table,
+                " ON ",
+                referring_table,
+                ".",
+                referring_column,
+                " = ",
+                referred_table,
+                ".",
+                referred_column,
+            ]
+            .join("")
+        }, "\nINNER JOIN "), "b_table ON a_table.another_foreign_key = b_table.id\nINNER JOIN d_table ON b_table.nested_fk = d_table.id\nINNER JOIN e_table ON b_table.b_table_fk = e_table.id".to_string());
     }
 }

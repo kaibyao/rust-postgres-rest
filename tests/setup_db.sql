@@ -176,3 +176,33 @@ CREATE TABLE IF NOT EXISTS public.test_insert (
 CREATE TABLE IF NOT EXISTS public.test_batch_insert (
   id BIGINT CONSTRAINT test_batch_insert_id_key PRIMARY KEY
 );
+
+-- For testing UPDATEs
+DROP TABLE IF EXISTS public.player;
+DROP TABLE IF EXISTS public.team;
+DROP TABLE IF EXISTS public.coach;
+
+CREATE TABLE IF NOT EXISTS public.coach (
+  id BIGINT CONSTRAINT coach_id_key PRIMARY KEY,
+  name TEXT
+);
+CREATE TABLE IF NOT EXISTS public.team (
+  id BIGINT CONSTRAINT team_id_key PRIMARY KEY,
+  coach_id BIGINT,
+  name TEXT
+);
+CREATE TABLE IF NOT EXISTS public.player (
+  id BIGINT CONSTRAINT player_id_key PRIMARY KEY,
+  team_id BIGINT,
+  name TEXT
+);
+
+ALTER TABLE public.player ADD CONSTRAINT player_team_reference FOREIGN KEY (team_id) REFERENCES public.team(id);
+ALTER TABLE public.team ADD CONSTRAINT team_coach_reference FOREIGN KEY (coach_id) REFERENCES public.coach(id);
+
+INSERT INTO public.coach (id, name) VALUES (1, 'Steve Kerr');
+INSERT INTO public.team (id, coach_id, name) VALUES (1, 1, 'Golden State Warriors');
+INSERT INTO public.player
+  (id, name, team_id)
+  VALUES
+  (1, 'Stephen Curry', 1);

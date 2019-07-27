@@ -76,10 +76,14 @@ pub fn get_db_column_str<'a>(
     column: &'a str,
     table: &'a str,
     fks: &'a [ForeignKeyReference],
-    is_use_alias: bool,
+    // whether the column being passed contains " AS "
+    is_column_alias: bool,
+    // whether the column tokens should contain an " AS " alias
+    is_return_alias: bool,
+    is_column_prefixed_with_table: bool,
 ) -> Result<Vec<&'a str>, Error> {
     if fks.is_empty() {
-        if is_use_alias {
+        if is_column_alias {
             let _ = validate_alias_identifier(column)?;
         } else {
             validate_where_column(column)?;
@@ -89,7 +93,7 @@ pub fn get_db_column_str<'a>(
     } else {
         let validate_alias_result = validate_alias_identifier(column)?;
         let (column, alias, has_alias) = if let (true, Some((actual_column_ref, alias))) =
-            (is_use_alias, validate_alias_result)
+            (is_column_alias, validate_alias_result)
         {
             (actual_column_ref, alias, true)
         } else {
@@ -102,27 +106,35 @@ pub fn get_db_column_str<'a>(
             !fks.is_empty(),
             ForeignKeyReference::find(fks, table, column),
         ) {
-            tokens.push(fk_ref.table_referred.as_str());
-            tokens.push(".");
+            if is_column_prefixed_with_table {
+                tokens.push(fk_ref.table_referred.as_str());
+                tokens.push(".");
+            }
             tokens.push(fk_column);
 
             // AS syntax (to avoid ambiguous columns)
-            tokens.push(" AS \"");
-            tokens.push(if has_alias { alias } else { column });
-            tokens.push("\"");
+            if is_return_alias {
+                tokens.push(" AS \"");
+                tokens.push(if has_alias { alias } else { column });
+                tokens.push("\"");
+            }
         } else {
-            // Current column is not an FK, but we still need to use actual table names to avoid
-            // ambiguous columns. Example: If I'm trying to retrieve the ID field of an employee as
-            // well as its company and they're both called "id", I would get an ambiguity error.
-
-            tokens.push(table);
-            tokens.push(".");
+            if is_column_prefixed_with_table {
+                // Current column is not an FK, but we still need to use actual table names to avoid
+                // ambiguous columns. Example: If I'm trying to retrieve the ID field of an employee
+                // as well as its company and they're both called "id", I would get
+                // an ambiguity error.
+                tokens.push(table);
+                tokens.push(".");
+            }
             tokens.push(column);
 
             // AS syntax (to avoid ambiguous columns)
-            tokens.push(" AS \"");
-            tokens.push(if has_alias { alias } else { column });
-            tokens.push("\"");
+            if is_return_alias {
+                tokens.push(" AS \"");
+                tokens.push(if has_alias { alias } else { column });
+                tokens.push("\"");
+            }
         }
 
         Ok(tokens)
@@ -280,10 +292,70 @@ mod get_db_column_str_tests {
         }];
         let table = "child";
 
-        let column_str = get_db_column_str(&column, table, &fks, false)
+        let column_str = get_db_column_str(&column, table, &fks, false, true, true)
             .unwrap()
             .join("");
         assert_eq!(column_str, r#"company.name AS "parent_id.company_id.name""#);
+    }
+
+    #[test]
+    fn foreign_keys_nested_no_return_alias() {
+        let column = "parent_id.company_id.name".to_string();
+        let fks = [ForeignKeyReference {
+            original_refs: vec!["parent_id.company_id.name".to_string()],
+            referring_table: "child".to_string(),
+            referring_column: "parent_id".to_string(),
+            referring_column_type: "int8".to_string(),
+            table_referred: "adult".to_string(),
+            foreign_key_column: "id".to_string(),
+            foreign_key_column_type: "int8".to_string(),
+            nested_fks: vec![ForeignKeyReference {
+                original_refs: vec!["company_id.name".to_string()],
+                referring_table: "adult".to_string(),
+                referring_column: "company_id".to_string(),
+                referring_column_type: "int8".to_string(),
+                table_referred: "company".to_string(),
+                foreign_key_column: "id".to_string(),
+                foreign_key_column_type: "int8".to_string(),
+                nested_fks: vec![],
+            }],
+        }];
+        let table = "child";
+
+        let column_str = get_db_column_str(&column, table, &fks, false, false, true)
+            .unwrap()
+            .join("");
+        assert_eq!(column_str, "company.name");
+    }
+
+    #[test]
+    fn foreign_keys_nested_no_return_alias_no_table_prefix() {
+        let column = "parent_id.company_id.name".to_string();
+        let fks = [ForeignKeyReference {
+            original_refs: vec!["parent_id.company_id.name".to_string()],
+            referring_table: "child".to_string(),
+            referring_column: "parent_id".to_string(),
+            referring_column_type: "int8".to_string(),
+            table_referred: "adult".to_string(),
+            foreign_key_column: "id".to_string(),
+            foreign_key_column_type: "int8".to_string(),
+            nested_fks: vec![ForeignKeyReference {
+                original_refs: vec!["company_id.name".to_string()],
+                referring_table: "adult".to_string(),
+                referring_column: "company_id".to_string(),
+                referring_column_type: "int8".to_string(),
+                table_referred: "company".to_string(),
+                foreign_key_column: "id".to_string(),
+                foreign_key_column_type: "int8".to_string(),
+                nested_fks: vec![],
+            }],
+        }];
+        let table = "child";
+
+        let column_str = get_db_column_str(&column, table, &fks, false, false, false)
+            .unwrap()
+            .join("");
+        assert_eq!(column_str, "name");
     }
 
     #[test]
@@ -310,10 +382,70 @@ mod get_db_column_str_tests {
         }];
         let table = "child";
 
-        let column_str = get_db_column_str(&column, table, &fks, true)
+        let column_str = get_db_column_str(&column, table, &fks, true, true, true)
             .unwrap()
             .join("");
         assert_eq!(column_str, r#"company.name AS "parent_company""#);
+    }
+
+    #[test]
+    fn foreign_keys_nested_alias_no_return_alias() {
+        let column = "parent_id.company_id.name AS parent_company".to_string();
+        let fks = [ForeignKeyReference {
+            original_refs: vec!["parent_id.company_id.name".to_string()],
+            referring_table: "child".to_string(),
+            referring_column: "parent_id".to_string(),
+            referring_column_type: "int8".to_string(),
+            table_referred: "adult".to_string(),
+            foreign_key_column: "id".to_string(),
+            foreign_key_column_type: "int8".to_string(),
+            nested_fks: vec![ForeignKeyReference {
+                original_refs: vec!["company_id.name".to_string()],
+                referring_table: "adult".to_string(),
+                referring_column: "company_id".to_string(),
+                referring_column_type: "int8".to_string(),
+                table_referred: "company".to_string(),
+                foreign_key_column: "id".to_string(),
+                foreign_key_column_type: "int8".to_string(),
+                nested_fks: vec![],
+            }],
+        }];
+        let table = "child";
+
+        let column_str = get_db_column_str(&column, table, &fks, true, false, true)
+            .unwrap()
+            .join("");
+        assert_eq!(column_str, "company.name");
+    }
+
+    #[test]
+    fn foreign_keys_nested_alias_no_return_alias_no_table_prefix() {
+        let column = "parent_id.company_id.name AS parent_company".to_string();
+        let fks = [ForeignKeyReference {
+            original_refs: vec!["parent_id.company_id.name".to_string()],
+            referring_table: "child".to_string(),
+            referring_column: "parent_id".to_string(),
+            referring_column_type: "int8".to_string(),
+            table_referred: "adult".to_string(),
+            foreign_key_column: "id".to_string(),
+            foreign_key_column_type: "int8".to_string(),
+            nested_fks: vec![ForeignKeyReference {
+                original_refs: vec!["company_id.name".to_string()],
+                referring_table: "adult".to_string(),
+                referring_column: "company_id".to_string(),
+                referring_column_type: "int8".to_string(),
+                table_referred: "company".to_string(),
+                foreign_key_column: "id".to_string(),
+                foreign_key_column_type: "int8".to_string(),
+                nested_fks: vec![],
+            }],
+        }];
+        let table = "child";
+
+        let column_str = get_db_column_str(&column, table, &fks, true, false, false)
+            .unwrap()
+            .join("");
+        assert_eq!(column_str, "name");
     }
 }
 

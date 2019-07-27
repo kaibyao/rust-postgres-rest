@@ -73,7 +73,8 @@ fn get_table_names() {
             "sibling",
             "test_batch_insert",
             "test_fields",
-            "test_insert"
+            "test_insert",
+            "throne",
         ])
     );
 }
@@ -752,4 +753,28 @@ fn post_table_records_on_conflict_update() {
     assert_eq!(res.status(), StatusCode::OK);
 }
 
-// TODO: step 8: write test for multi-column foreign keys
+#[test]
+fn put_table_records_fk_returning_columns() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=id%3D1&returning_columns=id, name",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"name": "team_id.name"}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(
+        response_body,
+        json!([{ "id": 1, "name": "Golden State Warriors" }])
+    );
+    assert_eq!(res.status(), StatusCode::OK);
+}

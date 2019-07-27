@@ -561,16 +561,18 @@ impl ColumnTypeValue {
         }
     }
 
-    // Parses a given AST and returns a tuple: (String [the converted expression that uses PREPARE
-    // parameters], Vec<ColumnTypeValue>).
+    /// Parses a given AST and returns a tuple: (String [the converted expression that uses PREPARE
+    /// parameters], Vec<ColumnTypeValue>).
     pub fn generate_prepared_statement_from_ast_expr(
         ast: &Expr,
+        table: &str,
         column_types: &HashMap<String, String>,
         starting_pos: Option<&mut usize>,
     ) -> Result<(String, Vec<ColumnTypeValue>), Error> {
         let mut ast = ast.clone();
         // mutates `ast`
-        let prepared_values = Self::generate_prepared_values(&mut ast, column_types, starting_pos)?;
+        let prepared_values =
+            Self::generate_prepared_values(&mut ast, table, column_types, starting_pos)?;
 
         Ok((ast.to_string(), prepared_values))
     }
@@ -579,6 +581,7 @@ impl ColumnTypeValue {
     /// parameters (like `$1`, `$2`, etc.). Returns a Vec of prepared values.
     fn generate_prepared_values(
         ast: &mut Expr,
+        table: &str,
         column_types: &HashMap<String, String>,
         prepared_param_pos_opt: Option<&mut usize>,
     ) -> Result<Vec<ColumnTypeValue>, Error> {
@@ -595,7 +598,10 @@ impl ColumnTypeValue {
             |possible_column_name_expr: &mut Expr| -> Result<Option<String>, Error> {
                 match possible_column_name_expr {
                     Expr::Identifier(non_nested_column_name) => {
-                        Ok(Some(non_nested_column_name.clone()))
+                        let column_name = non_nested_column_name.clone();
+                        // prepend column with table prefix
+                        *non_nested_column_name = [table, non_nested_column_name].join(".");
+                        Ok(Some(column_name))
                     }
                     Expr::CompoundIdentifier(nested_fk_column_vec) => {
                         Ok(Some(nested_fk_column_vec.join(".")))
@@ -603,6 +609,7 @@ impl ColumnTypeValue {
                     _ => {
                         prepared_statement_values.extend(Self::generate_prepared_values(
                             possible_column_name_expr,
+                            table,
                             column_types,
                             Some(prepared_param_pos),
                         )?);
@@ -622,6 +629,7 @@ impl ColumnTypeValue {
                 let column_name_opt = get_column_name(bin_left_ast_box.borrow_mut())?;
                 let expr = bin_right_ast_box.borrow_mut();
                 if let Some(ast_replacement) = Self::attempt_prepared_value_extraction(
+                    table,
                     column_types,
                     prepared_param_pos,
                     &column_name_opt,
@@ -640,6 +648,7 @@ impl ColumnTypeValue {
 
                 for expr in list_ast_vec {
                     if let Some(ast_replacement) = Self::attempt_prepared_value_extraction(
+                        table,
                         column_types,
                         prepared_param_pos,
                         &column_name_opt,
@@ -661,6 +670,7 @@ impl ColumnTypeValue {
 
                 let between_low_ast = between_low_ast_box.borrow_mut();
                 if let Some(ast_replacement) = Self::attempt_prepared_value_extraction(
+                    table,
                     column_types,
                     prepared_param_pos,
                     &column_name_opt,
@@ -672,6 +682,7 @@ impl ColumnTypeValue {
 
                 let between_high_ast = between_high_ast_box.borrow_mut();
                 if let Some(ast_replacement) = Self::attempt_prepared_value_extraction(
+                    table,
                     column_types,
                     prepared_param_pos,
                     &column_name_opt,
@@ -690,6 +701,7 @@ impl ColumnTypeValue {
                 for case_condition_ast in case_conditions_ast_vec {
                     prepared_statement_values.extend(Self::generate_prepared_values(
                         case_condition_ast,
+                        table,
                         column_types,
                         Some(prepared_param_pos),
                     )?);
@@ -698,6 +710,7 @@ impl ColumnTypeValue {
                 for case_results_ast_vec in case_results_ast_vec {
                     prepared_statement_values.extend(Self::generate_prepared_values(
                         case_results_ast_vec,
+                        table,
                         column_types,
                         Some(prepared_param_pos),
                     )?);
@@ -706,6 +719,7 @@ impl ColumnTypeValue {
                 if let Some(case_else_results_ast_box) = case_else_results_ast_box_opt {
                     prepared_statement_values.extend(Self::generate_prepared_values(
                         case_else_results_ast_box.borrow_mut(),
+                        table,
                         column_types,
                         Some(prepared_param_pos),
                     )?);
@@ -717,6 +731,7 @@ impl ColumnTypeValue {
             } => {
                 prepared_statement_values.extend(Self::generate_prepared_values(
                     cast_expr_box,
+                    table,
                     column_types,
                     Some(prepared_param_pos),
                 )?);
@@ -724,6 +739,7 @@ impl ColumnTypeValue {
             Expr::Collate { expr, .. } => {
                 prepared_statement_values.extend(Self::generate_prepared_values(
                     expr,
+                    table,
                     column_types,
                     Some(prepared_param_pos),
                 )?);
@@ -731,6 +747,7 @@ impl ColumnTypeValue {
             Expr::Extract { expr, .. } => {
                 prepared_statement_values.extend(Self::generate_prepared_values(
                     expr,
+                    table,
                     column_types,
                     Some(prepared_param_pos),
                 )?);
@@ -741,6 +758,7 @@ impl ColumnTypeValue {
                 for expr in args_ast_vec {
                     prepared_statement_values.extend(Self::generate_prepared_values(
                         expr,
+                        table,
                         column_types,
                         Some(prepared_param_pos),
                     )?);
@@ -749,6 +767,7 @@ impl ColumnTypeValue {
             Expr::InSubquery { expr: expr_box, .. } => {
                 prepared_statement_values.extend(Self::generate_prepared_values(
                     expr_box.borrow_mut(),
+                    table,
                     column_types,
                     Some(prepared_param_pos),
                 )?);
@@ -756,6 +775,7 @@ impl ColumnTypeValue {
             Expr::IsNotNull(null_ast_box) => {
                 prepared_statement_values.extend(Self::generate_prepared_values(
                     null_ast_box.borrow_mut(),
+                    table,
                     column_types,
                     Some(prepared_param_pos),
                 )?);
@@ -763,6 +783,7 @@ impl ColumnTypeValue {
             Expr::IsNull(null_ast_box) => {
                 prepared_statement_values.extend(Self::generate_prepared_values(
                     null_ast_box.borrow_mut(),
+                    table,
                     column_types,
                     Some(prepared_param_pos),
                 )?);
@@ -770,6 +791,7 @@ impl ColumnTypeValue {
             Expr::Nested(nested_ast_box) => {
                 prepared_statement_values.extend(Self::generate_prepared_values(
                     nested_ast_box.borrow_mut(),
+                    table,
                     column_types,
                     Some(prepared_param_pos),
                 )?);
@@ -798,6 +820,7 @@ impl ColumnTypeValue {
     /// Attempts to swap a Value with a prepared parameter string ($1, $2, etc.) and extract that
     /// value as a ColumnTypeValue.
     fn attempt_prepared_value_extraction(
+        table: &str,
         column_types: &HashMap<String, String>,
         prepared_param_pos: &mut usize,
         column_name_opt: &Option<String>,
@@ -821,6 +844,7 @@ impl ColumnTypeValue {
 
         prepared_statement_values.extend(Self::generate_prepared_values(
             expr,
+            table,
             column_types,
             Some(prepared_param_pos),
         )?);

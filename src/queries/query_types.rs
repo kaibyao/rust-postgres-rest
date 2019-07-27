@@ -212,8 +212,6 @@ pub struct QueryParamsUpdate {
     pub column_values: Map<String, Value>,
     /// WHERE expression.
     pub conditions: Option<String>,
-    /// List of tables.
-    pub from: Option<Vec<String>>,
     /// List of (foreign key) columns whose values are returned.
     pub returning_columns: Option<Vec<String>>,
     // Name of table to update.
@@ -232,10 +230,6 @@ impl QueryParamsUpdate {
                 "INCORRECT_REQUEST_BODY",
                 "Request body must be a JSON object whose key-values represent column names and the values to set. String values must contain quotes or else they will be evaluated as expressions and not strings.".to_string(),
             ))
-        };
-        let from = match query_string_params.from {
-            Some(from_str) => Some(normalize_columns(&from_str)?),
-            None => None,
         };
         let returning_columns = match query_string_params.returning_columns {
             Some(columns_str) => {
@@ -260,7 +254,6 @@ impl QueryParamsUpdate {
         Ok(QueryParamsUpdate {
             column_values,
             conditions,
-            from,
             returning_columns,
             table,
         })

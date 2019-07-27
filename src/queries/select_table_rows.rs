@@ -169,7 +169,25 @@ fn build_select_statement(
 
     // build inner join expression
     let inner_join_str = if is_fks_exist {
-        ForeignKeyReference::inner_join_expr(&fks)
+        ForeignKeyReference::join_foreign_key_references(
+            &fks,
+            |(referring_table, referring_column, referred_table, referred_column)| {
+                // generate the INNER JOIN column equality expression
+                [
+                    referred_table,
+                    " ON ",
+                    referring_table,
+                    ".",
+                    referring_column,
+                    " = ",
+                    referred_table,
+                    ".",
+                    referred_column,
+                ]
+                .join("")
+            },
+            "\nINNER JOIN ",
+        )
     } else {
         "".to_string()
     };
@@ -190,6 +208,7 @@ fn build_select_statement(
         let (where_string_with_prepared_positions, prepared_values_vec) =
             ColumnTypeValue::generate_prepared_statement_from_ast_expr(
                 &where_ast,
+                &params.table,
                 &column_types,
                 None,
             )?;
@@ -294,7 +313,7 @@ fn get_column_str<'a>(
     let mut statement: Vec<&str> = vec![];
 
     for (i, column) in columns.iter().enumerate() {
-        let column_tokens = get_db_column_str(column, table, fks, is_use_alias)?;
+        let column_tokens = get_db_column_str(column, table, fks, is_use_alias, true, true)?;
         statement.extend(column_tokens);
 
         if i < columns.len() - 1 {

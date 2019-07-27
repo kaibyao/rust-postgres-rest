@@ -22,6 +22,11 @@ use sqlparser::ast::{Expr, Value as SqlValue};
 use std::{collections::HashMap, sync::Arc};
 use tokio_postgres::{types::ToSql, Client};
 
+lazy_static! {
+    // check for strings
+    static ref STRING_RE: Regex = Regex::new(r#"^['"](.+)['"]$"#).unwrap();
+}
+
 /// Runs an UPDATE query on the selected table rows.
 pub fn update_table_rows(
     state: &AppState,
@@ -33,20 +38,36 @@ pub fn update_table_rows(
 
     // Get list of every column in the query (column_values, conditions, returning_columns). Used
     // for finding all foreign key references
-    let mut columns: Vec<String> = match params
-        .column_values
-        .iter()
-        .map(|(col, _val)| -> Result<String, Error> {
+    let (columns, values): (Vec<&String>, Vec<&JsonValue>) = params.column_values.iter().unzip();
+
+    let mut column_expr_strings: Vec<String> = match columns
+        .into_iter()
+        .map(|col| -> Result<String, Error> {
             match validate_alias_identifier(col)? {
                 Some((actual_column_ref, _alias)) => Ok(actual_column_ref.to_string()),
-                _ => Ok(col.clone()),
+                _ => Ok(col.to_string()),
             }
         })
         .collect::<Result<Vec<String>, Error>>()
     {
-        Ok(columns) => columns,
+        Ok(column_expr_strings) => column_expr_strings,
         Err(e) => return Either::A(err(e)),
     };
+
+    // search for column expression values and append to column_expr_strings
+    for val in values {
+        // check for expression used as a column value
+        if let Some(val_str) = val.as_str() {
+            if !STRING_RE.is_match(val_str) {
+                if let Err(e) = validate_where_column(val_str) {
+                    return Either::A(err(e));
+                }
+
+                // column value is an expression, append to column_expr_strings
+                column_expr_strings.push(val_str.to_string());
+            }
+        }
+    }
 
     // WHERE clause foreign key references
     let where_ast = match &params.conditions {
@@ -64,12 +85,12 @@ pub fn update_table_rows(
         },
         None => Expr::Identifier("".to_string()),
     };
-    columns.extend(fk_columns_from_where_ast(&where_ast));
+    column_expr_strings.extend(fk_columns_from_where_ast(&where_ast));
 
     let mut is_return_rows = false;
     if let Some(v) = &params.returning_columns {
         is_return_rows = true;
-        columns.extend(v.clone());
+        column_expr_strings.extend(v.clone());
     }
 
     let db_url_str = state.config.db_url.to_string();
@@ -87,26 +108,25 @@ pub fn update_table_rows(
                 })
         });
 
-    // parse columns for foreign key usage
+    // parse column_expr_strings for foreign key usage
     let addr_clone = if let Some(addr) = &state.stats_cache_addr {
         Some(addr.clone())
     } else {
         None
     };
 
+    // dbg!(&column_expr_strings);
+
     let fk_future = stats_future
         .join(ForeignKeyReference::from_query_columns(
             state.config.db_url,
             Arc::new(addr_clone),
             params.table.clone(),
-            columns,
+            column_expr_strings,
         ))
         .and_then(move |(stats, fk_columns)| {
-            let column_types: HashMap<String, String> =
-                TableColumnStat::stats_to_column_types(stats.clone());
-
             let (statement_str, prepared_values) =
-                match build_update_statement(params, column_types, stats, fk_columns, where_ast) {
+                match build_update_statement(params, stats, fk_columns, where_ast) {
                     Ok((stmt, prep_vals)) => (stmt, prep_vals),
                     Err(e) => return Either::A(err(e)),
                 };
@@ -164,7 +184,6 @@ pub fn update_table_rows(
 /// Returns the UPDATE query statement string and a vector of prepared values.
 fn build_update_statement(
     params: QueryParamsUpdate,
-    column_types: HashMap<String, String>,
     stats: Vec<TableColumnStat>,
     fks: Vec<ForeignKeyReference>,
     mut where_ast: Expr,
@@ -179,7 +198,8 @@ fn build_update_statement(
     let mut prepared_statement_values = vec![];
     let mut prepared_value_pos: usize = 1;
     let mut prepared_value_pos_vec = vec![];
-    // let mut from_tables = vec![];
+    let column_types: HashMap<String, String> =
+        TableColumnStat::stats_to_column_types(stats.clone());
 
     // Convert JSON object and append query_str and prepared_statement_values with column values
     let column_values_len = params.column_values.len();
@@ -193,10 +213,12 @@ fn build_update_statement(
             let val = ColumnTypeValue::from_json(column_type, &val)?;
             prepared_statement_values.push(val);
 
-            let actual_column_tokens = get_db_column_str(col, &params.table, &fks, false)?;
+            let actual_column_tokens =
+                get_db_column_str(col, &params.table, &fks, false, false, false)?;
 
             query_str_arr.push(actual_column_tokens.join(""));
 
+            // todo: experiment moving this out of the loop using 2 vecs. convert String -> &str
             let prepared_value_pos_str = prepared_value_pos.to_string();
             query_str_arr.push([" = $", &prepared_value_pos_str].join(""));
             prepared_value_pos_vec.push(prepared_value_pos_str);
@@ -207,11 +229,6 @@ fn build_update_statement(
 
         // check for expression used as a column value
         if let Some(val_str) = val.as_str() {
-            lazy_static! {
-                // check for strings
-                static ref STRING_RE: Regex = Regex::new(r#"^['"](.+)['"]$"#).unwrap();
-            }
-
             if STRING_RE.is_match(val_str) {
                 // column value is a string
                 let captures = STRING_RE.captures(val_str).unwrap();
@@ -221,8 +238,10 @@ fn build_update_statement(
                 append_prepared_value(&val)?;
             } else {
                 // column value is an expression, parse foreign key usage
-                let actual_column_tokens = get_db_column_str(col, &params.table, &fks, false)?;
-                let actual_value_tokens = get_db_column_str(val_str, &params.table, &fks, false)?;
+                let actual_column_tokens =
+                    get_db_column_str(col, &params.table, &fks, false, false, false)?;
+                let actual_value_tokens =
+                    get_db_column_str(val_str, &params.table, &fks, false, false, true)?;
 
                 let mut assignment_str: Vec<&str> = vec![];
                 assignment_str.extend(actual_column_tokens);
@@ -239,8 +258,20 @@ fn build_update_statement(
         }
     }
 
+    // dbg!(&fks);
+
+    // FROM string
+    if !fks.is_empty() {
+        query_str_arr.push(" FROM ".to_string());
+        let from_tables_str = ForeignKeyReference::join_foreign_key_references(
+            &fks,
+            |(_, _, referred_table, _)| referred_table.to_string(),
+            ", ",
+        );
+        query_str_arr.push(from_tables_str);
+    }
+
     // building WHERE string
-    let where_str = params.conditions.as_ref().map_or("", |s| s.as_str());
     let (mut where_string, where_column_types) =
         get_where_string(&mut where_ast, &params.table, &stats, &fks);
     if &where_string != "" {
@@ -251,24 +282,214 @@ fn build_update_statement(
         let (where_string_with_prepared_positions, prepared_values_vec) =
             ColumnTypeValue::generate_prepared_statement_from_ast_expr(
                 &where_ast,
-                &column_types,
+                &params.table,
+                &where_column_types,
                 Some(&mut prepared_value_pos),
             )?;
         where_string = where_string_with_prepared_positions;
-
-        // prepared_statement_values.extend(prepared_values_vec.into_iter().map(|prep_value|
-        // ColumnTypeValue::from_prepared_statement_value(column_type: &str, value:
-        // PreparedStatementValue))); prepared_values = prepared_values_vec;
+        prepared_statement_values.extend(prepared_values_vec);
 
         query_str_arr.push(where_string);
         query_str_arr.push(")".to_string());
     }
 
-    // "from" should just take into account FK dot-syntax
-
     // returning_columns
 
     // table
 
+    query_str_arr.push(";".to_string());
+    // dbg!(query_str_arr.join(""));
+
     Ok((query_str_arr.join(""), prepared_statement_values))
+}
+
+#[cfg(test)]
+mod build_update_statement_tests {
+    use super::*;
+    use crate::queries::{postgres_types::ColumnValue, query_types::QueryParamsUpdate};
+    use pretty_assertions::assert_eq;
+    use serde_json::json;
+
+    #[test]
+    fn fk_returning_columns() {
+        let conditions = "id = 2".to_string();
+        let where_ast = where_clause_str_to_ast(&conditions).unwrap().unwrap();
+        let params = QueryParamsUpdate {
+            column_values: json!({"nemesis_name": "nemesis_id.name"})
+                .as_object()
+                .unwrap()
+                .clone(),
+            conditions: Some(conditions),
+            returning_columns: Some(vec!["id".to_string(), "nemesis_name".to_string()]),
+            table: "throne".to_string(),
+        };
+        let stats = vec![
+            TableColumnStat {
+                column_name: "id".to_string(),
+                column_type: "int8".to_string(),
+                default_value: None,
+                is_nullable: false,
+                is_foreign_key: false,
+                foreign_key_table: None,
+                foreign_key_column: None,
+                foreign_key_column_type: None,
+                char_max_length: None,
+                char_octet_length: None,
+            },
+            TableColumnStat {
+                column_name: "nemesis_id".to_string(),
+                column_type: "int8".to_string(),
+                default_value: None,
+                is_nullable: true,
+                is_foreign_key: true,
+                foreign_key_table: Some("adult".to_string()),
+                foreign_key_column: Some("id".to_string()),
+                foreign_key_column_type: Some("int8".to_string()),
+                char_max_length: None,
+                char_octet_length: None,
+            },
+            TableColumnStat {
+                column_name: "nemesis_name".to_string(),
+                column_type: "text".to_string(),
+                default_value: None,
+                is_nullable: true,
+                is_foreign_key: false,
+                foreign_key_table: None,
+                foreign_key_column: None,
+                foreign_key_column_type: None,
+                char_max_length: None,
+                char_octet_length: None,
+            },
+            TableColumnStat {
+                column_name: "house".to_string(),
+                column_type: "text".to_string(),
+                default_value: None,
+                is_nullable: true,
+                is_foreign_key: false,
+                foreign_key_table: None,
+                foreign_key_column: None,
+                foreign_key_column_type: None,
+                char_max_length: None,
+                char_octet_length: None,
+            },
+            TableColumnStat {
+                column_name: "ruler".to_string(),
+                column_type: "text".to_string(),
+                default_value: None,
+                is_nullable: true,
+                is_foreign_key: false,
+                foreign_key_table: None,
+                foreign_key_column: None,
+                foreign_key_column_type: None,
+                char_max_length: None,
+                char_octet_length: None,
+            },
+        ];
+        let fks = vec![ForeignKeyReference {
+            original_refs: vec!["nemesis_id.name".to_string()],
+            referring_table: "throne".to_string(),
+            referring_column: "nemesis_id".to_string(),
+            referring_column_type: "int8".to_string(),
+            table_referred: "adult".to_string(),
+            foreign_key_column: "id".to_string(),
+            foreign_key_column_type: "int8".to_string(),
+            nested_fks: vec![],
+        }];
+
+        let (sql_str, prepared_values) =
+            build_update_statement(params, stats, fks, where_ast).unwrap();
+
+        assert_eq!(
+            &sql_str,
+            "UPDATE throne SET nemesis_name = adult.name FROM adult WHERE (throne.id = $1);"
+        );
+        assert_eq!(
+            prepared_values,
+            vec![ColumnTypeValue::BigInt(ColumnValue::NotNullable(2))]
+        );
+    }
+
+    #[test]
+    fn nested_fk_returning_columns() {
+        let conditions = "id = 1".to_string();
+        let where_ast = where_clause_str_to_ast(&conditions).unwrap().unwrap();
+        let params = QueryParamsUpdate {
+            column_values: json!({"name": "team_id.coach_id.name"})
+                .as_object()
+                .unwrap()
+                .clone(),
+            conditions: Some(conditions),
+            returning_columns: Some(vec!["id".to_string(), "team_id.coach_id.name".to_string()]),
+            table: "player".to_string(),
+        };
+        let stats = vec![
+            TableColumnStat {
+                column_name: "id".to_string(),
+                column_type: "int8".to_string(),
+                default_value: None,
+                is_nullable: false,
+                is_foreign_key: false,
+                foreign_key_table: None,
+                foreign_key_column: None,
+                foreign_key_column_type: None,
+                char_max_length: None,
+                char_octet_length: None,
+            },
+            TableColumnStat {
+                column_name: "team_id".to_string(),
+                column_type: "int8".to_string(),
+                default_value: None,
+                is_nullable: true,
+                is_foreign_key: true,
+                foreign_key_table: Some("team".to_string()),
+                foreign_key_column: Some("id".to_string()),
+                foreign_key_column_type: Some("int8".to_string()),
+                char_max_length: None,
+                char_octet_length: None,
+            },
+            TableColumnStat {
+                column_name: "name".to_string(),
+                column_type: "text".to_string(),
+                default_value: None,
+                is_nullable: true,
+                is_foreign_key: false,
+                foreign_key_table: None,
+                foreign_key_column: None,
+                foreign_key_column_type: None,
+                char_max_length: None,
+                char_octet_length: None,
+            },
+        ];
+        let fks = vec![ForeignKeyReference {
+            original_refs: vec!["team_id.coach_id.name".to_string()],
+            referring_table: "player".to_string(),
+            referring_column: "team_id".to_string(),
+            referring_column_type: "int8".to_string(),
+            table_referred: "team".to_string(),
+            foreign_key_column: "id".to_string(),
+            foreign_key_column_type: "int8".to_string(),
+            nested_fks: vec![ForeignKeyReference {
+                original_refs: vec!["coach_id.name".to_string()],
+                referring_table: "team".to_string(),
+                referring_column: "coach_id".to_string(),
+                referring_column_type: "int8".to_string(),
+                table_referred: "coach".to_string(),
+                foreign_key_column: "id".to_string(),
+                foreign_key_column_type: "int8".to_string(),
+                nested_fks: vec![],
+            }],
+        }];
+
+        let (sql_str, prepared_values) =
+            build_update_statement(params, stats, fks, where_ast).unwrap();
+
+        assert_eq!(
+            &sql_str,
+            "UPDATE player SET name = coach.name FROM team, coach WHERE (player.id = $1);"
+        );
+        assert_eq!(
+            prepared_values,
+            vec![ColumnTypeValue::BigInt(ColumnValue::NotNullable(1))]
+        );
+    }
 }
