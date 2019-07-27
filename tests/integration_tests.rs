@@ -68,13 +68,15 @@ fn get_table_names() {
         json!([
             "adult",
             "child",
+            "coach",
             "company",
+            "player",
             "school",
             "sibling",
+            "team",
             "test_batch_insert",
             "test_fields",
             "test_insert",
-            "throne",
         ])
     );
 }
@@ -754,6 +756,29 @@ fn post_table_records_on_conflict_update() {
 }
 
 #[test]
+fn put_table_records_fk() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=team_id%3D2",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"team_id": 3}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!({ "num_rows": 2 }));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
 fn put_table_records_fk_returning_columns() {
     run_setup();
 
@@ -778,3 +803,31 @@ fn put_table_records_fk_returning_columns() {
     );
     assert_eq!(res.status(), StatusCode::OK);
 }
+
+#[test]
+fn put_table_records_nested_fk_returning_columns() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=id%3D2&returning_columns=id, name, team_id.name, team_id.coach_id.name",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"name": "team_id.coach_id.name"}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(
+        response_body,
+        json!([{ "id": 2, "name": "Steve Kerr", "team_id.name": "Golden State Warriors", "team_id.coach_id.name": "Steve Kerr" }])
+    );
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+// TODO: documentation for UPDATE

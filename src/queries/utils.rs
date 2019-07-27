@@ -29,7 +29,7 @@ pub fn get_where_string<'a>(
     stats: &[TableColumnStat],
     fks: &'a [ForeignKeyReference],
 ) -> (String, HashMap<String, String>) {
-    let where_ast_nodes = fk_ast_nodes_from_where_ast(where_ast, true);
+    let where_ast_nodes = fk_ast_nodes_from_where_ast(where_ast);
     let mut column_types = HashMap::new();
 
     for (ast_column_name, ast_node) in where_ast_nodes {

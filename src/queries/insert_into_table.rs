@@ -10,7 +10,7 @@ use super::{
     postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
     query_types::{QueryParamsInsert, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
-    utils::get_columns_str,
+    utils::{get_columns_str, validate_where_column},
 };
 use crate::Error;
 
@@ -177,45 +177,57 @@ fn execute_insert<'a>(
     Error = (Error, Client),
 > {
     let mut is_return_rows = false;
+    let mut insert_statement_tokens = vec!["INSERT INTO ", &params.table];
 
-    // parse out the columns that have values to assign
+    // generaate the list of columns that have values to assign
     let columns = get_all_columns_to_insert(rows);
+
+    // validate columns
+    insert_statement_tokens.push(" (");
+    for (i, col) in columns.iter().enumerate() {
+        if let Err(e) = validate_where_column(col) {
+            return Either::A(err((e, conn)));
+        }
+
+        insert_statement_tokens.push(col);
+
+        if i < columns.len() - 1 {
+            insert_statement_tokens.push(", ");
+        }
+    }
+    insert_statement_tokens.push(")");
+
     let (values_params_str, column_values) =
         match generate_insert_params(rows, &columns, &column_types) {
             Ok((values_params_str, column_values)) => (values_params_str, column_values),
             Err(e) => return Either::A(err((e, conn))),
         };
+    insert_statement_tokens.push(" VALUES ");
+    insert_statement_tokens.push(&values_params_str);
 
     // generate the ON CONFLICT string
     let conflict_clause = match generate_conflict_str(&params, &columns) {
         Some(conflict_str) => conflict_str,
         None => "".to_string(),
     };
+    if conflict_clause != "" {
+        insert_statement_tokens.push(&conflict_clause);
+    }
 
     // generate the RETURNING string
-    let returning_clause = if let Some(returning_columns) = &params.returning_columns {
+    if let Some(returning_columns) = &params.returning_columns {
         match get_columns_str(returning_columns, &params.table, &[]) {
             Ok(columns_tokens) => {
                 is_return_rows = true;
-                columns_tokens.join("")
+                insert_statement_tokens.push(" RETURNING ");
+                insert_statement_tokens.extend(columns_tokens);
             }
             Err(e) => return Either::A(err((e, conn))),
         }
-    } else {
-        "".to_string()
-    };
+    }
 
     // create initial prepared statement
-    let insert_query_str = [
-        "INSERT INTO ",
-        &params.table,
-        &[" (", &columns.join(", "), ")"].join(""),
-        " VALUES ",
-        &values_params_str,
-        &conflict_clause,
-        &returning_clause,
-    ]
-    .join("");
+    let insert_query_str = insert_statement_tokens.join("");
 
     let insert_future = conn
         .prepare(&insert_query_str)

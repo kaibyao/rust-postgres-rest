@@ -8,7 +8,7 @@ use futures::{
     future::{err, ok, Either},
     Future,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::{
     db::connect,
@@ -112,6 +112,10 @@ pub fn put_table(
         Some(body) => body.into_inner(),
         None => return Either::A(err(Error::generate_error("INCORRECT_REQUEST_BODY", "Request body is required. Body must be a JSON object whose key-values represent column names and the values to set. String values must contain quotes or else they will be evaluated as expressions and not strings.".to_string())))
     };
+
+    if actual_body == json!({}) {
+        return Either::A(err(Error::generate_error("INCORRECT_REQUEST_BODY", "Request body cannot be empty. Body must be a JSON object whose key-values represent column names and the values to set. String values must contain quotes or else they will be evaluated as expressions and not strings.".to_string())));
+    }
 
     let params = match QueryParamsUpdate::from_http_request(
         &req,

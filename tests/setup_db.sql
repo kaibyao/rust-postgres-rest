@@ -200,9 +200,18 @@ CREATE TABLE IF NOT EXISTS public.player (
 ALTER TABLE public.player ADD CONSTRAINT player_team_reference FOREIGN KEY (team_id) REFERENCES public.team(id);
 ALTER TABLE public.team ADD CONSTRAINT team_coach_reference FOREIGN KEY (coach_id) REFERENCES public.coach(id);
 
-INSERT INTO public.coach (id, name) VALUES (1, 'Steve Kerr');
-INSERT INTO public.team (id, coach_id, name) VALUES (1, 1, 'Golden State Warriors');
+INSERT INTO public.coach (id, name) VALUES
+  (1, 'Steve Kerr'),
+  (2, 'Doc Rivers'),
+  (3, 'Kenny Atkinson');
+INSERT INTO public.team (id, coach_id, name) VALUES
+  (1, 1, 'Golden State Warriors'),
+  (2, 2, 'LA Clippers'),
+  (3, 3, 'Brooklyn Nets');
 INSERT INTO public.player
   (id, name, team_id)
   VALUES
-  (1, 'Stephen Curry', 1);
+  (1, 'Stephen Curry', 1),
+  (2, 'Klay Thompson', 1),
+  (3, 'Garrett Temple', 2),
+  (4, 'Wilson Chandler', 2);

@@ -16,13 +16,10 @@ use crate::{
     Error,
 };
 
-/// Extracts the foreign key Exprs from a WHERE Expr.
-pub fn fk_ast_nodes_from_where_ast(
-    ast: &mut Expr,
-    is_include_non_fk_columns: bool,
-) -> Vec<(String, &mut Expr)> {
-    // TODO: step 6: if after we are done with the UPDATE endpoint and there are no situations where
-    // is_include_non_fk_columns == false, remove that parameter
+/// Extracts the "a_table".* (wildcard), identifiers, and foreign key Exprs from a WHERE Expr. The
+/// Expressions are returned as a Vector of tuples: (The expr-as-a-string, a reference to the
+/// expression itself).
+pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
     let mut fks = vec![];
 
     match ast {
@@ -33,21 +30,13 @@ pub fn fk_ast_nodes_from_where_ast(
             fks.push((nested_fk_column_vec.join("."), ast));
         }
         Expr::Identifier(non_nested_column_name) => {
-            if is_include_non_fk_columns {
-                fks.push((non_nested_column_name.clone(), ast))
-            }
+            fks.push((non_nested_column_name.clone(), ast));
         }
         Expr::IsNull(null_ast_box) => {
-            fks.extend(fk_ast_nodes_from_where_ast(
-                null_ast_box.borrow_mut(),
-                is_include_non_fk_columns,
-            ));
+            fks.extend(fk_ast_nodes_from_where_ast(null_ast_box.borrow_mut()));
         }
         Expr::IsNotNull(null_ast_box) => {
-            fks.extend(fk_ast_nodes_from_where_ast(
-                null_ast_box.borrow_mut(),
-                is_include_non_fk_columns,
-            ));
+            fks.extend(fk_ast_nodes_from_where_ast(null_ast_box.borrow_mut()));
         }
         Expr::InList {
             expr: list_expr_ast_box_ref,
@@ -56,14 +45,10 @@ pub fn fk_ast_nodes_from_where_ast(
         } => {
             fks.extend(fk_ast_nodes_from_where_ast(
                 list_expr_ast_box_ref.borrow_mut(),
-                is_include_non_fk_columns,
             ));
 
             for list_ast in list_ast_vec {
-                fks.extend(fk_ast_nodes_from_where_ast(
-                    list_ast,
-                    is_include_non_fk_columns,
-                ));
+                fks.extend(fk_ast_nodes_from_where_ast(list_ast));
             }
         }
         Expr::BinaryOp {
@@ -73,36 +58,25 @@ pub fn fk_ast_nodes_from_where_ast(
         } => {
             fks.extend(fk_ast_nodes_from_where_ast(
                 bin_left_ast_box_ref.borrow_mut(),
-                is_include_non_fk_columns,
             ));
             fks.extend(fk_ast_nodes_from_where_ast(
                 bin_right_ast_box_ref.borrow_mut(),
-                is_include_non_fk_columns,
             ));
         }
         Expr::Cast {
             expr: cast_expr_box_ref,
             ..
         } => {
-            fks.extend(fk_ast_nodes_from_where_ast(
-                cast_expr_box_ref.borrow_mut(),
-                is_include_non_fk_columns,
-            ));
+            fks.extend(fk_ast_nodes_from_where_ast(cast_expr_box_ref.borrow_mut()));
         }
         Expr::Nested(nested_ast_box_ref) => {
-            fks.extend(fk_ast_nodes_from_where_ast(
-                nested_ast_box_ref.borrow_mut(),
-                is_include_non_fk_columns,
-            ));
+            fks.extend(fk_ast_nodes_from_where_ast(nested_ast_box_ref.borrow_mut()));
         }
         Expr::UnaryOp {
             expr: unary_expr_box_ref,
             ..
         } => {
-            fks.extend(fk_ast_nodes_from_where_ast(
-                unary_expr_box_ref.borrow_mut(),
-                is_include_non_fk_columns,
-            ));
+            fks.extend(fk_ast_nodes_from_where_ast(unary_expr_box_ref.borrow_mut()));
         }
         Expr::Between {
             expr: between_expr_ast_box_ref,
@@ -112,25 +86,19 @@ pub fn fk_ast_nodes_from_where_ast(
         } => {
             fks.extend(fk_ast_nodes_from_where_ast(
                 between_expr_ast_box_ref.borrow_mut(),
-                is_include_non_fk_columns,
             ));
             fks.extend(fk_ast_nodes_from_where_ast(
                 between_low_ast_box_ref.borrow_mut(),
-                is_include_non_fk_columns,
             ));
             fks.extend(fk_ast_nodes_from_where_ast(
                 between_high_ast_box_ref.borrow_mut(),
-                is_include_non_fk_columns,
             ));
         }
         Expr::Function(Function {
             args: args_ast_vec, ..
         }) => {
             for ast_arg in args_ast_vec {
-                fks.extend(fk_ast_nodes_from_where_ast(
-                    ast_arg,
-                    is_include_non_fk_columns,
-                ));
+                fks.extend(fk_ast_nodes_from_where_ast(ast_arg));
             }
         }
         Expr::Case {
@@ -140,34 +108,21 @@ pub fn fk_ast_nodes_from_where_ast(
             ..
         } => {
             for case_condition_ast in case_conditions_ast_vec {
-                fks.extend(fk_ast_nodes_from_where_ast(
-                    case_condition_ast,
-                    is_include_non_fk_columns,
-                ));
+                fks.extend(fk_ast_nodes_from_where_ast(case_condition_ast));
             }
 
             for case_results_ast_vec in case_results_ast_vec {
-                fks.extend(fk_ast_nodes_from_where_ast(
-                    case_results_ast_vec,
-                    is_include_non_fk_columns,
-                ));
+                fks.extend(fk_ast_nodes_from_where_ast(case_results_ast_vec));
             }
 
             if let Some(case_else_results_ast_box) = case_else_results_ast_box_opt {
                 fks.extend(fk_ast_nodes_from_where_ast(
                     case_else_results_ast_box.borrow_mut(),
-                    is_include_non_fk_columns,
                 ));
             }
         }
-        Expr::Collate { expr, .. } => fks.extend(fk_ast_nodes_from_where_ast(
-            expr.borrow_mut(),
-            is_include_non_fk_columns,
-        )),
-        Expr::Extract { expr, .. } => fks.extend(fk_ast_nodes_from_where_ast(
-            expr.borrow_mut(),
-            is_include_non_fk_columns,
-        )),
+        Expr::Collate { expr, .. } => fks.extend(fk_ast_nodes_from_where_ast(expr.borrow_mut())),
+        Expr::Extract { expr, .. } => fks.extend(fk_ast_nodes_from_where_ast(expr.borrow_mut())),
         // below is unsupported
         Expr::Exists(_query_box) => (), // EXISTS(subquery) not supported
         Expr::Wildcard => (),
@@ -787,19 +742,25 @@ mod fk_ast_nodes_from_where_ast {
         let mut cloned = borrowed.clone();
 
         let expected = vec![("a_column.b_column".to_string(), Rc::make_mut(&mut borrowed))];
-        // step 7: alter these tests
         assert_eq!(
-            fk_ast_nodes_from_where_ast(Rc::make_mut(&mut cloned), false),
+            fk_ast_nodes_from_where_ast(Rc::make_mut(&mut cloned)),
             expected
         );
     }
 
     #[test]
     fn non_fk_nodes_return_empty_vec() {
-        let mut ast = Expr::Identifier("a_column".to_string());
-        let expected = vec![];
+        let ast = Expr::Identifier("a_column".to_string());
 
-        assert_eq!(fk_ast_nodes_from_where_ast(&mut ast, false), expected);
+        let mut borrowed = Rc::new(ast);
+        let mut cloned = borrowed.clone();
+
+        let expected = vec![("a_column".to_string(), Rc::make_mut(&mut borrowed))];
+
+        assert_eq!(
+            fk_ast_nodes_from_where_ast(Rc::make_mut(&mut cloned)),
+            expected
+        );
     }
 }
 

@@ -511,7 +511,7 @@ mod build_select_statement_tests {
             Ok((sql, prepared_values)) => {
                 assert_eq!(
                     &sql,
-                    "SELECT id FROM a_table WHERE ((id > $1 OR id < $2) AND name = $3) LIMIT 10;"
+                    "SELECT id FROM a_table WHERE ((a_table.id > $1 OR a_table.id < $2) AND a_table.name = $3) LIMIT 10;"
                 );
                 assert_eq!(
                     prepared_values,
@@ -643,7 +643,7 @@ mod build_select_statement_tests {
             Ok((sql, prepared_values)) => {
                 assert_eq!(
                     &sql,
-                    "SELECT DISTINCT ON (test_date, test_timestamptz) id, test_bigint, test_bigserial FROM a_table WHERE (id = $1 AND test_name = $2) ORDER BY due_date DESC LIMIT 10000 OFFSET 2000;"
+                    "SELECT DISTINCT ON (test_date, test_timestamptz) id, test_bigint, test_bigserial FROM a_table WHERE (a_table.id = $1 AND a_table.test_name = $2) ORDER BY due_date DESC LIMIT 10000 OFFSET 2000;"
                 );
 
                 assert_eq!(

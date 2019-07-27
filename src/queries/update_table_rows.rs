@@ -119,8 +119,6 @@ pub fn update_table_rows(
         None
     };
 
-    // dbg!(&column_expr_strings);
-
     let fk_future = stats_future
         .join(ForeignKeyReference::from_query_columns(
             state.config.db_url,
@@ -192,22 +190,16 @@ fn build_update_statement(
     fks: Vec<ForeignKeyReference>,
     mut where_ast: Expr,
 ) -> Result<(String, Vec<ColumnTypeValue>), Error> {
-    // I would prefer this to be &str instead of String, but I haven't figured out yet the best way
-    // to append prepared_value_pos usize as a &str.
-    let mut query_str_arr = vec![
-        "UPDATE ".to_string(),
-        params.table.clone(),
-        " SET ".to_string(),
-    ];
+    let mut query_str_arr = vec!["UPDATE ", &params.table, " SET "];
     let mut prepared_statement_values = vec![];
     let mut prepared_value_pos: usize = 1;
-    let mut prepared_value_pos_vec = vec![];
     let column_types: HashMap<String, String> =
         TableColumnStat::stats_to_column_types(stats.clone());
 
     // Convert JSON object and append query_str and prepared_statement_values with column values
-    let column_values_len = params.column_values.len();
-    for (i, (col, val)) in params.column_values.iter().enumerate() {
+    let mut column_name_tokens_vec: Vec<Vec<&str>> = vec![];
+    let mut set_prepared_values: Vec<String> = vec![];
+    for (col, val) in params.column_values.iter() {
         let column_type = column_types
             .get(col)
             .ok_or_else(|| Error::generate_error("TABLE_COLUMN_TYPE_NOT_FOUND", col.clone()))?;
@@ -219,12 +211,8 @@ fn build_update_statement(
 
             let actual_column_tokens = get_db_column_str(col, &params.table, &fks, false, false)?;
 
-            query_str_arr.push(actual_column_tokens.join(""));
-
-            // todo: experiment moving this out of the loop using 2 vecs. convert String -> &str
-            let prepared_value_pos_str = prepared_value_pos.to_string();
-            query_str_arr.push([" = $", &prepared_value_pos_str].join(""));
-            prepared_value_pos_vec.push(prepared_value_pos_str);
+            column_name_tokens_vec.push(actual_column_tokens);
+            set_prepared_values.push(format!("${}", prepared_value_pos));
             prepared_value_pos += 1;
 
             Ok(())
@@ -246,39 +234,49 @@ fn build_update_statement(
                 let actual_value_tokens =
                     get_db_column_str(val_str, &params.table, &fks, false, true)?;
 
-                let mut assignment_str: Vec<&str> = vec![];
-                assignment_str.extend(actual_column_tokens);
-                assignment_str.push(" = ");
-                assignment_str.extend(actual_value_tokens);
-                query_str_arr.push(assignment_str.join(""));
+                column_name_tokens_vec.push(actual_column_tokens);
+                set_prepared_values.push(actual_value_tokens.join(""));
             }
         } else {
             append_prepared_value(&val)?;
         }
+    }
+
+    let column_values_len = params.column_values.len();
+    for (i, (column_name_tokens, set_prepared_value)) in column_name_tokens_vec
+        .into_iter()
+        .zip(set_prepared_values.iter())
+        .enumerate()
+    {
+        query_str_arr.extend(column_name_tokens);
+        query_str_arr.push(" = ");
+        query_str_arr.push(set_prepared_value);
 
         if i < column_values_len - 1 {
-            query_str_arr.push(", ".to_string());
+            query_str_arr.push(", ");
         }
     }
 
-    // dbg!(&fks);
-
     // FROM string
-    if !fks.is_empty() {
-        query_str_arr.push(" FROM ".to_string());
-        let from_tables_str = ForeignKeyReference::join_foreign_key_references(
+    let from_tables_str = if !fks.is_empty() {
+        ForeignKeyReference::join_foreign_key_references(
             &fks,
             |(_, _, referred_table, _)| referred_table.to_string(),
             ", ",
-        );
-        query_str_arr.push(from_tables_str);
+        )
+    } else {
+        "".to_string()
+    };
+    if &from_tables_str != "" {
+        query_str_arr.push(" FROM ");
+        query_str_arr.push(&from_tables_str);
     }
 
     // building WHERE string
     let (mut where_string, where_column_types) =
         get_where_string(&mut where_ast, &params.table, &stats, &fks);
     if &where_string != "" {
-        query_str_arr.push(" WHERE (".to_string());
+        query_str_arr.push(" WHERE (");
 
         // parse through the `WHERE` AST and return a tuple: (expression-with-prepared-params
         // string, Vec of tuples (position, Value)).
@@ -292,20 +290,19 @@ fn build_update_statement(
         where_string = where_string_with_prepared_positions;
         prepared_statement_values.extend(prepared_values_vec);
 
-        query_str_arr.push(where_string);
-        query_str_arr.push(")".to_string());
+        query_str_arr.push(&where_string);
+        query_str_arr.push(")");
     }
 
     // returning_columns
-    if let Some(returned_column_names) = params.returning_columns {
-        query_str_arr.push(" RETURNING ".to_string());
+    if let Some(returned_column_names) = &params.returning_columns {
+        query_str_arr.push(" RETURNING ");
 
-        let returning_columns_str = get_columns_str(&returned_column_names, &params.table, &fks)?;
-        query_str_arr.push(returning_columns_str.join(""));
+        let returning_columns_str = get_columns_str(returned_column_names, &params.table, &fks)?;
+        query_str_arr.extend(returning_columns_str);
     }
 
-    query_str_arr.push(";".to_string());
-    // dbg!(query_str_arr.join(""));
+    query_str_arr.push(";");
 
     Ok((query_str_arr.join(""), prepared_statement_values))
 }
@@ -408,7 +405,7 @@ mod build_update_statement_tests {
 
         assert_eq!(
             &sql_str,
-            "UPDATE throne SET nemesis_name = adult.name FROM adult WHERE (throne.id = $1);"
+            "UPDATE throne SET nemesis_name = adult.name FROM adult WHERE (throne.id = $1) RETURNING throne.id AS \"id\", throne.nemesis_name AS \"nemesis_name\";"
         );
         assert_eq!(
             prepared_values,
@@ -492,7 +489,7 @@ mod build_update_statement_tests {
 
         assert_eq!(
             &sql_str,
-            "UPDATE player SET name = coach.name FROM team, coach WHERE (player.id = $1);"
+            "UPDATE player SET name = coach.name FROM team, coach WHERE (player.id = $1) RETURNING player.id AS \"id\", coach.name AS \"team_id.coach_id.name\";"
         );
         assert_eq!(
             prepared_values,
