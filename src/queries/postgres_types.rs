@@ -1315,9 +1315,3 @@ impl PreparedStatementValue {
         };
     }
 }
-
-/// Used for returning either number of rows or actual row values in INSERT/UPDATE statements.
-pub enum UpsertResult {
-    Rows(Vec<RowFields>),
-    NumRowsAffected(u64),
-}

@@ -14,7 +14,7 @@ use super::{
     query_types::QueryParamsSelect,
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
-        get_db_column_str, get_where_string, validate_alias_identifier, validate_table_name,
+        get_columns_str, get_where_string, validate_alias_identifier, validate_table_name,
         validate_where_column, where_clause_str_to_ast,
     },
 };
@@ -151,18 +151,13 @@ fn build_select_statement(
     if let Some(distinct_columns) = &params.distinct {
         statement.push("DISTINCT ON (");
 
-        statement.extend(get_column_str(
-            &distinct_columns,
-            &params.table,
-            &fks,
-            false,
-        )?);
+        statement.extend(get_columns_str(&distinct_columns, &params.table, &fks)?);
 
         statement.push(") ");
     }
 
     // building column selection
-    statement.extend(get_column_str(&params.columns, &params.table, &fks, true)?);
+    statement.extend(get_columns_str(&params.columns, &params.table, &fks)?);
 
     statement.push(" FROM ");
     statement.push(&params.table);
@@ -222,12 +217,7 @@ fn build_select_statement(
     // GROUP BY statement
     if let Some(group_by_columns) = &params.group_by {
         statement.push(" GROUP BY ");
-        statement.extend(get_column_str(
-            group_by_columns,
-            &params.table,
-            &fks,
-            false,
-        )?);
+        statement.extend(get_columns_str(group_by_columns, &params.table, &fks)?);
     }
 
     // Append ORDER BY if the param exists
@@ -300,28 +290,6 @@ fn build_select_statement(
     statement.push(";");
 
     Ok((statement.join(""), prepared_values))
-}
-
-/// Generates a string of column names delimited by commas. Foreign keys are correctly accounted
-/// for.
-fn get_column_str<'a>(
-    columns: &'a [String],
-    table: &'a str,
-    fks: &'a [ForeignKeyReference],
-    is_use_alias: bool,
-) -> Result<Vec<&'a str>, Error> {
-    let mut statement: Vec<&str> = vec![];
-
-    for (i, column) in columns.iter().enumerate() {
-        let column_tokens = get_db_column_str(column, table, fks, is_use_alias, true, true)?;
-        statement.extend(column_tokens);
-
-        if i < columns.len() - 1 {
-            statement.push(", ");
-        }
-    }
-
-    Ok(statement)
 }
 
 #[cfg(test)]
@@ -692,119 +660,5 @@ mod build_select_statement_tests {
                 panic!(e);
             }
         };
-    }
-}
-
-#[cfg(test)]
-mod get_column_str_tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn foreign_keys_nested() {
-        let columns = vec!["id".to_string(), "parent_id.company_id.name".to_string()];
-        let fks = [ForeignKeyReference {
-            original_refs: vec!["parent_id.company_id.name".to_string()],
-            referring_table: "child".to_string(),
-            referring_column: "parent_id".to_string(),
-            referring_column_type: "int8".to_string(),
-            table_referred: "adult".to_string(),
-            foreign_key_column: "id".to_string(),
-            foreign_key_column_type: "int8".to_string(),
-            nested_fks: vec![ForeignKeyReference {
-                original_refs: vec!["company_id.name".to_string()],
-                referring_table: "adult".to_string(),
-                referring_column: "company_id".to_string(),
-                referring_column_type: "int8".to_string(),
-                table_referred: "company".to_string(),
-                foreign_key_column: "id".to_string(),
-                foreign_key_column_type: "int8".to_string(),
-                nested_fks: vec![],
-            }],
-        }];
-        let table = "child";
-
-        let column_str = get_column_str(&columns, table, &fks, false)
-            .unwrap()
-            .join("");
-        assert_eq!(
-            column_str,
-            r#"child.id AS "id", company.name AS "parent_id.company_id.name""#
-        );
-    }
-
-    #[test]
-    fn foreign_keys_nested_more_than_one() {
-        let columns = vec![
-            "parent_id.name".to_string(),
-            "parent_id.company_id.name".to_string(),
-        ];
-        let fks = [ForeignKeyReference {
-            original_refs: vec![
-                "parent_id.company_id.name".to_string(),
-                "parent_id.name".to_string(),
-            ],
-            referring_table: "child".to_string(),
-            referring_column: "parent_id".to_string(),
-            referring_column_type: "int8".to_string(),
-            table_referred: "adult".to_string(),
-            foreign_key_column: "id".to_string(),
-            foreign_key_column_type: "int8".to_string(),
-            nested_fks: vec![ForeignKeyReference {
-                original_refs: vec!["company_id.name".to_string()],
-                referring_table: "adult".to_string(),
-                referring_column: "company_id".to_string(),
-                referring_column_type: "int8".to_string(),
-                table_referred: "company".to_string(),
-                foreign_key_column: "id".to_string(),
-                foreign_key_column_type: "int8".to_string(),
-                nested_fks: vec![],
-            }],
-        }];
-        let table = "child";
-
-        let column_str = get_column_str(&columns, table, &fks, false)
-            .unwrap()
-            .join("");
-        assert_eq!(
-            column_str,
-            r#"adult.name AS "parent_id.name", company.name AS "parent_id.company_id.name""#
-        );
-    }
-
-    #[test]
-    fn foreign_keys_nested_alias() {
-        let columns = vec![
-            "id".to_string(),
-            "parent_id.company_id.name AS parent_company".to_string(),
-        ];
-        let fks = [ForeignKeyReference {
-            original_refs: vec!["parent_id.company_id.name".to_string()],
-            referring_table: "child".to_string(),
-            referring_column: "parent_id".to_string(),
-            referring_column_type: "int8".to_string(),
-            table_referred: "adult".to_string(),
-            foreign_key_column: "id".to_string(),
-            foreign_key_column_type: "int8".to_string(),
-            nested_fks: vec![ForeignKeyReference {
-                original_refs: vec!["company_id.name".to_string()],
-                referring_table: "adult".to_string(),
-                referring_column: "company_id".to_string(),
-                referring_column_type: "int8".to_string(),
-                table_referred: "company".to_string(),
-                foreign_key_column: "id".to_string(),
-                foreign_key_column_type: "int8".to_string(),
-                nested_fks: vec![],
-            }],
-        }];
-        let table = "child";
-
-        let column_str = get_column_str(&columns, table, &fks, true)
-            .unwrap()
-            .join("");
-        assert_eq!(
-            column_str,
-            r#"child.id AS "id", company.name AS "parent_company""#
-        );
     }
 }

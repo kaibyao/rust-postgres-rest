@@ -1,12 +1,10 @@
 use super::{
-    foreign_keys::{fk_ast_nodes_from_where_ast, fk_columns_from_where_ast, ForeignKeyReference},
-    postgres_types::{
-        convert_row_fields, ColumnTypeValue, PreparedStatementValue, RowFields, UpsertResult,
-    },
+    foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
+    postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
     query_types::{QueryParamsUpdate, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
-        generate_returning_clause, get_db_column_str, get_where_string, validate_alias_identifier,
+        get_columns_str, get_db_column_str, get_where_string, validate_alias_identifier,
         validate_table_name, validate_where_column, where_clause_str_to_ast,
     },
 };
@@ -17,10 +15,10 @@ use futures::{
 };
 use lazy_static::lazy_static;
 use regex::Regex;
-use serde_json::{Map, Value as JsonValue};
-use sqlparser::ast::{Expr, Value as SqlValue};
+use serde_json::Value as JsonValue;
+use sqlparser::ast::Expr;
 use std::{collections::HashMap, sync::Arc};
-use tokio_postgres::{types::ToSql, Client};
+use tokio_postgres::types::ToSql;
 
 lazy_static! {
     // check for strings
@@ -89,6 +87,12 @@ pub fn update_table_rows(
 
     let mut is_return_rows = false;
     if let Some(v) = &params.returning_columns {
+        for col in v.iter() {
+            if let Err(e) = validate_where_column(col) {
+                return Either::A(err(e));
+            }
+        }
+
         is_return_rows = true;
         column_expr_strings.extend(v.clone());
     }
@@ -213,8 +217,7 @@ fn build_update_statement(
             let val = ColumnTypeValue::from_json(column_type, &val)?;
             prepared_statement_values.push(val);
 
-            let actual_column_tokens =
-                get_db_column_str(col, &params.table, &fks, false, false, false)?;
+            let actual_column_tokens = get_db_column_str(col, &params.table, &fks, false, false)?;
 
             query_str_arr.push(actual_column_tokens.join(""));
 
@@ -239,9 +242,9 @@ fn build_update_statement(
             } else {
                 // column value is an expression, parse foreign key usage
                 let actual_column_tokens =
-                    get_db_column_str(col, &params.table, &fks, false, false, false)?;
+                    get_db_column_str(col, &params.table, &fks, false, false)?;
                 let actual_value_tokens =
-                    get_db_column_str(val_str, &params.table, &fks, false, false, true)?;
+                    get_db_column_str(val_str, &params.table, &fks, false, true)?;
 
                 let mut assignment_str: Vec<&str> = vec![];
                 assignment_str.extend(actual_column_tokens);
@@ -294,8 +297,12 @@ fn build_update_statement(
     }
 
     // returning_columns
+    if let Some(returned_column_names) = params.returning_columns {
+        query_str_arr.push(" RETURNING ".to_string());
 
-    // table
+        let returning_columns_str = get_columns_str(&returned_column_names, &params.table, &fks)?;
+        query_str_arr.push(returning_columns_str.join(""));
+    }
 
     query_str_arr.push(";".to_string());
     // dbg!(query_str_arr.join(""));

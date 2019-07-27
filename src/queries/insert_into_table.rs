@@ -7,14 +7,20 @@ use std::collections::HashMap;
 use tokio_postgres::{types::ToSql, Client};
 
 use super::{
-    postgres_types::{convert_row_fields, ColumnTypeValue, RowFields, UpsertResult},
+    postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
     query_types::{QueryParamsInsert, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
-    utils::generate_returning_clause,
+    utils::get_columns_str,
 };
 use crate::Error;
 
 static INSERT_ROWS_BATCH_COUNT: usize = 100;
+
+/// Used for returning either number of rows or actual row values in INSERT/UPDATE statements.
+pub enum InsertResult {
+    Rows(Vec<RowFields>),
+    NumRowsAffected(u64),
+}
 
 /// Runs an INSERT INTO <table> query
 pub fn insert_into_table(
@@ -78,10 +84,10 @@ pub fn insert_into_table(
                                 execute_insert(conn, params, column_types, &insert_batches[i])
                                     .and_then(move |(conn, params, column_types, insert_result)| {
                                         match insert_result {
-                                            UpsertResult::NumRowsAffected(num_rows_affected) => {
+                                            InsertResult::NumRowsAffected(num_rows_affected) => {
                                                 total_num_rows_affected += num_rows_affected;
                                             }
-                                            UpsertResult::Rows(rows) => {
+                                            InsertResult::Rows(rows) => {
                                                 total_rows_returned.extend(rows);
                                             }
                                         };
@@ -141,10 +147,10 @@ pub fn insert_into_table(
                 let simple_insert_future =
                     execute_insert(conn, params, column_types, &rows).then(|result| match result {
                         Ok((_conn, _params, _column_types, insert_result)) => match insert_result {
-                            UpsertResult::NumRowsAffected(num_rows_affected) => {
+                            InsertResult::NumRowsAffected(num_rows_affected) => {
                                 Ok(QueryResult::from_num_rows_affected(num_rows_affected))
                             }
-                            UpsertResult::Rows(rows) => Ok(QueryResult::QueryTableResult(rows)),
+                            InsertResult::Rows(rows) => Ok(QueryResult::QueryTableResult(rows)),
                         },
                         Err((e, _client)) => Err(e),
                     });
@@ -166,7 +172,7 @@ fn execute_insert<'a>(
         Client,
         QueryParamsInsert,
         HashMap<String, String>,
-        UpsertResult,
+        InsertResult,
     ),
     Error = (Error, Client),
 > {
@@ -187,12 +193,16 @@ fn execute_insert<'a>(
     };
 
     // generate the RETURNING string
-    let returning_clause = match generate_returning_clause(&params.returning_columns) {
-        Some(returning_str) => {
-            is_return_rows = true;
-            returning_str
+    let returning_clause = if let Some(returning_columns) = &params.returning_columns {
+        match get_columns_str(returning_columns, &params.table, &[]) {
+            Ok(columns_tokens) => {
+                is_return_rows = true;
+                columns_tokens.join("")
+            }
+            Err(e) => return Either::A(err((e, conn))),
         }
-        None => "".to_string(),
+    } else {
+        "".to_string()
     };
 
     // create initial prepared statement
@@ -231,7 +241,7 @@ fn execute_insert<'a>(
                                 .collect::<Result<Vec<RowFields>, Error>>()
                             {
                                 Ok(row_fields) => {
-                                    Ok((conn, params, column_types, UpsertResult::Rows(row_fields)))
+                                    Ok((conn, params, column_types, InsertResult::Rows(row_fields)))
                                 }
                                 Err(e) => Err((e, conn)),
                             }
@@ -249,7 +259,7 @@ fn execute_insert<'a>(
                                 conn,
                                 params,
                                 column_types,
-                                UpsertResult::NumRowsAffected(num_rows),
+                                InsertResult::NumRowsAffected(num_rows),
                             )),
                             Err(e) => Err((Error::from(e), conn)),
                         });
