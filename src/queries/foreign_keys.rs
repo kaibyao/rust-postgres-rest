@@ -253,7 +253,7 @@ pub struct ForeignKeyReference {
     pub referring_column: String,
 
     // The Postgres type of the referring column.
-    pub referring_column_type: String,
+    pub referring_column_type: &'static str,
 
     /// The table being referred by the foreign key.
     pub table_referred: String,
@@ -262,7 +262,7 @@ pub struct ForeignKeyReference {
     pub foreign_key_column: String,
 
     // The Postgres type of the column of the table being referred by the foreign key.
-    pub foreign_key_column_type: String,
+    pub foreign_key_column_type: &'static str,
 
     /// Any child foreign key columns that are part of the original_ref string.
     pub nested_fks: Vec<ForeignKeyReference>,
@@ -594,18 +594,14 @@ impl ForeignKeyReference {
 
             let table_clone = table.clone();
             let stat_column_name_clone = stat.column_name.clone();
-            let stat_column_type_clone = stat.column_type.clone();
             let stat_fk_column = stat.foreign_key_column.clone().unwrap_or_else(String::new);
-            let stat_fk_column_type = stat
-                .foreign_key_column_type
-                .clone()
-                .unwrap_or_else(String::new);
+            let stat_fk_column_type = stat.foreign_key_column_type.unwrap_or_else(|| "");
 
             // child column is not a foreign key, return future with ForeignKeyReference
             if child_fk_columns.is_empty() {
                 let no_child_columns_fut = ok::<ForeignKeyReference, Error>(ForeignKeyReference {
                     referring_column: stat_column_name_clone,
-                    referring_column_type: stat_column_type_clone,
+                    referring_column_type: stat.column_type,
                     referring_table: table_clone,
                     table_referred: foreign_key_table,
                     foreign_key_column: stat_fk_column,
@@ -628,7 +624,7 @@ impl ForeignKeyReference {
             .and_then(move |nested_fks| {
                 Ok(ForeignKeyReference {
                     referring_column: stat_column_name_clone,
-                    referring_column_type: stat_column_type_clone,
+                    referring_column_type: stat.column_type,
                     referring_table: table_clone,
                     table_referred: foreign_key_table,
                     foreign_key_column: stat_fk_column,
@@ -798,10 +794,10 @@ mod fkr_find {
             original_refs: vec!["a_foreign_key.some_text".to_string()],
             referring_table: "a_table".to_string(),
             referring_column: "a_foreign_key".to_string(),
-            referring_column_type: "int8".to_string(),
+            referring_column_type: "int8",
             table_referred: "b_table".to_string(),
             foreign_key_column: "id".to_string(),
-            foreign_key_column_type: "int8".to_string(),
+            foreign_key_column_type: "int8",
             nested_fks: vec![],
         }];
 
@@ -818,18 +814,18 @@ mod fkr_find {
             original_refs: vec!["another_foreign_key.nested_fk.some_str".to_string()],
             referring_table: "a_table".to_string(),
             referring_column: "another_foreign_key".to_string(),
-            referring_column_type: "int8".to_string(),
+            referring_column_type: "int8",
             table_referred: "b_table".to_string(),
             foreign_key_column: "id".to_string(),
-            foreign_key_column_type: "int8".to_string(),
+            foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
                 original_refs: vec!["nested_fk.some_str".to_string()],
                 referring_table: "b_table".to_string(),
                 referring_column: "nested_fk".to_string(),
-                referring_column_type: "int8".to_string(),
+                referring_column_type: "int8",
                 table_referred: "c_table".to_string(),
                 foreign_key_column: "id".to_string(),
-                foreign_key_column_type: "int8".to_string(),
+                foreign_key_column_type: "int8",
                 nested_fks: vec![],
             }],
         }];
@@ -857,18 +853,18 @@ mod fkr_join_foreign_key_references {
                 original_refs: vec!["another_foreign_key.nested_fk.some_str".to_string()],
                 referring_table: "a_table".to_string(),
                 referring_column: "another_foreign_key".to_string(),
-                referring_column_type: "int8".to_string(),
+                referring_column_type: "int8",
                 table_referred: "b_table".to_string(),
                 foreign_key_column: "id".to_string(),
-                foreign_key_column_type: "int8".to_string(),
+                foreign_key_column_type: "int8",
                 nested_fks: vec![ForeignKeyReference {
                     original_refs: vec!["nested_fk.some_str".to_string()],
                     referring_table: "b_table".to_string(),
                     referring_column: "nested_fk".to_string(),
-                    referring_column_type: "int8".to_string(),
+                    referring_column_type: "int8",
                     table_referred: "d_table".to_string(),
                     foreign_key_column: "id".to_string(),
-                    foreign_key_column_type: "int8".to_string(),
+                    foreign_key_column_type: "int8",
                     nested_fks: vec![],
                 }],
             },
@@ -876,10 +872,10 @@ mod fkr_join_foreign_key_references {
                 original_refs: vec!["fk.another_field".to_string()],
                 referring_table: "b_table".to_string(),
                 referring_column: "b_table_fk".to_string(),
-                referring_column_type: "int8".to_string(),
+                referring_column_type: "int8",
                 table_referred: "e_table".to_string(),
                 foreign_key_column: "id".to_string(),
-                foreign_key_column_type: "int8".to_string(),
+                foreign_key_column_type: "int8",
                 nested_fks: vec![],
             },
         ];

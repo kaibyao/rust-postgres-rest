@@ -258,22 +258,19 @@ returns `[{ "id": 1002, "name": "Arya" }]`.
 ## Not supported
 
 - HStore (`rust-sqlparser` doesn't support it). Use JSON/JSONB instead.
-- Bit and Varbit types (mostly because I'm not comfortable working with them yet)
+- Bit and Varbit types (the `B'0101'` syntax in postgres is not supported by `rust-sqlparser`)
 - Exclusion and Trigger constraints
 - `BETWEEN` (see [Postgres wiki article](https://wiki.postgresql.org/wiki/Don%27t_Do_This#Don.27t_use_BETWEEN_.28especially_with_timestamps.29))
 
 ## To dos
 
 1. Recreate the Table API.
-1. Consider moving PreparedStatementValue to postgres_types.
 1. Shortened alias syntax ("some_table a" vs "some_table AS a")
 1. parallelize all iters (with Rayon + par_iter).
-1. RETURNING clause should also return foreign key columns.
 1. Add security, customizability, optimizations, etc.
 1. GraphQL API
 1. Optimization: Convert Strings to &str / statics.
 1. CSV, XML for REST API (nix for now?)
-1. gRPC/Flatbuffers/Cap'n Proto (nix for now?)
 
 ## To run tests
 

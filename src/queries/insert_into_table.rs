@@ -44,7 +44,7 @@ pub fn insert_into_table(
                 .map(|stats| (stats, conn))
         })
         .and_then(move |(stats, mut conn)| {
-            let column_types: HashMap<String, String> =
+            let column_types: HashMap<String, &'static str> =
                 TableColumnStat::stats_to_column_types(stats);
 
             let num_rows = params.rows.len();
@@ -165,13 +165,13 @@ pub fn insert_into_table(
 fn execute_insert<'a>(
     mut conn: Client,
     params: QueryParamsInsert,
-    column_types: HashMap<String, String>,
+    column_types: HashMap<String, &'static str>,
     rows: &'a [Map<String, Value>],
 ) -> impl Future<
     Item = (
         Client,
         QueryParamsInsert,
-        HashMap<String, String>,
+        HashMap<String, &'static str>,
         InsertResult,
     ),
     Error = (Error, Client),
@@ -347,7 +347,7 @@ fn get_all_columns_to_insert<'a>(rows: &'a [Map<String, Value>]) -> Vec<&'a str>
 fn generate_insert_params(
     rows: &[Map<String, Value>],
     columns: &[&str],
-    column_types: &HashMap<String, String>,
+    column_types: &HashMap<String, &'static str>,
 ) -> Result<(String, Vec<ColumnTypeValue>), Error> {
     let mut prep_column_number = 1;
     let mut row_strs = vec![];

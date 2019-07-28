@@ -1,5 +1,7 @@
 use super::{
-    select_table_stats::{Constraint, TableColumnStat, TableIndex, TableReferencedBy, TableStats},
+    select_table_stats::{
+        Constraint, TableColumnStat, TableIndex, TableReferencedBy, TableStats, COLUMN_TYPES,
+    },
     utils::validate_table_name,
 };
 use crate::Error;
@@ -54,12 +56,7 @@ pub async fn select_all_table_stats(
         Err(e) => return Err(Error::from(e)),
     };
 
-    Ok(compile_table_stats(
-        tables,
-        constraints,
-        indexes,
-        column_stats,
-    ))
+    compile_table_stats(tables, constraints, indexes, column_stats)
 }
 
 /// Takes the results of individual queries and generates the final table stats object
@@ -68,10 +65,10 @@ fn compile_table_stats(
     constraint_rows: Vec<Row>,
     index_rows: Vec<Row>,
     column_stat_rows: Vec<Row>,
-) -> HashMap<String, TableStats> {
+) -> Result<HashMap<String, TableStats>, Error> {
     let mut constraints = process_constraints(constraint_rows);
     let mut indexes = process_indexes(index_rows);
-    let mut column_stats = process_column_stats(column_stat_rows);
+    let mut column_stats = process_column_stats(column_stat_rows)?;
 
     let mut table_stats: HashMap<String, TableStats> = HashMap::new();
 
@@ -134,7 +131,7 @@ fn compile_table_stats(
         );
     }
 
-    table_stats
+    Ok(table_stats)
 }
 
 fn select_column_stats_statement(conn: &mut Client, tables_str: &str) -> Prepare {
@@ -231,15 +228,55 @@ FROM
 
 /// Returns a given tables’ column stats: column names, column types, length, default values, and
 /// foreign keys information.
-fn process_column_stats(rows: Vec<Row>) -> HashMap<String, Vec<TableColumnStat>> {
+fn process_column_stats(rows: Vec<Row>) -> Result<HashMap<String, Vec<TableColumnStat>>, Error> {
     let mut table_column_stats: HashMap<String, Vec<TableColumnStat>> = HashMap::new();
     for row in rows {
         let table: String = row.get(0);
+        let column_name = row.get(1);
         let is_nullable_string: String = row.get(6);
 
+        let column_type: String = row.get(2);
+        let column_type: &'static str = match COLUMN_TYPES
+            .iter()
+            .find(|static_column_type| *static_column_type == &column_type)
+        {
+            Some(found_column_type) => found_column_type,
+            None => {
+                return Err(Error::generate_error(
+                    "UNSUPPORTED_DATA_TYPE",
+                    format!(
+                        "Column {} has unsupported type: {}",
+                        column_name, column_type
+                    ),
+                ))
+            }
+        };
+
+        let foreign_key_column: Option<String> = row.get(9);
+        let foreign_key_column_type: Option<String> = row.get(10);
+        let foreign_key_column_type: Option<&'static str> = if foreign_key_column_type.is_some() {
+            match COLUMN_TYPES.iter().find(|static_column_type| {
+                **static_column_type == foreign_key_column_type.as_ref().unwrap()
+            }) {
+                Some(found_column_type) => Some(found_column_type),
+                None => {
+                    return Err(Error::generate_error(
+                        "UNSUPPORTED_DATA_TYPE",
+                        format!(
+                            "Column {} has unsupported type: {}",
+                            foreign_key_column.unwrap(),
+                            foreign_key_column_type.as_ref().unwrap()
+                        ),
+                    ))
+                }
+            }
+        } else {
+            None
+        };
+
         let column_stats = TableColumnStat {
-            column_name: row.get(1),
-            column_type: row.get(2),
+            column_name,
+            column_type,
             default_value: row.get(3),
             is_nullable: match is_nullable_string.as_str() {
                 "YES" => true,
@@ -248,8 +285,8 @@ fn process_column_stats(rows: Vec<Row>) -> HashMap<String, Vec<TableColumnStat>>
             },
             is_foreign_key: row.get(7),
             foreign_key_table: row.get(8),
-            foreign_key_column: row.get(9),
-            foreign_key_column_type: row.get(10),
+            foreign_key_column,
+            foreign_key_column_type,
             char_max_length: row.get(4),
             char_octet_length: row.get(5),
         };
@@ -263,7 +300,7 @@ fn process_column_stats(rows: Vec<Row>) -> HashMap<String, Vec<TableColumnStat>>
             .push(column_stats);
     }
 
-    table_column_stats
+    Ok(table_column_stats)
 }
 
 fn select_constraints_statement(conn: &mut Client, tables_str: &str, tables: &[String]) -> Prepare {
@@ -329,7 +366,6 @@ fn process_constraints(rows: Vec<Row>) -> HashMap<String, Vec<Constraint>> {
     // Using lazy_static so that COLUMN_REG and CONSTRAINT_MAP are only compiled once total (versus
     // compiling every time this function is called)
     lazy_static! {
-        // static ref COLUMN_REG: Regex = Regex::new(r"^\{(.*)\}$").unwrap();
         static ref CONSTRAINT_MAP: HashMap<char, &'static str> = {
             let mut m = HashMap::new();
             m.insert('c', "check");

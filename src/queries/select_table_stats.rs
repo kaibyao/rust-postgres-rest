@@ -15,10 +15,38 @@ use std::collections::HashMap;
 
 use tokio_postgres::{
     impls::{Prepare, Query},
-    Client, Error as PgError,
+    Client,
 };
 
-// TODO: column_types can probably be a static &'str, now that i think about it.
+lazy_static! {
+    pub static ref COLUMN_TYPES: &'static [&'static str] = &[
+        "bit",
+        "bool",
+        "bytea",
+        "bpchar",
+        "citext",
+        "date",
+        "float4",
+        "float8",
+        "hstore",
+        "int2",
+        "int4",
+        "int8",
+        "json",
+        "jsonb",
+        "macaddr",
+        "name",
+        "numeric",
+        "oid",
+        "text",
+        "time",
+        "timestamp",
+        "timestamptz",
+        "uuid",
+        "varbit",
+        "varchar",
+    ];
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 /// Stats for a single column of a table
@@ -26,7 +54,7 @@ pub struct TableColumnStat {
     /// Name of column.
     pub column_name: String,
     /// Type of column.
-    pub column_type: String,
+    pub column_type: &'static str,
     /// Default value of column.
     pub default_value: Option<String>,
     /// If null can be a column value.
@@ -38,7 +66,7 @@ pub struct TableColumnStat {
     /// Table columns being referenced (if is_foreign_key).
     pub foreign_key_column: Option<String>,
     /// Types of table column being referenced (if is_foreign_key).
-    pub foreign_key_column_type: Option<String>,
+    pub foreign_key_column_type: Option<&'static str>,
     /// If data_type identifies a character or bit string type, the declared maximum length; null
     /// for all other data types or if no maximum length was declared.
     pub char_max_length: Option<i32>,
@@ -50,8 +78,8 @@ pub struct TableColumnStat {
 
 impl TableColumnStat {
     /// Takes a Vec of stats and returns a HashMap of column name:type.
-    pub fn stats_to_column_types(stats: Vec<Self>) -> HashMap<String, String> {
-        let mut column_types: HashMap<String, String> = HashMap::new();
+    pub fn stats_to_column_types(stats: Vec<Self>) -> HashMap<String, &'static str> {
+        let mut column_types: HashMap<String, &'static str> = HashMap::new();
 
         for stat in stats.into_iter() {
             column_types.insert(stat.column_name, stat.column_type);
@@ -171,6 +199,7 @@ fn select_table_stats_from_db(
                 select_indexes_statement(&mut conn, &table),
                 select_column_stats_statement(&mut conn, &table),
             ])
+            .from_err()
             .and_then(move |statements| {
                 // query the statements
                 let mut queries = vec![];
@@ -199,28 +228,72 @@ fn select_table_stats_from_db(
 
 /// Returns a given table’s column stats: column names, column types, length, default values, and
 /// foreign keys information.
-pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>, Error = PgError> {
-    q.map(|row| {
-        let is_nullable_string: String = row.get(5);
+pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>, Error = Error> {
+    q.map_err(Error::from).collect().and_then(|rows| {
+        rows.into_iter()
+            .map(|row| {
+                let column_name = row.get(0);
+                let is_nullable_string: String = row.get(5);
 
-        TableColumnStat {
-            column_name: row.get(0),
-            column_type: row.get(1),
-            default_value: row.get(2),
-            is_nullable: match is_nullable_string.as_str() {
-                "YES" => true,
-                "NO" => false,
-                _ => false,
-            },
-            is_foreign_key: row.get(6),
-            foreign_key_table: row.get(7),
-            foreign_key_column: row.get(8),
-            foreign_key_column_type: row.get(9),
-            char_max_length: row.get(3),
-            char_octet_length: row.get(4),
-        }
+                let column_type: String = row.get(1);
+                let column_type: &'static str = match COLUMN_TYPES
+                    .iter()
+                    .find(|static_column_type| *static_column_type == &column_type)
+                {
+                    Some(found_column_type) => found_column_type,
+                    None => {
+                        return Err(Error::generate_error(
+                            "UNSUPPORTED_DATA_TYPE",
+                            format!(
+                                "Column {} has unsupported type: {}",
+                                column_name, column_type
+                            ),
+                        ))
+                    }
+                };
+
+                let foreign_key_column: Option<String> = row.get(8);
+                let foreign_key_column_type: Option<String> = row.get(9);
+                let foreign_key_column_type: Option<&'static str> =
+                    if foreign_key_column_type.is_some() {
+                        match COLUMN_TYPES.iter().find(|static_column_type| {
+                            **static_column_type == foreign_key_column_type.as_ref().unwrap()
+                        }) {
+                            Some(found_column_type) => Some(found_column_type),
+                            None => {
+                                return Err(Error::generate_error(
+                                    "UNSUPPORTED_DATA_TYPE",
+                                    format!(
+                                        "Column {} has unsupported type: {}",
+                                        foreign_key_column.unwrap(),
+                                        foreign_key_column_type.as_ref().unwrap()
+                                    ),
+                                ))
+                            }
+                        }
+                    } else {
+                        None
+                    };
+
+                Ok(TableColumnStat {
+                    column_name,
+                    column_type,
+                    default_value: row.get(2),
+                    is_nullable: match is_nullable_string.as_str() {
+                        "YES" => true,
+                        "NO" => false,
+                        _ => false,
+                    },
+                    is_foreign_key: row.get(6),
+                    foreign_key_table: row.get(7),
+                    foreign_key_column,
+                    foreign_key_column_type,
+                    char_max_length: row.get(3),
+                    char_octet_length: row.get(4),
+                })
+            })
+            .collect::<Result<Vec<TableColumnStat>, Error>>()
     })
-    .collect()
 }
 
 pub fn select_column_stats_statement(conn: &mut Client, table: &str) -> Prepare {
@@ -362,7 +435,7 @@ fn compile_table_stats(
     }
 }
 
-fn select_constraints(q: Query) -> impl Future<Item = Vec<Constraint>, Error = PgError> {
+fn select_constraints(q: Query) -> impl Future<Item = Vec<Constraint>, Error = Error> {
     // retrieves all constraints (c = check, u = unique, f = foreign key, p = primary key)
     // shamelessly taken from https://dba.stackexchange.com/questions/36979/retrieving-all-pk-and-fk
 
@@ -383,37 +456,38 @@ fn select_constraints(q: Query) -> impl Future<Item = Vec<Constraint>, Error = P
         };
     }
 
-    q.map(|row| {
-        let constraint_type_int: i8 = row.get(1);
-        let constraint_type_uint: u8 = constraint_type_int as u8;
-        let constraint_type_char: char = constraint_type_uint.into();
+    q.from_err()
+        .map(|row| {
+            let constraint_type_int: i8 = row.get(1);
+            let constraint_type_uint: u8 = constraint_type_int as u8;
+            let constraint_type_char: char = constraint_type_uint.into();
 
-        Constraint {
-            name: row.get(0),
-            table: row.get(2),
-            columns: row.get(3),
-            constraint_type: match CONSTRAINT_MAP.get(&constraint_type_char) {
-                Some(constraint_type) => constraint_type,
-                None => panic!("Unhandled constraint type: {}", constraint_type_char),
-            },
-            definition: row.get(4),
-            fk_table: row.get(5),
-            fk_columns: {
-                let pk_column_raw: Option<String> = row.get(6);
+            Constraint {
+                name: row.get(0),
+                table: row.get(2),
+                columns: row.get(3),
+                constraint_type: match CONSTRAINT_MAP.get(&constraint_type_char) {
+                    Some(constraint_type) => constraint_type,
+                    None => panic!("Unhandled constraint type: {}", constraint_type_char),
+                },
+                definition: row.get(4),
+                fk_table: row.get(5),
+                fk_columns: {
+                    let pk_column_raw: Option<String> = row.get(6);
 
-                match pk_column_raw {
-                    Some(pk_column) => Some(
-                        pk_column
-                            .split(',')
-                            .map(|column| column.trim().to_string())
-                            .collect(),
-                    ),
-                    None => None,
-                }
-            },
-        }
-    })
-    .collect()
+                    match pk_column_raw {
+                        Some(pk_column) => Some(
+                            pk_column
+                                .split(',')
+                                .map(|column| column.trim().to_string())
+                                .collect(),
+                        ),
+                        None => None,
+                    }
+                },
+            }
+        })
+        .collect()
 }
 
 fn select_constraints_statement(conn: &mut Client, table: &str) -> Prepare {
@@ -453,26 +527,27 @@ ORDER BY "table";"#, table);
 }
 
 // returns indexes (including primary keys) of a given table
-fn select_indexes(q: Query) -> impl Future<Item = Vec<TableIndex>, Error = PgError> {
-    q.map(|row| {
-        let column_names_str: String = row.get(2);
-        TableIndex {
-            name: row.get(0),
-            columns: column_names_str
-                .split(',')
-                .map(std::string::ToString::to_string)
-                .collect(),
-            access_method: row.get(1),
-            is_exclusion: row.get(4),
-            is_primary_key: row.get(5),
-            is_unique: row.get(3),
-        }
-    })
-    .collect()
-    .then(move |result| match result {
-        Ok(rows) => Ok(rows),
-        Err(e) => Err(e),
-    })
+fn select_indexes(q: Query) -> impl Future<Item = Vec<TableIndex>, Error = Error> {
+    q.from_err()
+        .map(|row| {
+            let column_names_str: String = row.get(2);
+            TableIndex {
+                name: row.get(0),
+                columns: column_names_str
+                    .split(',')
+                    .map(std::string::ToString::to_string)
+                    .collect(),
+                access_method: row.get(1),
+                is_exclusion: row.get(4),
+                is_primary_key: row.get(5),
+                is_unique: row.get(3),
+            }
+        })
+        .collect()
+        .then(move |result| match result {
+            Ok(rows) => Ok(rows),
+            Err(e) => Err(e),
+        })
 }
 
 fn select_indexes_statement(conn: &mut Client, table: &str) -> Prepare {

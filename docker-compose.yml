@@ -2,7 +2,7 @@ version: '3.1'
 
 services:
   db:
-    image: postgres:cached
+    image: postgres
     restart: always
     environment:
       POSTGRES_PASSWORD: example # user = postgres

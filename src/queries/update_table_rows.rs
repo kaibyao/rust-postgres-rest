@@ -193,7 +193,7 @@ fn build_update_statement(
     let mut query_str_arr = vec!["UPDATE ", &params.table, " SET "];
     let mut prepared_statement_values = vec![];
     let mut prepared_value_pos: usize = 1;
-    let column_types: HashMap<String, String> =
+    let column_types: HashMap<String, &'static str> =
         TableColumnStat::stats_to_column_types(stats.clone());
 
     // Convert JSON object and append query_str and prepared_statement_values with column values
@@ -330,7 +330,7 @@ mod build_update_statement_tests {
         let stats = vec![
             TableColumnStat {
                 column_name: "id".to_string(),
-                column_type: "int8".to_string(),
+                column_type: "int8",
                 default_value: None,
                 is_nullable: false,
                 is_foreign_key: false,
@@ -342,19 +342,19 @@ mod build_update_statement_tests {
             },
             TableColumnStat {
                 column_name: "nemesis_id".to_string(),
-                column_type: "int8".to_string(),
+                column_type: "int8",
                 default_value: None,
                 is_nullable: true,
                 is_foreign_key: true,
                 foreign_key_table: Some("adult".to_string()),
                 foreign_key_column: Some("id".to_string()),
-                foreign_key_column_type: Some("int8".to_string()),
+                foreign_key_column_type: Some("int8"),
                 char_max_length: None,
                 char_octet_length: None,
             },
             TableColumnStat {
                 column_name: "nemesis_name".to_string(),
-                column_type: "text".to_string(),
+                column_type: "text",
                 default_value: None,
                 is_nullable: true,
                 is_foreign_key: false,
@@ -366,7 +366,7 @@ mod build_update_statement_tests {
             },
             TableColumnStat {
                 column_name: "house".to_string(),
-                column_type: "text".to_string(),
+                column_type: "text",
                 default_value: None,
                 is_nullable: true,
                 is_foreign_key: false,
@@ -378,7 +378,7 @@ mod build_update_statement_tests {
             },
             TableColumnStat {
                 column_name: "ruler".to_string(),
-                column_type: "text".to_string(),
+                column_type: "text",
                 default_value: None,
                 is_nullable: true,
                 is_foreign_key: false,
@@ -393,10 +393,10 @@ mod build_update_statement_tests {
             original_refs: vec!["nemesis_id.name".to_string()],
             referring_table: "throne".to_string(),
             referring_column: "nemesis_id".to_string(),
-            referring_column_type: "int8".to_string(),
+            referring_column_type: "int8",
             table_referred: "adult".to_string(),
             foreign_key_column: "id".to_string(),
-            foreign_key_column_type: "int8".to_string(),
+            foreign_key_column_type: "int8",
             nested_fks: vec![],
         }];
 
@@ -429,7 +429,7 @@ mod build_update_statement_tests {
         let stats = vec![
             TableColumnStat {
                 column_name: "id".to_string(),
-                column_type: "int8".to_string(),
+                column_type: "int8",
                 default_value: None,
                 is_nullable: false,
                 is_foreign_key: false,
@@ -441,19 +441,19 @@ mod build_update_statement_tests {
             },
             TableColumnStat {
                 column_name: "team_id".to_string(),
-                column_type: "int8".to_string(),
+                column_type: "int8",
                 default_value: None,
                 is_nullable: true,
                 is_foreign_key: true,
                 foreign_key_table: Some("team".to_string()),
                 foreign_key_column: Some("id".to_string()),
-                foreign_key_column_type: Some("int8".to_string()),
+                foreign_key_column_type: Some("int8"),
                 char_max_length: None,
                 char_octet_length: None,
             },
             TableColumnStat {
                 column_name: "name".to_string(),
-                column_type: "text".to_string(),
+                column_type: "text",
                 default_value: None,
                 is_nullable: true,
                 is_foreign_key: false,
@@ -468,18 +468,18 @@ mod build_update_statement_tests {
             original_refs: vec!["team_id.coach_id.name".to_string()],
             referring_table: "player".to_string(),
             referring_column: "team_id".to_string(),
-            referring_column_type: "int8".to_string(),
+            referring_column_type: "int8",
             table_referred: "team".to_string(),
             foreign_key_column: "id".to_string(),
-            foreign_key_column_type: "int8".to_string(),
+            foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
                 original_refs: vec!["coach_id.name".to_string()],
                 referring_table: "team".to_string(),
                 referring_column: "coach_id".to_string(),
-                referring_column_type: "int8".to_string(),
+                referring_column_type: "int8",
                 table_referred: "coach".to_string(),
                 foreign_key_column: "id".to_string(),
-                foreign_key_column_type: "int8".to_string(),
+                foreign_key_column_type: "int8",
                 nested_fks: vec![],
             }],
         }];

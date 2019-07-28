@@ -482,7 +482,7 @@ mod build_select_statement_tests {
             vec![
                 TableColumnStat {
                     column_name: "id".to_string(),
-                    column_type: "int8".to_string(),
+                    column_type: "int8",
                     default_value: None,
                     is_nullable: false,
                     is_foreign_key: false,
@@ -494,7 +494,7 @@ mod build_select_statement_tests {
                 },
                 TableColumnStat {
                     column_name: "name".to_string(),
-                    column_type: "text".to_string(),
+                    column_type: "text",
                     default_value: None,
                     is_nullable: true,
                     is_foreign_key: false,
@@ -554,7 +554,7 @@ mod build_select_statement_tests {
             vec![
                 TableColumnStat {
                     column_name: "id".to_string(),
-                    column_type: "int8".to_string(),
+                    column_type: "int8",
                     default_value: None,
                     is_nullable: false,
                     is_foreign_key: false,
@@ -566,7 +566,7 @@ mod build_select_statement_tests {
                 },
                 TableColumnStat {
                     column_name: "test_bigint".to_string(),
-                    column_type: "int8".to_string(),
+                    column_type: "int8",
                     default_value: None,
                     is_nullable: true,
                     is_foreign_key: false,
@@ -578,7 +578,7 @@ mod build_select_statement_tests {
                 },
                 TableColumnStat {
                     column_name: "test_bigserial".to_string(),
-                    column_type: "int8".to_string(),
+                    column_type: "int8",
                     default_value: None,
                     is_nullable: true,
                     is_foreign_key: false,
@@ -590,7 +590,7 @@ mod build_select_statement_tests {
                 },
                 TableColumnStat {
                     column_name: "test_name".to_string(),
-                    column_type: "text".to_string(),
+                    column_type: "text",
                     default_value: None,
                     is_nullable: true,
                     is_foreign_key: false,
@@ -602,7 +602,7 @@ mod build_select_statement_tests {
                 },
                 TableColumnStat {
                     column_name: "test_date".to_string(),
-                    column_type: "date".to_string(),
+                    column_type: "date",
                     default_value: None,
                     is_nullable: true,
                     is_foreign_key: false,
@@ -614,7 +614,7 @@ mod build_select_statement_tests {
                 },
                 TableColumnStat {
                     column_name: "test_timestamptz".to_string(),
-                    column_type: "timestamptz".to_string(),
+                    column_type: "timestamptz",
                     default_value: None,
                     is_nullable: true,
                     is_foreign_key: false,
@@ -626,7 +626,7 @@ mod build_select_statement_tests {
                 },
                 TableColumnStat {
                     column_name: "due_date".to_string(),
-                    column_type: "date".to_string(),
+                    column_type: "date",
                     default_value: None,
                     is_nullable: true,
                     is_foreign_key: false,
