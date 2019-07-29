@@ -40,16 +40,22 @@ pub fn get_where_string<'a>(
             let replacement_node = match ast_node {
                 Expr::QualifiedWildcard(_wildcard_vec) => {
                     let actual_column_name =
-                        vec![fk_ref.table_referred.clone(), fk_column.to_string()];
+                        vec![fk_ref.foreign_key_table.clone(), fk_column.to_string()];
                     column_types
                         .insert(actual_column_name.join("."), fk_ref.foreign_key_column_type);
                     Expr::QualifiedWildcard(actual_column_name)
                 }
                 Expr::CompoundIdentifier(_nested_fk_column_vec) => {
                     let actual_column_name =
-                        vec![fk_ref.table_referred.clone(), fk_column.to_string()];
-                    column_types
-                        .insert(actual_column_name.join("."), fk_ref.foreign_key_column_type);
+                        vec![fk_ref.foreign_key_table.clone(), fk_column.to_string()];
+
+                    let fk_column_stat = fk_ref
+                        .foreign_key_table_stats
+                        .iter()
+                        .find(|stat| stat.column_name == fk_column)
+                        .unwrap();
+
+                    column_types.insert(actual_column_name.join("."), fk_column_stat.column_type);
                     Expr::CompoundIdentifier(actual_column_name)
                 }
                 _ => unimplemented!(
@@ -95,7 +101,7 @@ pub fn get_db_column_str<'a>(
             ForeignKeyReference::find(fks, table, column),
         ) {
             if is_returned_column_prefixed_with_table {
-                tokens.push(fk_ref.table_referred.as_str());
+                tokens.push(fk_ref.foreign_key_table.as_str());
                 tokens.push(".");
             }
             tokens.push(fk_column);
@@ -286,7 +292,8 @@ mod get_db_column_str_tests {
             referring_table: "child".to_string(),
             referring_column: "parent_id".to_string(),
             referring_column_type: "int8",
-            table_referred: "adult".to_string(),
+            foreign_key_table: "adult".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
@@ -294,7 +301,8 @@ mod get_db_column_str_tests {
                 referring_table: "adult".to_string(),
                 referring_column: "company_id".to_string(),
                 referring_column_type: "int8",
-                table_referred: "company".to_string(),
+                foreign_key_table: "company".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![],
@@ -316,7 +324,8 @@ mod get_db_column_str_tests {
             referring_table: "child".to_string(),
             referring_column: "parent_id".to_string(),
             referring_column_type: "int8",
-            table_referred: "adult".to_string(),
+            foreign_key_table: "adult".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
@@ -324,7 +333,8 @@ mod get_db_column_str_tests {
                 referring_table: "adult".to_string(),
                 referring_column: "company_id".to_string(),
                 referring_column_type: "int8",
-                table_referred: "company".to_string(),
+                foreign_key_table: "company".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![],
@@ -346,7 +356,8 @@ mod get_db_column_str_tests {
             referring_table: "child".to_string(),
             referring_column: "parent_id".to_string(),
             referring_column_type: "int8",
-            table_referred: "adult".to_string(),
+            foreign_key_table: "adult".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
@@ -354,7 +365,8 @@ mod get_db_column_str_tests {
                 referring_table: "adult".to_string(),
                 referring_column: "company_id".to_string(),
                 referring_column_type: "int8",
-                table_referred: "company".to_string(),
+                foreign_key_table: "company".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![],
@@ -376,7 +388,8 @@ mod get_db_column_str_tests {
             referring_table: "child".to_string(),
             referring_column: "parent_id".to_string(),
             referring_column_type: "int8",
-            table_referred: "adult".to_string(),
+            foreign_key_table: "adult".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
@@ -384,7 +397,8 @@ mod get_db_column_str_tests {
                 referring_table: "adult".to_string(),
                 referring_column: "company_id".to_string(),
                 referring_column_type: "int8",
-                table_referred: "company".to_string(),
+                foreign_key_table: "company".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![],
@@ -406,7 +420,8 @@ mod get_db_column_str_tests {
             referring_table: "child".to_string(),
             referring_column: "parent_id".to_string(),
             referring_column_type: "int8",
-            table_referred: "adult".to_string(),
+            foreign_key_table: "adult".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
@@ -414,7 +429,8 @@ mod get_db_column_str_tests {
                 referring_table: "adult".to_string(),
                 referring_column: "company_id".to_string(),
                 referring_column_type: "int8",
-                table_referred: "company".to_string(),
+                foreign_key_table: "company".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![],
@@ -436,7 +452,8 @@ mod get_db_column_str_tests {
             referring_table: "child".to_string(),
             referring_column: "parent_id".to_string(),
             referring_column_type: "int8",
-            table_referred: "adult".to_string(),
+            foreign_key_table: "adult".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
@@ -444,7 +461,8 @@ mod get_db_column_str_tests {
                 referring_table: "adult".to_string(),
                 referring_column: "company_id".to_string(),
                 referring_column_type: "int8",
-                table_referred: "company".to_string(),
+                foreign_key_table: "company".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![],
@@ -472,7 +490,8 @@ mod get_column_str_tests {
             referring_table: "child".to_string(),
             referring_column: "parent_id".to_string(),
             referring_column_type: "int8",
-            table_referred: "adult".to_string(),
+            foreign_key_table: "adult".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
@@ -480,7 +499,8 @@ mod get_column_str_tests {
                 referring_table: "adult".to_string(),
                 referring_column: "company_id".to_string(),
                 referring_column_type: "int8",
-                table_referred: "company".to_string(),
+                foreign_key_table: "company".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![],
@@ -509,7 +529,8 @@ mod get_column_str_tests {
             referring_table: "child".to_string(),
             referring_column: "parent_id".to_string(),
             referring_column_type: "int8",
-            table_referred: "adult".to_string(),
+            foreign_key_table: "adult".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
@@ -517,7 +538,8 @@ mod get_column_str_tests {
                 referring_table: "adult".to_string(),
                 referring_column: "company_id".to_string(),
                 referring_column_type: "int8",
-                table_referred: "company".to_string(),
+                foreign_key_table: "company".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![],
@@ -543,7 +565,8 @@ mod get_column_str_tests {
             referring_table: "child".to_string(),
             referring_column: "parent_id".to_string(),
             referring_column_type: "int8",
-            table_referred: "adult".to_string(),
+            foreign_key_table: "adult".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
@@ -551,7 +574,8 @@ mod get_column_str_tests {
                 referring_table: "adult".to_string(),
                 referring_column: "company_id".to_string(),
                 referring_column_type: "int8",
-                table_referred: "company".to_string(),
+                foreign_key_table: "company".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![],

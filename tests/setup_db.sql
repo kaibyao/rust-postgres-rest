@@ -203,15 +203,20 @@ ALTER TABLE public.team ADD CONSTRAINT team_coach_reference FOREIGN KEY (coach_i
 INSERT INTO public.coach (id, name) VALUES
   (1, 'Steve Kerr'),
   (2, 'Doc Rivers'),
-  (3, 'Kenny Atkinson');
+  (3, 'Kenny Atkinson'),
+  (4, 'Bill Donovan'),
+  (5, 'Mike D''Antoni');
 INSERT INTO public.team (id, coach_id, name) VALUES
   (1, 1, 'Golden State Warriors'),
   (2, 2, 'LA Clippers'),
-  (3, 3, 'Brooklyn Nets');
+  (3, 3, 'Brooklyn Nets'),
+  (4, 4, 'OKC Thunder'),
+  (5, 5, 'Houston Rockets');
 INSERT INTO public.player
   (id, name, team_id)
   VALUES
   (1, 'Stephen Curry', 1),
   (2, 'Klay Thompson', 1),
   (3, 'Garrett Temple', 2),
-  (4, 'Wilson Chandler', 2);
+  (4, 'Wilson Chandler', 2),
+  (5, 'Russell Westbrook', 4);

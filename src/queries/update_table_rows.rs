@@ -273,10 +273,11 @@ fn build_update_statement(
     }
 
     // building WHERE string
+    let mut fk_where_filter = String::from("");
     let (mut where_string, where_column_types) =
         get_where_string(&mut where_ast, &params.table, &stats, &fks);
     if &where_string != "" {
-        query_str_arr.push(" WHERE (");
+        query_str_arr.push(" WHERE (\n");
 
         // parse through the `WHERE` AST and return a tuple: (expression-with-prepared-params
         // string, Vec of tuples (position, Value)).
@@ -291,7 +292,25 @@ fn build_update_statement(
         prepared_statement_values.extend(prepared_values_vec);
 
         query_str_arr.push(&where_string);
-        query_str_arr.push(")");
+
+        if !fks.is_empty() {
+            fk_where_filter = ForeignKeyReference::join_foreign_key_references(
+                &fks,
+                |(referring_table, referring_column, fk_table, fk_column)| {
+                    format!(
+                        "{}.{} = {}.{}",
+                        referring_table, referring_column, fk_table, fk_column
+                    )
+                },
+                " AND\n  ",
+            );
+        }
+        if fk_where_filter != "" {
+            query_str_arr.push(" AND\n  ");
+            query_str_arr.push(&fk_where_filter);
+        }
+
+        query_str_arr.push("\n)");
     }
 
     // returning_columns
@@ -394,7 +413,8 @@ mod build_update_statement_tests {
             referring_table: "throne".to_string(),
             referring_column: "nemesis_id".to_string(),
             referring_column_type: "int8",
-            table_referred: "adult".to_string(),
+            foreign_key_table: "adult".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![],
@@ -469,7 +489,8 @@ mod build_update_statement_tests {
             referring_table: "player".to_string(),
             referring_column: "team_id".to_string(),
             referring_column_type: "int8",
-            table_referred: "team".to_string(),
+            foreign_key_table: "team".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
@@ -477,7 +498,8 @@ mod build_update_statement_tests {
                 referring_table: "team".to_string(),
                 referring_column: "coach_id".to_string(),
                 referring_column_type: "int8",
-                table_referred: "coach".to_string(),
+                foreign_key_table: "coach".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![],

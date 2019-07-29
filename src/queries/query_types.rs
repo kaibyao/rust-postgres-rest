@@ -247,7 +247,7 @@ impl QueryParamsUpdate {
         };
         let table = req.match_info().query("table").to_lowercase();
         let conditions = match query_string_params.r#where {
-            Some(where_string) => Some(where_string.trim().to_lowercase()),
+            Some(where_string) => Some(where_string.trim().to_string()),
             None => None,
         };
 

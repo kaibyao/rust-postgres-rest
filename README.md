@@ -173,7 +173,7 @@ Changing the previous API endpoint to `/api/child?columns=id,name,parent_id.name
 
 ### `POST /{table}`
 
-Inserts new records into the table. Returns the number of rows affected. Optionally, table columns of affected rows can be returned instead using the `returning_columns` query parameter (see below).
+Inserts new records into the table. Returns the number of rows affected. Optionally, table columns of affected rows can be returned using the `returning_columns` query parameter (see below).
 
 #### Query Parameters for `POST /{table}`
 
@@ -254,6 +254,130 @@ POST /api/child?returning_columns=id,name
 ```
 
 returns `[{ "id": 1002, "name": "Arya" }]`.
+
+### `PUT /{table}`
+
+Updates existing records in `{table}`. Returns the number of rows affected. Optionally, table columns of affected rows can be returned using the `returning_columns` query parameter (see below).
+
+#### Query Parameters for `PUT /{table}`
+
+##### where (PUT)
+
+The WHERE clause of an UPDATE statement. Remember to URI-encode the final result. Example: `(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1`. Note that you can easily traverse foreign key references using DOT (`.`) syntax.
+
+##### returning_columns (PUT)
+
+Comma-separated list of columns to return from the UPDATE operation. Example: `id,name,field_2`.
+
+#### Body schema for `PUT /{table}`
+
+An object whose key-values represent column names and the values to set. String values must be contained inside quotes or else they will be evaluated as expressions and not strings.
+
+#### Examples for `PUT /{table}`
+
+<!-- TODO: move foreign key traversal to its own section -->
+
+Assume the following database schema for these examples:
+
+```postgre
+CREATE TABLE IF NOT EXISTS public.coach (
+  id BIGINT CONSTRAINT coach_id_key PRIMARY KEY,
+  name TEXT
+);
+CREATE TABLE IF NOT EXISTS public.team (
+  id BIGINT CONSTRAINT team_id_key PRIMARY KEY,
+  coach_id BIGINT,
+  name TEXT
+);
+CREATE TABLE IF NOT EXISTS public.player (
+  id BIGINT CONSTRAINT player_id_key PRIMARY KEY,
+  team_id BIGINT,
+  name TEXT
+);
+
+ALTER TABLE public.player ADD CONSTRAINT player_team_reference FOREIGN KEY (team_id) REFERENCES public.team(id);
+ALTER TABLE public.team ADD CONSTRAINT team_coach_reference FOREIGN KEY (coach_id) REFERENCES public.coach(id);
+
+INSERT INTO public.coach (id, name) VALUES
+  (2, 'Doc Rivers'),
+  (4, 'Bill Donovan'),
+  (5, 'Mike D''Antoni');
+INSERT INTO public.team (id, coach_id, name) VALUES
+  (2, 2, 'LA Clippers'),
+  (4, 4, 'OKC Thunder'),
+  (5, 5, 'Houston Rockets');
+INSERT INTO public.player
+  (id, name, team_id)
+  VALUES
+  (3, 'Garrett Temple', 2),
+  (4, 'Wilson Chandler', 2),
+  (5, 'Russell Westbrook', 4);
+
+```
+
+##### Simple update
+
+```plaintext
+PUT /api/player?where=id%3D5
+{ "team_id": 5 }
+
+Result:
+{ "num_rows": 1 }
+Russell Westbrook’s team_id is now 5.
+```
+
+##### `returning_columns` (PUT)
+
+```plaintext
+PUT /api/player?where=id%3D5&returning_columns=name,team_id
+{ "team_id": 5 }
+
+Result:
+[{ "name": "Russell Westbrook", "team_id": 5 }]
+Russell Westbrook’s team_id is now 5.
+```
+
+##### String values
+
+```plaintext
+PUT /api/player?where=name%3D'Russell Westbrook'&returning_columns=name
+                             ^-----------------^ Notice the quotes used to pass a string value
+Body:
+{ "name": "'Chris Paul'" }
+           ^----------^ Notice the quotes used to pass a string value
+
+Result:
+[{ "name": "Chris Paul" }]
+Russell Westbrook’s name has been changed to 'Chris Paul'.
+```
+
+##### Foreign keys in HTTP body, `where` and `returning_columns`
+
+```plaintext
+PUT /api/player?where=team_id.name%3D'LA Clippers'&returning_columns=id, name, team_id.name, team_id.coach_id.name
+{ "name": "team_id.coach_id.name" }
+          ^---------------------^ No inner quotes in the string means that the value is an expression.
+
+Result:
+[
+  {
+    "id": 3,
+    "name": "Doc Rivers",
+    "team_id.name": "LA Clippers",
+    "team_id.coach_id.name": "Doc Rivers"
+  },
+  {
+    "id": 4,
+    "name": "Doc Rivers",
+    "team_id.name": "LA Clippers",
+    "team_id.coach_id.name": "Doc Rivers"
+  }
+]
+
+Garrett Temple and Wilson Chandler have been renamed to Doc Rivers.
+```
+
+Obviously this request didn’t produce the most useful results, but it shows the possibilities of bulk updates.
 
 ## Not supported
 

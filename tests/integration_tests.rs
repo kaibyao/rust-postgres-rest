@@ -756,7 +756,7 @@ fn post_table_records_on_conflict_update() {
 }
 
 #[test]
-fn put_table_records_fk() {
+fn put_table_records_simple() {
     run_setup();
 
     let url = [
@@ -764,7 +764,76 @@ fn put_table_records_fk() {
         &SERVER_IP,
         ":",
         &NO_CACHE_PORT,
-        "/api/player?where=team_id%3D2",
+        "/api/player?where=id%3D5",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"team_id": 5}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!({ "num_rows": 1 }));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn put_table_records_simple_returning_columns() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=id%3D5&returning_columns=team_id",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"team_id": 5}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!([{ "team_id": 5 }]));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn put_table_records_string_value() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=name%3D'Russell Westbrook'&returning_columns=name",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"name": "'Chris Paul'"}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!([{ "name": "Chris Paul" }]));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn put_table_records_fk_in_where() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=team_id.name%3D'LA Clippers'",
     ]
     .join("");
     let mut res = Client::new()
@@ -779,7 +848,7 @@ fn put_table_records_fk() {
 }
 
 #[test]
-fn put_table_records_fk_returning_columns() {
+fn put_table_records_fk_in_body() {
     run_setup();
 
     let url = [
@@ -805,7 +874,7 @@ fn put_table_records_fk_returning_columns() {
 }
 
 #[test]
-fn put_table_records_nested_fk_returning_columns() {
+fn put_table_records_nested_fk_in_returning_columns() {
     run_setup();
 
     let url = [
@@ -829,5 +898,3 @@ fn put_table_records_nested_fk_returning_columns() {
     );
     assert_eq!(res.status(), StatusCode::OK);
 }
-
-// TODO: documentation for UPDATE

@@ -256,7 +256,10 @@ pub struct ForeignKeyReference {
     pub referring_column_type: &'static str,
 
     /// The table being referred by the foreign key.
-    pub table_referred: String,
+    pub foreign_key_table: String,
+
+    /// A Vec of table stats for the table being referred by the foreign key.
+    pub foreign_key_table_stats: Vec<TableColumnStat>,
 
     /// The column of the table being referred by the foreign key.
     pub foreign_key_column: String,
@@ -295,7 +298,7 @@ impl ForeignKeyReference {
     ///             original_refs: vec!["a_foreign_key.some_text".to_string()],
     ///             referring_table: "a_table".to_string(),
     ///             referring_column: "a_foreign_key".to_string(),
-    ///             table_referred: "b_table".to_string(),
+    ///             foreign_key_table: "b_table".to_string(),
     ///             foreign_key_column: "id".to_string(),
     ///             foreign_key_column_type: "id".to_string(),
     ///             nested_fks: vec![],
@@ -304,7 +307,7 @@ impl ForeignKeyReference {
     ///             original_refs: vec!["another_foreign_key.some_str".to_string()],
     ///             referring_table: "a_table".to_string(),
     ///             referring_column: "another_foreign_key".to_string(),
-    ///             table_referred: "c_table".to_string(),
+    ///             foreign_key_table: "c_table".to_string(),
     ///             foreign_key_column: "id".to_string(),
     ///             foreign_key_column_type: "id".to_string(),
     ///             nested_fks: vec![],
@@ -337,7 +340,7 @@ impl ForeignKeyReference {
     ///             original_refs: vec!["a_foreign_key.some_text".to_string()],
     ///             referring_table: "a_table".to_string(),
     ///             referring_column: "a_foreign_key".to_string(),
-    ///             table_referred: "b_table".to_string(),
+    ///             foreign_key_table: "b_table".to_string(),
     ///             foreign_key_column: "id".to_string(),
     ///             foreign_key_column_type: "id".to_string(),
     ///             nested_fks: vec![]
@@ -346,7 +349,7 @@ impl ForeignKeyReference {
     ///             original_refs: vec!["another_foreign_key.nested_fk.some_str".to_string(), "another_foreign_key.different_nested_fk.some_int".to_string()],
     ///             referring_table: "a_table".to_string(),
     ///             referring_column: "another_foreign_key".to_string(),
-    ///             table_referred: "b_table".to_string(),
+    ///             foreign_key_table: "b_table".to_string(),
     ///             foreign_key_column: "id".to_string(),
     ///             foreign_key_column_type: "id".to_string(),
     ///             nested_fks: vec![
@@ -354,7 +357,7 @@ impl ForeignKeyReference {
     ///                     original_refs: vec!["nested_fk.some_str".to_string()],
     ///                     referring_table: "c_table".to_string(),
     ///                     referring_column: "nested_fk".to_string(),
-    ///                     table_referred: "d_table".to_string(),
+    ///                     foreign_key_table: "d_table".to_string(),
     ///                     foreign_key_column: "id".to_string(),
     ///                     foreign_key_column_type: "id".to_string(),
     ///                     nested_fks: vec![]
@@ -363,7 +366,7 @@ impl ForeignKeyReference {
     ///                     original_refs: vec!["different_nested_fk.some_int".to_string()],
     ///                     referring_table: "c_table".to_string(),
     ///                     referring_column: "different_nested_fk".to_string(),
-    ///                     table_referred: "e_table".to_string(),
+    ///                     foreign_key_table: "e_table".to_string(),
     ///                     foreign_key_column: "id".to_string(),
     ///                     foreign_key_column_type: "id".to_string(),
     ///                     nested_fks: vec![]
@@ -432,6 +435,23 @@ impl ForeignKeyReference {
         Box::new(process_column_stats_future)
     }
 
+    fn get_table_column_stats(
+        db_url_str: &str,
+        table: &str,
+    ) -> impl Future<Item = Vec<TableColumnStat>, Error = Error> {
+        let table_clone = table.to_string();
+        connect(db_url_str)
+            .map_err(Error::from)
+            .and_then(move |mut conn| {
+                select_column_stats_statement(&mut conn, &table_clone)
+                    .map_err(Error::from)
+                    .and_then(move |statement| {
+                        let q = conn.query(&statement, &[]);
+                        select_column_stats(q).map_err(Error::from)
+                    })
+            })
+    }
+
     fn process_column_stats(
         db_url: &str,
         stats_cache_addr: Arc<Option<Addr<StatsCache>>>,
@@ -443,19 +463,6 @@ impl ForeignKeyReference {
         let table_clone_2 = table.clone();
         let db_url_str = db_url.to_string();
         let db_url_str_2 = db_url_str.clone();
-
-        let get_stats_and_matched_columns_from_table_column_stats = move || {
-            connect(&db_url_str)
-                .map_err(Error::from)
-                .and_then(move |mut conn| {
-                    select_column_stats_statement(&mut conn, &table_clone)
-                        .map_err(Error::from)
-                        .and_then(move |statement| {
-                            let q = conn.query(&statement, &[]);
-                            select_column_stats(q).map_err(Error::from)
-                        })
-                })
-        };
 
         let column_stats_future = if let Some(cache_addr) = stats_cache_addr.borrow() {
             // similar to select_table_stats::select_table_stats_from_cache, except we just need a
@@ -473,7 +480,7 @@ impl ForeignKeyReference {
                                 Either::A(ok(calculated_columns_and_stats))
                             }
                             None => Either::B(
-                                get_stats_and_matched_columns_from_table_column_stats().map(
+                                Self::get_table_column_stats(&db_url_str, &table_clone).map(
                                     move |stats| {
                                         Self::match_fk_column_stats(stats, fk_columns_grouped)
                                     },
@@ -489,7 +496,7 @@ impl ForeignKeyReference {
             Either::A(cache_future)
         } else {
             Either::B(
-                get_stats_and_matched_columns_from_table_column_stats()
+                Self::get_table_column_stats(&db_url_str, &table_clone)
                     .map(move |stats| Self::match_fk_column_stats(stats, fk_columns_grouped)),
             )
         };
@@ -558,8 +565,8 @@ impl ForeignKeyReference {
         (filtered_stats, matched_columns)
     }
 
-    /// Maps a Vec of `TableColumnStat`s to a Future wrapping a Vec of `ForeignKeyReference`s. Used
-    /// by from_query_columns.
+    /// Maps a Vec of `TableColumnStat`s to a Future resolving to a Vec of `ForeignKeyReference`s.
+    /// Used by from_query_columns.
     fn stats_to_fkr_futures(
         db_url: &str,
         stats_cache_addr: Arc<Option<Addr<StatsCache>>>,
@@ -597,20 +604,58 @@ impl ForeignKeyReference {
             let stat_fk_column = stat.foreign_key_column.clone().unwrap_or_else(String::new);
             let stat_fk_column_type = stat.foreign_key_column_type.unwrap_or_else(|| "");
 
+            let fk_column_stats_future = if let Some(cache_addr) = stats_cache_addr.borrow() {
+                // used for moving into futures
+                let db_url_clone = db_url.to_string();
+                let fk_table_clone = foreign_key_table.clone();
+
+                // similar to select_table_stats::select_table_stats_from_cache, except we just
+                // need a subset of stats (cheaper/more lightweight to
+                // query), not the whole stat object (expensive to query)
+                let cache_future = cache_addr
+                    .send(StatsCacheMessage::FetchStatsForTable(
+                        foreign_key_table.clone(),
+                    ))
+                    .map_err(Error::from)
+                    .and_then(move |response_result| match response_result {
+                        Ok(response) => match response {
+                            StatsCacheResponse::TableStat(stats_opt) => match stats_opt {
+                                Some(stats) => Either::A(ok(stats.columns)),
+                                None => Either::B(Self::get_table_column_stats(
+                                    &db_url_clone,
+                                    &fk_table_clone.clone(),
+                                )),
+                            },
+                            StatsCacheResponse::OK => unreachable!(
+                                "Message of type `FetchStatsForTable` should never return an OK."
+                            ),
+                        },
+                        Err(e) => Either::A(err(e)),
+                    });
+                Either::A(cache_future)
+            } else {
+                Either::B(Self::get_table_column_stats(
+                    &db_url,
+                    &foreign_key_table.clone(),
+                ))
+            };
+
             // child column is not a foreign key, return future with ForeignKeyReference
             if child_fk_columns.is_empty() {
-                let no_child_columns_fut = ok::<ForeignKeyReference, Error>(ForeignKeyReference {
-                    referring_column: stat_column_name_clone,
-                    referring_column_type: stat.column_type,
-                    referring_table: table_clone,
-                    table_referred: foreign_key_table,
-                    foreign_key_column: stat_fk_column,
-                    foreign_key_column_type: stat_fk_column_type,
-                    nested_fks: vec![],
-                    original_refs,
-                });
+                let resolve_stats_to_fkr =
+                    fk_column_stats_future.map(move |stats| ForeignKeyReference {
+                        referring_column: stat_column_name_clone,
+                        referring_column_type: stat.column_type,
+                        referring_table: table_clone,
+                        foreign_key_table,
+                        foreign_key_table_stats: stats,
+                        foreign_key_column: stat_fk_column,
+                        foreign_key_column_type: stat_fk_column_type,
+                        nested_fks: vec![],
+                        original_refs,
+                    });
 
-                fkr_futures.push(Either::A(no_child_columns_fut));
+                fkr_futures.push(Either::A(resolve_stats_to_fkr));
                 continue;
             }
 
@@ -621,12 +666,14 @@ impl ForeignKeyReference {
                 foreign_key_table.clone(),
                 child_fk_columns,
             )
-            .and_then(move |nested_fks| {
+            .join(fk_column_stats_future)
+            .and_then(move |(nested_fks, foreign_key_table_stats)| {
                 Ok(ForeignKeyReference {
                     referring_column: stat_column_name_clone,
                     referring_column_type: stat.column_type,
                     referring_table: table_clone,
-                    table_referred: foreign_key_table,
+                    foreign_key_table,
+                    foreign_key_table_stats,
                     foreign_key_column: stat_fk_column,
                     foreign_key_column_type: stat_fk_column_type,
                     nested_fks,
@@ -661,7 +708,7 @@ impl ForeignKeyReference {
                         return Some((fkr, sub_column_str));
                     }
 
-                    return Self::find(&fkr.nested_fks, &fkr.table_referred, sub_column_str);
+                    return Self::find(&fkr.nested_fks, &fkr.foreign_key_table, sub_column_str);
                 }
 
                 // by this point, sub_column_breadcrumbs should have a length of 1 or 2 (1 if
@@ -713,7 +760,7 @@ impl ForeignKeyReference {
             join_data.push((
                 &fk.referring_table,
                 &fk.referring_column,
-                &fk.table_referred,
+                &fk.foreign_key_table,
                 &fk.foreign_key_column,
             ));
 
@@ -795,7 +842,8 @@ mod fkr_find {
             referring_table: "a_table".to_string(),
             referring_column: "a_foreign_key".to_string(),
             referring_column_type: "int8",
-            table_referred: "b_table".to_string(),
+            foreign_key_table: "b_table".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![],
@@ -815,7 +863,8 @@ mod fkr_find {
             referring_table: "a_table".to_string(),
             referring_column: "another_foreign_key".to_string(),
             referring_column_type: "int8",
-            table_referred: "b_table".to_string(),
+            foreign_key_table: "b_table".to_string(),
+            foreign_key_table_stats: vec![],
             foreign_key_column: "id".to_string(),
             foreign_key_column_type: "int8",
             nested_fks: vec![ForeignKeyReference {
@@ -823,7 +872,8 @@ mod fkr_find {
                 referring_table: "b_table".to_string(),
                 referring_column: "nested_fk".to_string(),
                 referring_column_type: "int8",
-                table_referred: "c_table".to_string(),
+                foreign_key_table: "c_table".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![],
@@ -854,7 +904,8 @@ mod fkr_join_foreign_key_references {
                 referring_table: "a_table".to_string(),
                 referring_column: "another_foreign_key".to_string(),
                 referring_column_type: "int8",
-                table_referred: "b_table".to_string(),
+                foreign_key_table: "b_table".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![ForeignKeyReference {
@@ -862,7 +913,8 @@ mod fkr_join_foreign_key_references {
                     referring_table: "b_table".to_string(),
                     referring_column: "nested_fk".to_string(),
                     referring_column_type: "int8",
-                    table_referred: "d_table".to_string(),
+                    foreign_key_table: "d_table".to_string(),
+                    foreign_key_table_stats: vec![],
                     foreign_key_column: "id".to_string(),
                     foreign_key_column_type: "int8",
                     nested_fks: vec![],
@@ -873,7 +925,8 @@ mod fkr_join_foreign_key_references {
                 referring_table: "b_table".to_string(),
                 referring_column: "b_table_fk".to_string(),
                 referring_column_type: "int8",
-                table_referred: "e_table".to_string(),
+                foreign_key_table: "e_table".to_string(),
+                foreign_key_table_stats: vec![],
                 foreign_key_column: "id".to_string(),
                 foreign_key_column_type: "int8",
                 nested_fks: vec![],

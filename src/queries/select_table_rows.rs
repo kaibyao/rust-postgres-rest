@@ -256,7 +256,7 @@ fn build_select_statement(
                 is_fks_exist,
                 ForeignKeyReference::find(&fks, &params.table, sql_column),
             ) {
-                statement.push(fk_ref.table_referred.as_str());
+                statement.push(fk_ref.foreign_key_table.as_str());
                 statement.push(".");
                 statement.push(fk_column);
             } else {

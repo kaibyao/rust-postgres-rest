@@ -79,10 +79,10 @@ pub fn index() -> HttpResponse {
                         }
                     },
                 },
-                "PUT|PATCH": {
-                    "description": "Updates table records (not implemented).",
+                "PUT": {
+                    "description": "Updates table records.",
                     "body": {
-                        "description": "An object whose key-values represent column names and the values to set. String values must contain quotes or else they will be evaluated as expressions and not strings.",
+                        "description": "An object whose key-values represent column names and the values to set. String values must be contained inside quotes or else they will be evaluated as expressions and not strings.",
                         "example": {
                             "column_a": "'some_string_value (notice the quotes)'",
                             "column_b": "foreign_key_example_id.foreign_key_column",
@@ -97,7 +97,7 @@ pub fn index() -> HttpResponse {
                         "returning_columns": {
                             "default": null,
                             "description": "Comma-separated list of columns to return from the UPDATE operation.",
-                            "example": "id,name,field_2",
+                            "example": "id,name, field_2",
                         }
                     },
                 },
