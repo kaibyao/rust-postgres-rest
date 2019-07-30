@@ -33,73 +33,17 @@ fn main() {
 
 `generate_rest_api_scope()` creates the `/api/table` and `/api/{table}` endpoints, which allow for CRUD operations on table rows in your database.
 
-## Configuration
+## Features
 
-The `AppConfig` struct contains the configuration options used by this library.
+### It’s fast
 
-### `db_url: &'static str (default: "")`
+TBD.
 
-The database URL. URL must be [Postgres-formatted](https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6).
-
-### `is_cache_table_stats: bool (default: false)`
-
-Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to `true`, caching of table stats is enabled, significantly speeding up API endpoings that use `SELECT` and `INSERT` statements.
-
-### `is_cache_reset_endpoint_enabled: bool (default: false)`
-
-Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to `true`, an additional API endpoint is made available at `{scope_name}/reset_table_stats_cache`, which allows for manual resetting of the Table Stats cache. This is useful if you want a persistent cache that only needs to be reset on upgrades, for example.
-
-### `cache_reset_interval_seconds: u32 (default: 0)`
-
-Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to a positive integer `n`, automatically refresh the Table Stats cache every `n` seconds. When set to `0`, the cache is never automatically reset.
-
-### `scope_name: &'static str (default: "/api")`
-
-The API endpoint that contains all of the other API operations available in this library.
-
-## Endpoints
-
-### `GET /`
-
-Displays a list of all available endpoints and their descriptions + how to use instructions.
-
-### `GET /{table}`
-
-Queries {table} with given parameters using SELECT. If no columns are provided, returns column stats for {table}.
-
-#### Query Parameters for `GET /{table}`
-
-##### columns
-
-A comma-separated list of column names for which values are retrieved. Example: `col1,col2,col_infinity`.
-
-##### distinct
-
-A comma-separated list of column names for which rows that have duplicate values are excluded. Example: `col1,col2,col_infinity`.
-
-##### where
-
-The WHERE clause of a SELECT statement. Remember to URI-encode the final result. Example: `(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1`.
-
-##### group_by
-
-Comma-separated list representing the field(s) on which to group the resulting rows. Example: `name, category`.
-
-##### order_by
-
-Comma-separated list representing the field(s) on which to sort the resulting rows. Example: `date DESC, id ASC`.
-
-##### limit
-
-The maximum number of rows that can be returned. Default: `10000`.
-
-##### offset
-
-The number of rows to exclude. Default: `0`.
-
-#### Foreign key syntax (`.`) for easier relationship traversal
+### Easy foreign-key references using DOT (`.`) syntax
 
 You can use dots (`.`) to easily walk through foreign keys and retrieve values of rows in related tables!
+
+Assume the following schema:
 
 ```postgre
 -- DB setup
@@ -135,12 +79,12 @@ INSERT INTO public.adult (id, company_id, name) VALUES (1, 100, 'Ned');
 INSERT INTO public.child (id, name, parent_id, school_id) VALUES (1000, 'Robb', 1, 10);
 ```
 
-Run the `GET` operation:
+Runing the `GET` operation:
 
 ```bash
 GET "/api/child?columns=id,name,parent_id.name,parent_id.company_id.name"
-#          |             ------------------------------------------------ column names
-#          ^^^^^ {table} value
+#         |             ------------------------------------------------ column names
+#         ^^^^^ {table} value
 ```
 
 Will return the following JSON:
@@ -171,6 +115,70 @@ Changing the previous API endpoint to `/api/child?columns=id,name,parent_id.name
 ]
 ```
 
+## Configuration
+
+The `AppConfig` struct contains the configuration options used by this library.
+
+### `db_url: &'static str (default: "")`
+
+The database URL. URL must be [Postgres-formatted](https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6).
+
+### `is_cache_table_stats: bool (default: false)`
+
+Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to `true`, caching of table stats is enabled, significantly speeding up API endpoings that use `SELECT` and `INSERT` statements.
+
+### `is_cache_reset_endpoint_enabled: bool (default: false)`
+
+Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to `true`, an additional API endpoint is made available at `{scope_name}/reset_table_stats_cache`, which allows for manual resetting of the Table Stats cache. This is useful if you want a persistent cache that only needs to be reset on upgrades, for example.
+
+### `cache_reset_interval_seconds: u32 (default: 0)`
+
+Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to a positive integer `n`, automatically refresh the Table Stats cache every `n` seconds. When set to `0`, the cache is never automatically reset.
+
+### `scope_name: &'static str (default: "/api")`
+
+The API endpoint that contains all of the other API operations available in this library.
+
+## Endpoints
+
+### `GET /`
+
+Displays a list of all available endpoints and their descriptions + how to use instructions.
+
+### `GET /{table}`
+
+Queries {table} with given parameters using SELECT. If no columns are provided, column stats for {table} are returned. DOT (`.`) syntax can be used in `columns`, `distinct`, `where`, `group_by`, and `order_by`.
+
+#### Query Parameters for `GET /{table}`
+
+##### columns
+
+A comma-separated list of column names for which values are retrieved. Example: `col1,col2,col_infinity`.
+
+##### distinct
+
+A comma-separated list of column names for which rows that have duplicate values are excluded. Example: `col1,col2,col_infinity`.
+
+##### where
+
+The WHERE clause of a SELECT statement. Remember to URI-encode the final result. Example: `(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1`.
+
+##### group_by
+
+Comma-separated list representing the field(s) on which to group the resulting rows. Example: `name, category`.
+
+##### order_by
+
+Comma-separated list representing the field(s) on which to sort the resulting rows. Example: `date DESC, id ASC`.
+
+##### limit
+
+The maximum number of rows that can be returned. Default: `10000`.
+
+##### offset
+
+The number of rows to exclude. Default: `0`.
+
 ### `POST /{table}`
 
 Inserts new records into the table. Returns the number of rows affected. Optionally, table columns of affected rows can be returned using the `returning_columns` query parameter (see below).
@@ -187,7 +195,7 @@ Comma-separated list of columns that determine if a row being inserted conflicts
 
 ##### returning_columns
 
-Comma-separated list of columns to return from the INSERT operation. Example: `id,name,field_2`.
+Comma-separated list of columns to return from the INSERT operation. Example: `id,name,field_2`. Unfortunately PostgreSQL has no native foreign key functionality for `RETURNING` columns, so only columns that are on the table being inserted can be returned.
 
 #### Body schema for `POST /{table}`
 
@@ -257,13 +265,13 @@ returns `[{ "id": 1002, "name": "Arya" }]`.
 
 ### `PUT /{table}`
 
-Updates existing records in `{table}`. Returns the number of rows affected. Optionally, table columns of affected rows can be returned using the `returning_columns` query parameter (see below).
+Updates existing records in `{table}`. Returns the number of rows affected. Optionally, table columns of affected rows can be returned using the `returning_columns` query parameter (see below). DOT (`.`) syntax can be used in `where`, `returning_columns`, as well as the request body (see examples).
 
 #### Query Parameters for `PUT /{table}`
 
 ##### where (PUT)
 
-The WHERE clause of an UPDATE statement. Remember to URI-encode the final result. Example: `(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1`. Note that you can easily traverse foreign key references using DOT (`.`) syntax.
+The WHERE clause of an UPDATE statement. Remember to URI-encode the final result. Example: `(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1`.
 
 ##### returning_columns (PUT)
 
@@ -274,8 +282,6 @@ Comma-separated list of columns to return from the UPDATE operation. Example: `i
 An object whose key-values represent column names and the values to set. String values must be contained inside quotes or else they will be evaluated as expressions and not strings.
 
 #### Examples for `PUT /{table}`
-
-<!-- TODO: move foreign key traversal to its own section -->
 
 Assume the following database schema for these examples:
 
