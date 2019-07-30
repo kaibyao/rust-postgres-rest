@@ -18,13 +18,12 @@ pub use self::select_table_stats::{
 mod select_table_stats_cache;
 pub use self::select_table_stats_cache::select_all_table_stats;
 
+mod update_table_rows;
+pub use update_table_rows::update_table_rows;
+
 pub mod postgres_types;
 pub mod query_types;
 
 pub mod utils;
 
-// pub fn upsert_into_table(conn: &Connection) {}
-
 // pub fn delete_table_rows(conn: &Connection) {}
-
-// fn update_table_rows(conn: &Connection) {}

@@ -5,9 +5,6 @@
 // to serialize large json (like the index)
 #![recursion_limit = "128"]
 
-/// Provides endpoints that can be used by `actix-web` to serve a REST API for a PostgreSQL
-/// database.
-
 /// Individual endpoints that can be applied to actix routes using `.to_async()`.
 pub mod endpoints;
 
@@ -16,7 +13,7 @@ mod error;
 mod queries;
 #[cfg(feature = "stats_cache")]
 mod stats_cache;
-use endpoints::{get_all_table_names, get_table, index, post_table, reset_caches};
+use endpoints::{get_all_table_names, get_table, index, post_table, put_table, reset_caches};
 
 pub use error::Error;
 use stats_cache::initialize_stats_cache;
@@ -106,6 +103,7 @@ pub fn generate_rest_api_scope(config: AppConfig) -> Scope {
         .service(
             web::resource("/{table}")
                 .route(web::get().to_async(get_table))
-                .route(web::post().to_async(post_table)),
+                .route(web::post().to_async(post_table))
+                .route(web::put().to_async(put_table)),
         )
 }

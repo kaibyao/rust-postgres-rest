@@ -68,11 +68,15 @@ fn get_table_names() {
         json!([
             "adult",
             "child",
+            "coach",
             "company",
+            "player",
             "school",
+            "sibling",
+            "team",
             "test_batch_insert",
             "test_fields",
-            "test_insert"
+            "test_insert",
         ])
     );
 }
@@ -81,17 +85,10 @@ fn get_table_names() {
 fn get_table_stats() {
     run_setup();
 
-    let expected_response_body = json!({"columns":[{"column_name":"id","column_type":"int8","default_value":null,"is_nullable":false,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_bigint","column_type":"int8","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_bigserial","column_type":"int8","default_value":null,"is_nullable":false,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_bit","column_type":"bit","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":1,"char_octet_length":null},{"column_name":"test_bool","column_type":"bool","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_bytea","column_type":"bytea","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_char","column_type":"bpchar","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":1,"char_octet_length":4},{"column_name":"test_citext","column_type":"citext","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_date","column_type":"date","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_decimal","column_type":"numeric","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_f64","column_type":"float8","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_float8","column_type":"float8","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_hstore","column_type":"hstore","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_int","column_type":"int4","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_json","column_type":"json","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_jsonb","column_type":"jsonb","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_macaddr","column_type":"macaddr","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_name","column_type":"name","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_numeric","column_type":"numeric","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_oid","column_type":"oid","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_real","column_type":"float4","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_serial","column_type":"int4","default_value":null,"is_nullable":false,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_smallint","column_type":"int2","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_smallserial","column_type":"int2","default_value":null,"is_nullable":false,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_text","column_type":"text","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":1_073_741_824},{"column_name":"test_time","column_type":"time","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_timestamp","column_type":"timestamp","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_timestamptz","column_type":"timestamptz","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_uuid","column_type":"uuid","default_value":"gen_random_uuid()","is_nullable":false,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_varbit","column_type":"varbit","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":null},{"column_name":"test_varchar","column_type":"varchar","default_value":null,"is_nullable":true,"is_foreign_key":false,"foreign_key_table":null,"foreign_key_column":null,"char_max_length":null,"char_octet_length":1_073_741_824}],"constraints":[{"name":"test_fields_pkey","table":"test_fields","columns":["id"],"constraint_type":"primary_key","definition":"PRIMARY KEY (id)","fk_table":null,"fk_columns":null}],"indexes":[{"name":"test_fields_pkey","columns":["id"],"access_method":"btree","is_exclusion":false,"is_primary_key":true,"is_unique":true}],"primary_key":["id"],"referenced_by":[]});
+    let expected_response_body = json!({"columns":[{"char_max_length":null,"char_octet_length":null,"column_name":"school_id","column_type":"int8","default_value":null,"foreign_key_column":"id","foreign_key_column_type":"int8","foreign_key_table":"school","is_foreign_key":true,"is_nullable":true},{"char_max_length":null,"char_octet_length":null,"column_name":"parent_id","column_type":"int8","default_value":null,"foreign_key_column":"id","foreign_key_column_type":"int8","foreign_key_table":"adult","is_foreign_key":true,"is_nullable":true},{"char_max_length":null,"char_octet_length":1_073_741_824,"column_name":"name","column_type":"text","default_value":null,"foreign_key_column":null,"foreign_key_column_type":null,"foreign_key_table":null,"is_foreign_key":false,"is_nullable":true},{"char_max_length":null,"char_octet_length":null,"column_name":"id","column_type":"int8","default_value":null,"foreign_key_column":null,"foreign_key_column_type":null,"foreign_key_table":null,"is_foreign_key":false,"is_nullable":false}],"constraints":[{"columns":["id"],"constraint_type":"primary_key","definition":"PRIMARY KEY (id)","fk_columns":null,"fk_table":null,"name":"child_id_key","table":"child"},{"columns":["parent_id"],"constraint_type":"foreign_key","definition":"FOREIGN KEY (parent_id) REFERENCES adult(id)","fk_columns":["id"],"fk_table":"adult","name":"child_parent_id","table":"child"},{"columns":["school_id"],"constraint_type":"foreign_key","definition":"FOREIGN KEY (school_id) REFERENCES school(id)","fk_columns":["id"],"fk_table":"school","name":"child_school_id","table":"child"},{"columns":["id","parent_id"],"constraint_type":"unique","definition":"UNIQUE (id, parent_id)","fk_columns":null,"fk_table":null,"name":"child_unique_id_parent_id","table":"child"},{"columns":["parent_id","sibling_id"],"constraint_type":"foreign_key","definition":"FOREIGN KEY (parent_id, sibling_id) REFERENCES child(parent_id, id)","fk_columns":["parent_id","id"],"fk_table":"child","name":"sibling_reference","table":"sibling"}],"indexes":[{"access_method":"btree","columns":["id"],"is_exclusion":false,"is_primary_key":true,"is_unique":true,"name":"child_id_key"},{"access_method":"btree","columns":["id","parent_id"],"is_exclusion":false,"is_primary_key":false,"is_unique":true,"name":"child_unique_id_parent_id"}],"primary_key":["id"],"referenced_by":[{"columns_referenced":["parent_id","id"],"referencing_columns":["parent_id","sibling_id"],"referencing_table":"sibling"}]});
 
     // test the non-cached path
-    let url = [
-        "http://",
-        &SERVER_IP,
-        ":",
-        &NO_CACHE_PORT,
-        "/api/test_fields",
-    ]
-    .join("");
+    let url = ["http://", &SERVER_IP, ":", &NO_CACHE_PORT, "/api/child"].join("");
     let mut res = reqwest::get(&url).unwrap();
     let response_body: Value = res.json().unwrap();
 
@@ -99,7 +96,30 @@ fn get_table_stats() {
     assert_eq!(response_body, expected_response_body);
 
     // test the cached path
-    let url = ["http://", &SERVER_IP, ":", &CACHE_PORT, "/api/test_fields"].join("");
+    let url = ["http://", &SERVER_IP, ":", &CACHE_PORT, "/api/child"].join("");
+    let mut res = reqwest::get(&url).unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(response_body, expected_response_body);
+}
+
+#[test]
+fn get_table_stats_multi_column_fk() {
+    run_setup();
+
+    let expected_response_body = json!({"columns":[{"char_max_length":null,"char_octet_length":null,"column_name":"sibling_id","column_type":"int8","default_value":null,"foreign_key_column":"id","foreign_key_column_type":"int8","foreign_key_table":"child","is_foreign_key":true,"is_nullable":true},{"char_max_length":null,"char_octet_length":null,"column_name":"parent_id","column_type":"int8","default_value":null,"foreign_key_column":"parent_id","foreign_key_column_type":"int8","foreign_key_table":"child","is_foreign_key":true,"is_nullable":true},{"char_max_length":null,"char_octet_length":1_073_741_824,"column_name":"name","column_type":"text","default_value":null,"foreign_key_column":null,"foreign_key_column_type":null,"foreign_key_table":null,"is_foreign_key":false,"is_nullable":true},{"char_max_length":null,"char_octet_length":null,"column_name":"id","column_type":"int8","default_value":null,"foreign_key_column":null,"foreign_key_column_type":null,"foreign_key_table":null,"is_foreign_key":false,"is_nullable":false}],"constraints":[{"columns":["id"],"constraint_type":"primary_key","definition":"PRIMARY KEY (id)","fk_columns":null,"fk_table":null,"name":"sibling_id_key","table":"sibling"},{"columns":["parent_id","sibling_id"],"constraint_type":"foreign_key","definition":"FOREIGN KEY (parent_id, sibling_id) REFERENCES child(parent_id, id)","fk_columns":["parent_id","id"],"fk_table":"child","name":"sibling_reference","table":"sibling"}],"indexes":[{"access_method":"btree","columns":["id"],"is_exclusion":false,"is_primary_key":true,"is_unique":true,"name":"sibling_id_key"}],"primary_key":["id"],"referenced_by":[]});
+
+    // test the non-cached path
+    let url = ["http://", &SERVER_IP, ":", &NO_CACHE_PORT, "/api/sibling"].join("");
+    let mut res = reqwest::get(&url).unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(response_body, expected_response_body);
+
+    // test the cached path
+    let url = ["http://", &SERVER_IP, ":", &CACHE_PORT, "/api/sibling"].join("");
     let mut res = reqwest::get(&url).unwrap();
     let response_body: Value = res.json().unwrap();
 
@@ -184,28 +204,6 @@ fn get_table_records_simple_where() {
 
     // test the cached path
     let url = ["http://", &SERVER_IP, ":", &CACHE_PORT, "/api/test_fields?columns=id,test_name&where=id%20%3D%2046327143679919107%20AND%20test_name%20%3D%20%27a%20name%27"].join("");
-    let mut res = reqwest::get(&url).unwrap();
-    let response_body: Value = res.json().unwrap();
-
-    assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(response_body, expected_response_body);
-}
-
-#[test]
-fn get_table_records_prepared_statement() {
-    run_setup();
-    let expected_response_body = json!([{"id": 46_327_143_679_919_107i64, "test_name": "a name"}]);
-
-    // test the non-cached path
-    let url = ["http://", &SERVER_IP, ":", &NO_CACHE_PORT, "/api/test_fields?columns=id,test_name&where=id%20%3D%20%241%20AND%20test_name%20%3D%20%242&prepared_values=46327143679919107,%27a%20name%27"].join("");
-    let mut res = reqwest::get(&url).unwrap();
-    let response_body: Value = res.json().unwrap();
-
-    assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(response_body, expected_response_body);
-
-    // test the cached path
-    let url = ["http://", &SERVER_IP, ":", &CACHE_PORT, "/api/test_fields?columns=id,test_name&where=id%20%3D%20%241%20AND%20test_name%20%3D%20%242&prepared_values=46327143679919107,%27a%20name%27"].join("");
     let mut res = reqwest::get(&url).unwrap();
     let response_body: Value = res.json().unwrap();
 
@@ -586,6 +584,23 @@ fn post_table_records() {
 }
 
 #[test]
+fn post_table_records_no_body() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/test_insert",
+    ]
+    .join("");
+    let res = Client::new().request(Method::POST, &url).send().unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
 fn post_table_records_returning_columns() {
     run_setup();
 
@@ -736,6 +751,150 @@ fn post_table_records_on_conflict_update() {
     assert_eq!(
         response_body,
         json!([{"id": 12, "name": "B"}, {"id": 13, "name": "C"}])
+    );
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn put_table_records_simple() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=id%3D5",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"team_id": 5}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!({ "num_rows": 1 }));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn put_table_records_simple_returning_columns() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=id%3D5&returning_columns=team_id",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"team_id": 5}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!([{ "team_id": 5 }]));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn put_table_records_string_value() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=name%3D'Russell Westbrook'&returning_columns=name",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"name": "'Chris Paul'"}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!([{ "name": "Chris Paul" }]));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn put_table_records_fk_in_where() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=team_id.name%3D'LA Clippers'",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"team_id": 3}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!({ "num_rows": 2 }));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn put_table_records_fk_in_body() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=id%3D1&returning_columns=id, name",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"name": "team_id.name"}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(
+        response_body,
+        json!([{ "id": 1, "name": "Golden State Warriors" }])
+    );
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn put_table_records_nested_fk_in_returning_columns() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=id%3D2&returning_columns=id, name, team_id.name, team_id.coach_id.name",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"name": "team_id.coach_id.name"}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(
+        response_body,
+        json!([{ "id": 2, "name": "Steve Kerr", "team_id.name": "Golden State Warriors", "team_id.coach_id.name": "Steve Kerr" }])
     );
     assert_eq!(res.status(), StatusCode::OK);
 }

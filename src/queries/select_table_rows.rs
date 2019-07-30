@@ -9,22 +9,16 @@ use std::sync::Arc;
 use tokio_postgres::types::ToSql;
 
 use super::{
-    foreign_keys::{
-        fk_ast_nodes_from_where_ast, fk_columns_from_where_ast, where_clause_str_to_ast,
-        ForeignKeyReference,
-    },
-    postgres_types::{convert_row_fields, RowFields},
+    foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
+    postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
     query_types::QueryParamsSelect,
-    utils::{validate_alias_identifier, validate_table_name, validate_where_column},
+    select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
+    utils::{
+        get_columns_str, get_where_string, validate_alias_identifier, validate_table_name,
+        validate_where_column, where_clause_str_to_ast,
+    },
 };
 use crate::{db::connect, AppState, Error};
-
-#[derive(Debug, PartialEq)]
-enum PreparedStatementValue {
-    String(String),
-    Int8(i64),
-    Int4(i32),
-}
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query
 pub fn select_table_rows(
@@ -32,7 +26,7 @@ pub fn select_table_rows(
     params: QueryParamsSelect,
 ) -> impl Future<Item = Vec<RowFields>, Error = Error> {
     if let Err(e) = validate_table_name(&params.table) {
-        return Either::A(err::<Vec<RowFields>, Error>(e));
+        return Either::A(err(e));
     }
 
     // get list of every column being used in the query params (columns, where, distinct, group_by,
@@ -57,7 +51,7 @@ pub fn select_table_rows(
                 None => Expr::Identifier("".to_string()),
             },
             Err(_e) => {
-                return Either::A(err::<Vec<RowFields>, Error>(Error::generate_error(
+                return Either::A(err(Error::generate_error(
                     "INVALID_SQL_SYNTAX",
                     ["WHERE", where_clause_str].join(":"),
                 )));
@@ -65,9 +59,8 @@ pub fn select_table_rows(
         },
         None => Expr::Identifier("".to_string()),
     };
-    let where_fk_columns = fk_columns_from_where_ast(&where_ast);
+    columns.extend(fk_columns_from_where_ast(&where_ast));
 
-    columns.extend(where_fk_columns);
     if let Some(v) = &params.distinct {
         columns.extend(v.clone());
     }
@@ -77,6 +70,20 @@ pub fn select_table_rows(
     if let Some(v) = &params.order_by {
         columns.extend(v.clone());
     }
+
+    // get table stats for building query (we need to know the column types)
+    let table_clone = params.table.clone();
+    let stats_future =
+        connect(state.config.db_url)
+            .map_err(Error::from)
+            .and_then(move |mut conn| {
+                select_column_stats_statement(&mut conn, &table_clone)
+                    .map_err(Error::from)
+                    .and_then(move |statement| {
+                        let q = conn.query(&statement, &[]);
+                        select_column_stats(q).map_err(Error::from)
+                    })
+            });
 
     // parse columns for foreign key usage
     let db_url_str = state.config.db_url.to_string();
@@ -91,11 +98,12 @@ pub fn select_table_rows(
         params.table.clone(),
         columns,
     )
-    .and_then(move |fk_columns| {
+    .join(stats_future)
+    .and_then(move |(fk_columns, stats)| {
         let (statement_str, prepared_values) =
-            match build_select_statement(params, fk_columns, where_ast) {
+            match build_select_statement(params, stats, fk_columns, where_ast) {
                 Ok((stmt, prep_vals)) => (stmt, prep_vals),
-                Err(e) => return Either::A(err::<Vec<RowFields>, Error>(e)),
+                Err(e) => return Either::A(err(e)),
             };
 
         // sending prepared statement to postgres
@@ -105,21 +113,8 @@ pub fn select_table_rows(
                 conn.prepare(&statement_str)
                     .map_err(Error::from)
                     .and_then(move |statement| {
-                        let prep_values: Vec<&dyn ToSql> = if prepared_values.is_empty() {
-                            vec![]
-                        } else {
-                            prepared_values
-                                .iter()
-                                .map(|val| {
-                                    let val_to_sql: &dyn ToSql = match val {
-                                        PreparedStatementValue::Int4(val_i32) => val_i32,
-                                        PreparedStatementValue::Int8(val_i64) => val_i64,
-                                        PreparedStatementValue::String(val_string) => val_string,
-                                    };
-                                    val_to_sql
-                                })
-                                .collect()
-                        };
+                        let prep_values: Vec<&dyn ToSql> =
+                            prepared_values.iter().map(|v| v as _).collect();
 
                         conn.query(&statement, &prep_values)
                             .collect()
@@ -145,33 +140,49 @@ pub fn select_table_rows(
 
 fn build_select_statement(
     params: QueryParamsSelect,
+    stats: Vec<TableColumnStat>,
     fks: Vec<ForeignKeyReference>,
     mut where_ast: Expr,
-) -> Result<(String, Vec<PreparedStatementValue>), Error> {
+) -> Result<(String, Vec<ColumnTypeValue>), Error> {
     let mut statement = vec!["SELECT "];
     let is_fks_exist = !fks.is_empty();
 
     // DISTINCT clause if exists
     if let Some(distinct_columns) = &params.distinct {
         statement.push("DISTINCT ON (");
-        statement.extend(get_column_str(
-            distinct_columns,
-            &params.table,
-            &fks,
-            false,
-        )?);
+
+        statement.extend(get_columns_str(&distinct_columns, &params.table, &fks)?);
+
         statement.push(") ");
     }
 
     // building column selection
-    statement.extend(get_column_str(&params.columns, &params.table, &fks, true)?);
+    statement.extend(get_columns_str(&params.columns, &params.table, &fks)?);
 
     statement.push(" FROM ");
     statement.push(&params.table);
 
     // build inner join expression
     let inner_join_str = if is_fks_exist {
-        ForeignKeyReference::inner_join_expr(&fks)
+        ForeignKeyReference::join_foreign_key_references(
+            &fks,
+            |(referring_table, referring_column, referred_table, referred_column)| {
+                // generate the INNER JOIN column equality expression
+                [
+                    referred_table,
+                    " ON ",
+                    referring_table,
+                    ".",
+                    referring_column,
+                    " = ",
+                    referred_table,
+                    ".",
+                    referred_column,
+                ]
+                .join("")
+            },
+            "\nINNER JOIN ",
+        )
     } else {
         "".to_string()
     };
@@ -181,59 +192,32 @@ fn build_select_statement(
     }
 
     // building WHERE string
-    let where_str = params.conditions.as_ref().map_or("", |s| s.as_str());
-    let where_string = get_where_string(where_str, &mut where_ast, &params.table, &fks);
-
+    let (mut where_string, column_types) =
+        get_where_string(&mut where_ast, &params.table, &stats, &fks);
     let mut prepared_values = vec![];
     if &where_string != "" {
         statement.push(" WHERE (");
+
+        // parse through the `WHERE` AST and return a tuple: (expression-with-prepared-params
+        // string, Vec of tuples (position, Value)).
+        let (where_string_with_prepared_positions, prepared_values_vec) =
+            ColumnTypeValue::generate_prepared_statement_from_ast_expr(
+                &where_ast,
+                &params.table,
+                &column_types,
+                None,
+            )?;
+        where_string = where_string_with_prepared_positions;
+        prepared_values = prepared_values_vec;
+
         statement.push(&where_string);
         statement.push(")");
-
-        if let Some(prepared_values_opt) = &params.prepared_values {
-            lazy_static! {
-                // need to parse integer strings as i32 or i64 so we don’t run into conversion errors
-                // (because rust-postgres attempts to convert really large integer strings as i32, which fails)
-                static ref INTEGER_RE: Regex = Regex::new(r"^\d+$").unwrap();
-
-                // anything in quotes should be forced as a string
-                static ref STRING_RE: Regex = Regex::new(r#"^['"](.+)['"]$"#).unwrap();
-            }
-
-            let prepared_values_vec = prepared_values_opt
-                .split(',')
-                .map(|val| {
-                    let val_str = val.trim();
-
-                    if STRING_RE.is_match(val_str) {
-                        let captures = STRING_RE.captures(val_str).unwrap();
-                        let val_string = captures.get(1).unwrap().as_str().to_string();
-
-                        return PreparedStatementValue::String(val_string);
-                    } else if INTEGER_RE.is_match(val_str) {
-                        if let Ok(val_i32) = val_str.parse::<i32>() {
-                            return PreparedStatementValue::Int4(val_i32);
-                        } else if let Ok(val_i64) = val_str.parse::<i64>() {
-                            return PreparedStatementValue::Int8(val_i64);
-                        }
-                    }
-
-                    PreparedStatementValue::String(val_str.to_string())
-                })
-                .collect();
-            prepared_values = prepared_values_vec;
-        }
     }
 
     // GROUP BY statement
     if let Some(group_by_columns) = &params.group_by {
         statement.push(" GROUP BY ");
-        statement.extend(get_column_str(
-            group_by_columns,
-            &params.table,
-            &fks,
-            false,
-        )?);
+        statement.extend(get_columns_str(group_by_columns, &params.table, &fks)?);
     }
 
     // Append ORDER BY if the param exists
@@ -272,7 +256,7 @@ fn build_select_statement(
                 is_fks_exist,
                 ForeignKeyReference::find(&fks, &params.table, sql_column),
             ) {
-                statement.push(fk_ref.table_referred.as_str());
+                statement.push(fk_ref.foreign_key_table.as_str());
                 statement.push(".");
                 statement.push(fk_column);
             } else {
@@ -308,124 +292,10 @@ fn build_select_statement(
     Ok((statement.join(""), prepared_values))
 }
 
-/// Generates a string of column names delimited by commas. Foreign keys are correctly accounted
-/// for.
-fn get_column_str<'a>(
-    columns: &'a [String],
-    table: &'a str,
-    fks: &'a [ForeignKeyReference],
-    is_use_alias: bool,
-) -> Result<Vec<&'a str>, Error> {
-    let mut statement: Vec<&str> = vec![];
-    let is_fks_exist = !fks.is_empty();
-
-    // no FKs exist, just add columns with commas in between
-    if !is_fks_exist {
-        for (i, column) in columns.iter().enumerate() {
-            if is_use_alias {
-                let _ = validate_alias_identifier(column)?;
-            } else {
-                validate_where_column(column)?;
-            }
-            statement.push(column);
-
-            if i < columns.len() - 1 {
-                statement.push(", ");
-            }
-        }
-
-        return Ok(statement);
-    }
-
-    // correctly account for FK column references
-    for (i, column) in columns.iter().enumerate() {
-        // If column is an alias (contains " AS "), de-alias and store alias for later
-        let validate_alias_result = validate_alias_identifier(column)?;
-        let (column, alias, has_alias) = if let (true, Some((actual_column_ref, alias))) =
-            (is_use_alias, validate_alias_result)
-        {
-            (actual_column_ref, alias, true)
-        } else {
-            (&column[..], "", false)
-        };
-
-        if let (true, Some((fk_ref, fk_column))) = (
-            !fks.is_empty(),
-            ForeignKeyReference::find(fks, table, column),
-        ) {
-            statement.push(fk_ref.table_referred.as_str());
-            statement.push(".");
-            statement.push(fk_column);
-
-            // AS syntax (to avoid ambiguous columns)
-            statement.push(" AS \"");
-            statement.push(if has_alias { alias } else { column });
-            statement.push("\"");
-        } else {
-            // Current column is not an FK, but we still need to use actual table names to avoid
-            // ambiguous columns. Example: If I'm trying to retrieve the ID field of an employee as
-            // well as its company and they're both called "id", I would get an ambiguity error.
-
-            statement.push(table);
-            statement.push(".");
-            statement.push(column);
-
-            // AS syntax (to avoid ambiguous columns)
-            statement.push(" AS \"");
-            statement.push(if has_alias { alias } else { column });
-            statement.push("\"");
-        }
-
-        if i < columns.len() - 1 {
-            statement.push(", ");
-        }
-    }
-
-    Ok(statement)
-}
-
-/// Generates the WHERE clause after taking foreign keys into account.
-fn get_where_string<'a>(
-    where_str: &str,
-    where_ast: &mut Expr,
-    table: &str,
-    fks: &'a [ForeignKeyReference],
-) -> String {
-    let where_fk_ast_nodes = fk_ast_nodes_from_where_ast(where_ast);
-
-    if where_fk_ast_nodes.is_empty() {
-        return where_str.to_string();
-    }
-
-    for (incorrect_column_name, ast_node) in where_fk_ast_nodes {
-        if let (true, Some((fk_ref, fk_column))) = (
-            !fks.is_empty(),
-            ForeignKeyReference::find(fks, table, &incorrect_column_name),
-        ) {
-            let replacement_node = match ast_node {
-                Expr::QualifiedWildcard(_wildcard_vec) => Expr::QualifiedWildcard(vec![
-                    fk_ref.table_referred.clone(),
-                    fk_column.to_string(),
-                ]),
-                Expr::CompoundIdentifier(_nested_fk_column_vec) => Expr::CompoundIdentifier(vec![
-                    fk_ref.table_referred.clone(),
-                    fk_column.to_string(),
-                ]),
-                _ => unimplemented!(
-                    "The WHERE clause HashMap only contains wildcards and compound identifiers."
-                ),
-            };
-
-            *ast_node = replacement_node;
-        }
-    }
-
-    where_ast.to_string()
-}
-
 #[cfg(test)]
 mod build_select_statement_tests {
-    use super::{super::query_types::QueryParamsSelect, *};
+    use super::*;
+    use crate::queries::{postgres_types::ColumnValue, query_types::QueryParamsSelect};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -439,9 +309,9 @@ mod build_select_statement_tests {
                 limit: 100,
                 offset: 0,
                 order_by: None,
-                prepared_values: None,
                 table: "a_table".to_string(),
             },
+            vec![],
             vec![],
             Expr::Identifier("".to_string()),
         ) {
@@ -465,9 +335,9 @@ mod build_select_statement_tests {
                 limit: 100,
                 offset: 0,
                 order_by: None,
-                prepared_values: None,
                 table: "a_table".to_string(),
             },
+            vec![],
             vec![],
             Expr::Identifier("".to_string()),
         ) {
@@ -491,9 +361,9 @@ mod build_select_statement_tests {
                 limit: 100,
                 offset: 0,
                 order_by: None,
-                prepared_values: None,
                 table: "a_table".to_string(),
             },
+            vec![],
             vec![],
             Expr::Identifier("".to_string()),
         ) {
@@ -520,9 +390,9 @@ mod build_select_statement_tests {
                 limit: 1000,
                 offset: 100,
                 order_by: None,
-                prepared_values: None,
                 table: "a_table".to_string(),
             },
+            vec![],
             vec![],
             Expr::Identifier("".to_string()),
         ) {
@@ -546,9 +416,9 @@ mod build_select_statement_tests {
                 limit: 1000,
                 offset: 0,
                 order_by: Some(vec!["name".to_string(), "test".to_string()]),
-                prepared_values: None,
                 table: "a_table".to_string(),
             },
+            vec![],
             vec![],
             Expr::Identifier("".to_string()),
         ) {
@@ -575,9 +445,9 @@ mod build_select_statement_tests {
                 limit: 1000,
                 offset: 0,
                 order_by: None,
-                prepared_values: None,
                 table: "a_table".to_string(),
             },
+            vec![],
             vec![],
             Expr::Identifier("".to_string()),
         ) {
@@ -595,62 +465,60 @@ mod build_select_statement_tests {
 
     #[test]
     fn conditions() {
-        match build_select_statement(
-            QueryParamsSelect {
-                columns: vec!["id".to_string()],
-                conditions: Some("(id > 10 OR id < 20) AND name = 'test'".to_string()),
-                distinct: None,
-                group_by: None,
-                limit: 10,
-                offset: 0,
-                order_by: None,
-                prepared_values: None,
-                table: "a_table".to_string(),
-            },
-            vec![],
-            Expr::Identifier("".to_string()),
-        ) {
-            Ok((sql, _)) => {
-                assert_eq!(
-                    &sql,
-                    "SELECT id FROM a_table WHERE ((id > 10 OR id < 20) AND name = 'test') LIMIT 10;"
-                );
-            }
-            Err(e) => {
-                panic!(e);
-            }
-        };
-    }
+        let conditions = "(id > 10 OR id < 20) AND name = 'test'".to_string();
+        let where_ast = where_clause_str_to_ast(&conditions).unwrap().unwrap();
 
-    #[test]
-    fn prepared_values() {
         match build_select_statement(
             QueryParamsSelect {
                 columns: vec!["id".to_string()],
-                conditions: Some("(id > $1 OR id < $2) AND name = $3".to_string()),
+                conditions: Some(conditions),
                 distinct: None,
                 group_by: None,
                 limit: 10,
                 offset: 0,
                 order_by: None,
-                prepared_values: Some("10,20,'test'".to_string()),
                 table: "a_table".to_string(),
             },
+            vec![
+                TableColumnStat {
+                    column_name: "id".to_string(),
+                    column_type: "int8",
+                    default_value: None,
+                    is_nullable: false,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "name".to_string(),
+                    column_type: "text",
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+            ],
             vec![],
-            Expr::Identifier("".to_string()),
+            where_ast,
         ) {
             Ok((sql, prepared_values)) => {
                 assert_eq!(
                     &sql,
-                    "SELECT id FROM a_table WHERE ((id > $1 OR id < $2) AND name = $3) LIMIT 10;"
+                    "SELECT id FROM a_table WHERE ((a_table.id > $1 OR a_table.id < $2) AND a_table.name = $3) LIMIT 10;"
                 );
-
                 assert_eq!(
                     prepared_values,
                     vec![
-                        PreparedStatementValue::Int4(10),
-                        PreparedStatementValue::Int4(20),
-                        PreparedStatementValue::String("test".to_string()),
+                        ColumnTypeValue::BigInt(ColumnValue::NotNullable(10)),
+                        ColumnTypeValue::BigInt(ColumnValue::NotNullable(20)),
+                        ColumnTypeValue::Text(ColumnValue::NotNullable("test".to_string())),
                     ]
                 );
             }
@@ -662,6 +530,9 @@ mod build_select_statement_tests {
 
     #[test]
     fn complex_query() {
+        let conditions = "id = 46327143679919107 AND test_name = 'a name'".to_string();
+        let where_ast = where_clause_str_to_ast(&conditions).unwrap().unwrap();
+
         match build_select_statement(
             QueryParamsSelect {
                 columns: vec![
@@ -669,7 +540,7 @@ mod build_select_statement_tests {
                     "test_bigint".to_string(),
                     "test_bigserial".to_string(),
                 ],
-                conditions: Some("id = $1 AND test_name = $2".to_string()),
+                conditions: Some(conditions),
                 distinct: Some(vec![
                     "test_date".to_string(),
                     "test_timestamptz".to_string(),
@@ -678,23 +549,110 @@ mod build_select_statement_tests {
                 limit: 10000,
                 offset: 2000,
                 order_by: Some(vec!["due_date desc".to_string()]),
-                prepared_values: Some("46327143679919107,'a name'".to_string()),
                 table: "a_table".to_string(),
             },
+            vec![
+                TableColumnStat {
+                    column_name: "id".to_string(),
+                    column_type: "int8",
+                    default_value: None,
+                    is_nullable: false,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "test_bigint".to_string(),
+                    column_type: "int8",
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "test_bigserial".to_string(),
+                    column_type: "int8",
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "test_name".to_string(),
+                    column_type: "text",
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "test_date".to_string(),
+                    column_type: "date",
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "test_timestamptz".to_string(),
+                    column_type: "timestamptz",
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "due_date".to_string(),
+                    column_type: "date",
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+            ],
             vec![],
-            Expr::Identifier("".to_string()),
+            where_ast,
         ) {
             Ok((sql, prepared_values)) => {
                 assert_eq!(
                     &sql,
-                    "SELECT DISTINCT ON (test_date, test_timestamptz) id, test_bigint, test_bigserial FROM a_table WHERE (id = $1 AND test_name = $2) ORDER BY due_date DESC LIMIT 10000 OFFSET 2000;"
+                    "SELECT DISTINCT ON (test_date, test_timestamptz) id, test_bigint, test_bigserial FROM a_table WHERE (a_table.id = $1 AND a_table.test_name = $2) ORDER BY due_date DESC LIMIT 10000 OFFSET 2000;"
                 );
 
                 assert_eq!(
                     prepared_values,
                     vec![
-                        PreparedStatementValue::Int8(46_327_143_679_919_107i64),
-                        PreparedStatementValue::String("a name".to_string()),
+                        ColumnTypeValue::BigInt(ColumnValue::NotNullable(
+                            46_327_143_679_919_107i64
+                        )),
+                        ColumnTypeValue::Text(ColumnValue::NotNullable("a name".to_string())),
                     ]
                 );
             }
@@ -702,107 +660,5 @@ mod build_select_statement_tests {
                 panic!(e);
             }
         };
-    }
-}
-
-#[cfg(test)]
-mod get_column_str_tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn foreign_keys_nested() {
-        let columns = vec!["id".to_string(), "parent_id.company_id.name".to_string()];
-        let fks = [ForeignKeyReference {
-            original_refs: vec!["parent_id.company_id.name".to_string()],
-            referring_table: "child".to_string(),
-            referring_column: "parent_id".to_string(),
-            table_referred: "adult".to_string(),
-            foreign_key_column: "id".to_string(),
-            nested_fks: vec![ForeignKeyReference {
-                original_refs: vec!["company_id.name".to_string()],
-                referring_table: "adult".to_string(),
-                referring_column: "company_id".to_string(),
-                table_referred: "company".to_string(),
-                foreign_key_column: "id".to_string(),
-                nested_fks: vec![],
-            }],
-        }];
-        let table = "child";
-
-        let column_str = get_column_str(&columns, table, &fks, false)
-            .unwrap()
-            .join("");
-        assert_eq!(
-            column_str,
-            r#"child.id AS "id", company.name AS "parent_id.company_id.name""#
-        );
-    }
-
-    #[test]
-    fn foreign_keys_nested_more_than_one() {
-        let columns = vec![
-            "parent_id.name".to_string(),
-            "parent_id.company_id.name".to_string(),
-        ];
-        let fks = [ForeignKeyReference {
-            original_refs: vec![
-                "parent_id.company_id.name".to_string(),
-                "parent_id.name".to_string(),
-            ],
-            referring_table: "child".to_string(),
-            referring_column: "parent_id".to_string(),
-            table_referred: "adult".to_string(),
-            foreign_key_column: "id".to_string(),
-            nested_fks: vec![ForeignKeyReference {
-                original_refs: vec!["company_id.name".to_string()],
-                referring_table: "adult".to_string(),
-                referring_column: "company_id".to_string(),
-                table_referred: "company".to_string(),
-                foreign_key_column: "id".to_string(),
-                nested_fks: vec![],
-            }],
-        }];
-        let table = "child";
-
-        let column_str = get_column_str(&columns, table, &fks, false)
-            .unwrap()
-            .join("");
-        assert_eq!(
-            column_str,
-            r#"adult.name AS "parent_id.name", company.name AS "parent_id.company_id.name""#
-        );
-    }
-
-    #[test]
-    fn foreign_keys_nested_alias() {
-        let columns = vec![
-            "id".to_string(),
-            "parent_id.company_id.name AS parent_company".to_string(),
-        ];
-        let fks = [ForeignKeyReference {
-            original_refs: vec!["parent_id.company_id.name".to_string()],
-            referring_table: "child".to_string(),
-            referring_column: "parent_id".to_string(),
-            table_referred: "adult".to_string(),
-            foreign_key_column: "id".to_string(),
-            nested_fks: vec![ForeignKeyReference {
-                original_refs: vec!["company_id.name".to_string()],
-                referring_table: "adult".to_string(),
-                referring_column: "company_id".to_string(),
-                table_referred: "company".to_string(),
-                foreign_key_column: "id".to_string(),
-                nested_fks: vec![],
-            }],
-        }];
-        let table = "child";
-
-        let column_str = get_column_str(&columns, table, &fks, true)
-            .unwrap()
-            .join("");
-        assert_eq!(
-            column_str,
-            r#"child.id AS "id", company.name AS "parent_company""#
-        );
     }
 }

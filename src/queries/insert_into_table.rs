@@ -9,13 +9,15 @@ use tokio_postgres::{types::ToSql, Client};
 use super::{
     postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
     query_types::{QueryParamsInsert, QueryResult},
-    select_table_stats::{select_column_stats, select_column_stats_statement},
+    select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
+    utils::{get_columns_str, validate_where_column},
 };
 use crate::Error;
 
 static INSERT_ROWS_BATCH_COUNT: usize = 100;
 
-enum InsertResult {
+/// Used for returning either number of rows or actual row values in INSERT/UPDATE statements.
+pub enum InsertResult {
     Rows(Vec<RowFields>),
     NumRowsAffected(u64),
 }
@@ -42,11 +44,8 @@ pub fn insert_into_table(
                 .map(|stats| (stats, conn))
         })
         .and_then(move |(stats, mut conn)| {
-            let mut column_types: HashMap<String, String> = HashMap::new();
-
-            for stat in stats.into_iter() {
-                column_types.insert(stat.column_name, stat.column_type);
-            }
+            let column_types: HashMap<String, &'static str> =
+                TableColumnStat::stats_to_column_types(stats);
 
             let num_rows = params.rows.len();
             if num_rows > INSERT_ROWS_BATCH_COUNT {
@@ -166,53 +165,69 @@ pub fn insert_into_table(
 fn execute_insert<'a>(
     mut conn: Client,
     params: QueryParamsInsert,
-    column_types: HashMap<String, String>,
+    column_types: HashMap<String, &'static str>,
     rows: &'a [Map<String, Value>],
 ) -> impl Future<
     Item = (
         Client,
         QueryParamsInsert,
-        HashMap<String, String>,
+        HashMap<String, &'static str>,
         InsertResult,
     ),
     Error = (Error, Client),
 > {
     let mut is_return_rows = false;
+    let mut insert_statement_tokens = vec!["INSERT INTO ", &params.table];
 
-    // parse out the columns that have values to assign
+    // generaate the list of columns that have values to assign
     let columns = get_all_columns_to_insert(rows);
-    let (values_params_str, column_values) = match get_insert_params(rows, &columns, &column_types)
-    {
-        Ok((values_params_str, column_values)) => (values_params_str, column_values),
-        Err(e) => return Either::A(err((e, conn))),
-    };
+
+    // validate columns
+    insert_statement_tokens.push(" (");
+    for (i, col) in columns.iter().enumerate() {
+        if let Err(e) = validate_where_column(col) {
+            return Either::A(err((e, conn)));
+        }
+
+        insert_statement_tokens.push(col);
+
+        if i < columns.len() - 1 {
+            insert_statement_tokens.push(", ");
+        }
+    }
+    insert_statement_tokens.push(")");
+
+    let (values_params_str, column_values) =
+        match generate_insert_params(rows, &columns, &column_types) {
+            Ok((values_params_str, column_values)) => (values_params_str, column_values),
+            Err(e) => return Either::A(err((e, conn))),
+        };
+    insert_statement_tokens.push(" VALUES ");
+    insert_statement_tokens.push(&values_params_str);
 
     // generate the ON CONFLICT string
     let conflict_clause = match generate_conflict_str(&params, &columns) {
         Some(conflict_str) => conflict_str,
         None => "".to_string(),
     };
+    if conflict_clause != "" {
+        insert_statement_tokens.push(&conflict_clause);
+    }
 
     // generate the RETURNING string
-    let returning_clause = match generate_returning_clause(&params) {
-        Some(returning_str) => {
-            is_return_rows = true;
-            returning_str
+    if let Some(returning_columns) = &params.returning_columns {
+        match get_columns_str(returning_columns, &params.table, &[]) {
+            Ok(columns_tokens) => {
+                is_return_rows = true;
+                insert_statement_tokens.push(" RETURNING ");
+                insert_statement_tokens.extend(columns_tokens);
+            }
+            Err(e) => return Either::A(err((e, conn))),
         }
-        None => "".to_string(),
-    };
+    }
 
     // create initial prepared statement
-    let insert_query_str = [
-        "INSERT INTO ",
-        &params.table,
-        &[" (", &columns.join(", "), ")"].join(""),
-        " VALUES ",
-        &values_params_str,
-        &conflict_clause,
-        &returning_clause,
-    ]
-    .join("");
+    let insert_query_str = insert_statement_tokens.join("");
 
     let insert_future = conn
         .prepare(&insert_query_str)
@@ -225,31 +240,7 @@ fn execute_insert<'a>(
             // execution
             let mut prep_values: Vec<&dyn ToSql> = vec![];
             for column_value in column_values.iter() {
-                match column_value {
-                    ColumnTypeValue::BigInt(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Bool(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::ByteA(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Char(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Citext(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Date(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Decimal(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Float8(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::HStore(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Int(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Json(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::JsonB(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::MacAddr(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Name(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Oid(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Real(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::SmallInt(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Text(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Time(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Timestamp(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::TimestampTz(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::Uuid(col_val) => prep_values.push(col_val),
-                    ColumnTypeValue::VarChar(col_val) => prep_values.push(col_val),
-                };
+                prep_values.push(column_value);
             }
 
             if is_return_rows {
@@ -337,14 +328,6 @@ fn generate_conflict_str(params: &QueryParamsInsert, columns: &[&str]) -> Option
     None
 }
 
-fn generate_returning_clause(params: &QueryParamsInsert) -> Option<String> {
-    if let Some(returning_columns) = &params.returning_columns {
-        return Some([" RETURNING ", &returning_columns.join(", ")].join(""));
-    }
-
-    None
-}
-
 /// Searches all rows being inserted and returns a vector containing all of the column names
 fn get_all_columns_to_insert<'a>(rows: &'a [Map<String, Value>]) -> Vec<&'a str> {
     // parse out the columns that have values to assign
@@ -361,10 +344,10 @@ fn get_all_columns_to_insert<'a>(rows: &'a [Map<String, Value>]) -> Vec<&'a str>
 
 /// Returns a Result containing the tuple that contains (the VALUES parameter string, the array of
 /// parameter values)
-fn get_insert_params(
+fn generate_insert_params(
     rows: &[Map<String, Value>],
     columns: &[&str],
-    column_types: &HashMap<String, String>,
+    column_types: &HashMap<String, &'static str>,
 ) -> Result<(String, Vec<ColumnTypeValue>), Error> {
     let mut prep_column_number = 1;
     let mut row_strs = vec![];
