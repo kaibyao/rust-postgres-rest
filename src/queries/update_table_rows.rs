@@ -74,7 +74,7 @@ pub fn update_table_rows(
                 Some(ast) => ast,
                 None => Expr::Identifier("".to_string()),
             },
-            Err(e) => {
+            Err(_e) => {
                 return Either::A(err(Error::generate_error(
                     "INVALID_SQL_SYNTAX",
                     ["WHERE", where_clause_str].join(":"),
@@ -292,7 +292,7 @@ fn build_update_statement(
     let (mut where_string, where_column_types) =
         get_where_string(&mut where_ast, &params.table, &stats, &fks);
     if &where_string != "" || &fk_where_filter != "" {
-        query_str_arr.push(" WHERE (\n  ");
+        query_str_arr.push("\nWHERE (\n  ");
 
         if &where_string != "" {
             // parse through the `WHERE` AST and return a tuple: (expression-with-prepared-params
@@ -323,7 +323,7 @@ fn build_update_statement(
 
     // returning_columns
     if let Some(returned_column_names) = &params.returning_columns {
-        query_str_arr.push(" RETURNING ");
+        query_str_arr.push(" RETURNING\n  ");
 
         let returning_columns_str = get_columns_str(returned_column_names, &params.table, &fks)?;
         query_str_arr.extend(returning_columns_str);
@@ -467,7 +467,7 @@ mod build_update_statement_tests {
 
         assert_eq!(
             &sql_str,
-            "UPDATE throne SET nemesis_name = adult.name FROM adult WHERE (\n  throne.id = $1 AND\n  throne.nemesis_id = adult.id\n) RETURNING throne.id AS \"id\", throne.nemesis_name AS \"nemesis_name\";"
+            "UPDATE throne SET nemesis_name = adult.name FROM adult\nWHERE (\n  throne.id = $1 AND\n  throne.nemesis_id = adult.id\n) RETURNING\n  throne.id AS \"id\", throne.nemesis_name AS \"nemesis_name\";"
         );
         assert_eq!(
             prepared_values,
@@ -565,7 +565,7 @@ mod build_update_statement_tests {
 
         assert_eq!(
             &sql_str,
-            "UPDATE throne SET nemesis_name = adult.name FROM adult WHERE (\n  throne.nemesis_id = adult.id\n) RETURNING throne.id AS \"id\", throne.nemesis_name AS \"nemesis_name\";"
+            "UPDATE throne SET nemesis_name = adult.name FROM adult\nWHERE (\n  throne.nemesis_id = adult.id\n) RETURNING\n  throne.id AS \"id\", throne.nemesis_name AS \"nemesis_name\";"
         );
         assert_eq!(prepared_values, vec![]);
     }
@@ -648,7 +648,7 @@ mod build_update_statement_tests {
 
         assert_eq!(
             &sql_str,
-            "UPDATE player SET name = coach.name FROM team, coach WHERE (\n  player.id = $1 AND\n  player.team_id = team.id AND\n  team.coach_id = coach.id\n) RETURNING player.id AS \"id\", coach.name AS \"team_id.coach_id.name\";"
+            "UPDATE player SET name = coach.name FROM team, coach\nWHERE (\n  player.id = $1 AND\n  player.team_id = team.id AND\n  team.coach_id = coach.id\n) RETURNING\n  player.id AS \"id\", coach.name AS \"team_id.coach_id.name\";"
         );
         assert_eq!(
             prepared_values,

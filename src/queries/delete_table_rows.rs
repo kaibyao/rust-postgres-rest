@@ -152,60 +152,56 @@ fn build_delete_statement(
     fks: Vec<ForeignKeyReference>,
     mut where_ast: Expr,
 ) -> Result<(String, Vec<ColumnTypeValue>), Error> {
-    let mut query_str_arr = vec!["DELETE FROM \n  ", &params.table];
+    let mut query_str_arr = vec!["DELETE FROM\n  ", &params.table];
     let mut prepared_statement_values = vec![];
 
-    // build USING and WHERE foreign-key clauses
+    // appending WHERE clauses to statement
     let fk_using_clause;
     let mut fk_where_filter = String::from("");
-    if !fks.is_empty() {
-        query_str_arr.push("\nUSING\n  ");
 
-        fk_using_clause = ForeignKeyReference::join_foreign_key_references(
-            &fks,
-            |(_referring_table, _referring_column, fk_table, _fk_column)| fk_table.to_string(),
-            ",\n  ",
-        );
-
-        fk_where_filter = ForeignKeyReference::join_foreign_key_references(
-            &fks,
-            |(referring_table, referring_column, fk_table, fk_column)| {
-                format!(
-                    "{}.{} = {}.{}",
-                    referring_table, referring_column, fk_table, fk_column
-                )
-            },
-            " AND\n  ",
-        );
-
-        query_str_arr.push(&fk_using_clause);
-    }
-
-    // appending WHERE clauses to statement
     let (mut where_string, where_column_types) =
         get_where_string(&mut where_ast, &params.table, &stats, &fks);
-    if &where_string != "" || &fk_where_filter != "" {
-        query_str_arr.push("\nWHERE (\n  ");
+    if &where_string != "" {
+        // build USING and WHERE foreign-key clauses
+        if !fks.is_empty() {
+            query_str_arr.push("\nUSING\n  ");
 
-        if &where_string != "" {
-            let (where_string_with_prepared_positions, prepared_values_vec) =
-                ColumnTypeValue::generate_prepared_statement_from_ast_expr(
-                    &where_ast,
-                    &params.table,
-                    &where_column_types,
-                    None,
-                )?;
-            where_string = where_string_with_prepared_positions;
-            prepared_statement_values.extend(prepared_values_vec);
+            fk_using_clause = ForeignKeyReference::join_foreign_key_references(
+                &fks,
+                |(_referring_table, _referring_column, fk_table, _fk_column)| fk_table.to_string(),
+                ",\n  ",
+            );
 
-            query_str_arr.push(&where_string);
+            fk_where_filter = ForeignKeyReference::join_foreign_key_references(
+                &fks,
+                |(referring_table, referring_column, fk_table, fk_column)| {
+                    format!(
+                        "{}.{} = {}.{}",
+                        referring_table, referring_column, fk_table, fk_column
+                    )
+                },
+                " AND\n  ",
+            );
 
-            if fk_where_filter != "" {
-                query_str_arr.push(" AND ");
-            }
+            query_str_arr.push(&fk_using_clause);
         }
 
+        query_str_arr.push("\nWHERE (\n  ");
+
+        let (where_string_with_prepared_positions, prepared_values_vec) =
+            ColumnTypeValue::generate_prepared_statement_from_ast_expr(
+                &where_ast,
+                &params.table,
+                &where_column_types,
+                None,
+            )?;
+        where_string = where_string_with_prepared_positions;
+        prepared_statement_values.extend(prepared_values_vec);
+
+        query_str_arr.push(&where_string);
+
         if &fk_where_filter != "" {
+            query_str_arr.push(" AND\n  ");
             query_str_arr.push(&fk_where_filter);
         }
 
@@ -214,7 +210,7 @@ fn build_delete_statement(
 
     // returning_columns
     if let Some(returned_column_names) = &params.returning_columns {
-        query_str_arr.push(" RETURNING ");
+        query_str_arr.push(" RETURNING\n  ");
 
         let returning_columns_str = get_columns_str(returned_column_names, &params.table, &fks)?;
         query_str_arr.extend(returning_columns_str);
@@ -230,7 +226,6 @@ mod build_delete_statement_tests {
     use super::*;
     use crate::queries::{postgres_types::ColumnValue, query_types::QueryParamsDelete};
     use pretty_assertions::assert_eq;
-    use serde_json::json;
 
     #[test]
     fn simple() {
@@ -337,5 +332,198 @@ mod build_delete_statement_tests {
 
         assert_eq!(&sql_str, "DELETE FROM\n  a_table;");
         assert_eq!(prepared_values, vec![]);
+    }
+
+    #[test]
+    fn fks_conditions() {
+        let conditions = "id = 1".to_string();
+        let where_ast = where_clause_str_to_ast(&conditions).unwrap().unwrap();
+        let params = QueryParamsDelete {
+            confirm_delete: Some("true".to_string()),
+            conditions: Some(conditions),
+            returning_columns: None,
+            table: "a_table".to_string(),
+        };
+        let stats = vec![
+            TableColumnStat {
+                column_name: "id".to_string(),
+                column_type: "int8",
+                default_value: None,
+                is_nullable: true,
+                is_foreign_key: false,
+                foreign_key_table: None,
+                foreign_key_column: None,
+                foreign_key_column_type: None,
+                char_max_length: None,
+                char_octet_length: None,
+            },
+            TableColumnStat {
+                column_name: "name".to_string(),
+                column_type: "text",
+                default_value: None,
+                is_nullable: true,
+                is_foreign_key: false,
+                foreign_key_table: None,
+                foreign_key_column: None,
+                foreign_key_column_type: None,
+                char_max_length: None,
+                char_octet_length: None,
+            },
+            TableColumnStat {
+                column_name: "b_id".to_string(),
+                column_type: "int8",
+                default_value: None,
+                is_nullable: true,
+                is_foreign_key: true,
+                foreign_key_table: Some("b_table".to_string()),
+                foreign_key_column: Some("id".to_string()),
+                foreign_key_column_type: Some("int8"),
+                char_max_length: None,
+                char_octet_length: None,
+            },
+        ];
+        let fks = vec![ForeignKeyReference {
+            original_refs: vec!["b_table.name".to_string()],
+            referring_table: "a_table".to_string(),
+            referring_column: "b_id".to_string(),
+            referring_column_type: "int8",
+            foreign_key_table: "b_table".to_string(),
+            foreign_key_table_stats: vec![
+                TableColumnStat {
+                    column_name: "id".to_string(),
+                    column_type: "int8",
+                    default_value: None,
+                    is_nullable: false,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "name".to_string(),
+                    column_type: "text",
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+            ],
+            foreign_key_column: "id".to_string(),
+            foreign_key_column_type: "int8",
+            nested_fks: vec![],
+        }];
+
+        let (sql_str, prepared_values) =
+            build_delete_statement(params, stats, fks, where_ast).unwrap();
+
+        assert_eq!(
+            &sql_str,
+            "DELETE FROM\n  a_table\nUSING\n  b_table\nWHERE (\n  a_table.id = $1 AND\n  a_table.b_id = b_table.id\n);"
+        );
+        assert_eq!(
+            prepared_values,
+            vec![ColumnTypeValue::BigInt(ColumnValue::NotNullable(1))]
+        );
+    }
+
+    #[test]
+    fn fks_conditions_with_fk() {
+        let conditions = "b_id.id = 1".to_string();
+        let where_ast = where_clause_str_to_ast(&conditions).unwrap().unwrap();
+        let params = QueryParamsDelete {
+            confirm_delete: Some("true".to_string()),
+            conditions: Some(conditions),
+            returning_columns: None,
+            table: "a_table".to_string(),
+        };
+        let stats = vec![
+            TableColumnStat {
+                column_name: "id".to_string(),
+                column_type: "int8",
+                default_value: None,
+                is_nullable: true,
+                is_foreign_key: false,
+                foreign_key_table: None,
+                foreign_key_column: None,
+                foreign_key_column_type: None,
+                char_max_length: None,
+                char_octet_length: None,
+            },
+            TableColumnStat {
+                column_name: "name".to_string(),
+                column_type: "text",
+                default_value: None,
+                is_nullable: true,
+                is_foreign_key: false,
+                foreign_key_table: None,
+                foreign_key_column: None,
+                foreign_key_column_type: None,
+                char_max_length: None,
+                char_octet_length: None,
+            },
+            TableColumnStat {
+                column_name: "b_id".to_string(),
+                column_type: "int8",
+                default_value: None,
+                is_nullable: true,
+                is_foreign_key: true,
+                foreign_key_table: Some("b_table".to_string()),
+                foreign_key_column: Some("id".to_string()),
+                foreign_key_column_type: Some("int8"),
+                char_max_length: None,
+                char_octet_length: None,
+            },
+        ];
+        let fks = vec![ForeignKeyReference {
+            original_refs: vec!["b_id.id".to_string()],
+            referring_table: "a_table".to_string(),
+            referring_column: "b_id".to_string(),
+            referring_column_type: "int8",
+            foreign_key_table: "b_table".to_string(),
+            foreign_key_table_stats: vec![
+                TableColumnStat {
+                    column_name: "id".to_string(),
+                    column_type: "int8",
+                    default_value: None,
+                    is_nullable: false,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "name".to_string(),
+                    column_type: "text",
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+            ],
+            foreign_key_column: "id".to_string(),
+            foreign_key_column_type: "int8",
+            nested_fks: vec![],
+        }];
+
+        let (sql_str, prepared_values) =
+            build_delete_statement(params, stats, fks, where_ast).unwrap();
+
+        assert_eq!(&sql_str, "DELETE FROM\n  a_table\nUSING\n  b_table\nWHERE (\n  b_table.id = $1 AND\n  a_table.b_id = b_table.id\n);");
+        assert_eq!(
+            prepared_values,
+            vec![ColumnTypeValue::BigInt(ColumnValue::NotNullable(1))]
+        );
     }
 }
