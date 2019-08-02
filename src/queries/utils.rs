@@ -12,15 +12,6 @@ use sqlparser::{
 };
 use std::{collections::HashMap, string::ToString};
 
-/// Takes a string of columns and returns the RETURNING clause of an INSERT or UPDATE statement.
-// pub fn generate_returning_clause(returning_columns_opt: &Option<Vec<String>>) -> Option<String> {
-//     if let Some(returning_columns) = returning_columns_opt {
-//         return Some([" RETURNING ", &returning_columns.join(", ")].join(""));
-//     }
-
-//     None
-// }
-
 /// Generates the WHERE clause and a HashMap of column name : column type after taking foreign keys
 /// into account. Mutates the original AST.
 pub fn get_where_string<'a>(

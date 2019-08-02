@@ -20,7 +20,7 @@ use super::{
 };
 use crate::{db::connect, AppState, Error};
 
-/// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query
+/// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query.
 pub fn select_table_rows(
     state: &AppState,
     params: QueryParamsSelect,

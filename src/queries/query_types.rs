@@ -40,6 +40,48 @@ pub struct RequestQueryStringParams {
 }
 
 #[derive(Debug)]
+/// Represents a single DELETE query
+pub struct QueryParamsDelete {
+    pub table: String,
+    pub conditions: Option<String>,
+    pub confirm_delete: Option<String>,
+    pub returning_columns: Option<Vec<String>>,
+}
+
+impl QueryParamsDelete {
+    /// Fills the struct’s values based on the HttpRequest data.
+    pub fn from_http_request(
+        req: &HttpRequest,
+        query_string_params: RequestQueryStringParams,
+    ) -> Result<Self, Error> {
+        let params = QueryParamsDelete {
+            table: req.match_info().query("table").trim().to_lowercase(),
+            conditions: match query_string_params.r#where {
+                Some(where_string) => Some(where_string.trim().to_lowercase()),
+                None => None,
+            },
+            confirm_delete: query_string_params.confirm_delete,
+            returning_columns: match query_string_params.returning_columns {
+                Some(columns_str) => {
+                    if columns_str == "" {
+                        return Err(Error::generate_error(
+                        "INCORRECT_REQUEST_BODY",
+                        "`returning_columns` must be a comma-separated list of column names and include at least one column name.".to_string(),
+                    ));
+                    }
+
+                    let returning_columns_vec = normalize_columns(&columns_str)?;
+                    Some(returning_columns_vec)
+                }
+                None => None,
+            },
+        };
+
+        Ok(params)
+    }
+}
+
+#[derive(Debug)]
 /// Represents a single SELECT query
 pub struct QueryParamsSelect {
     pub distinct: Option<Vec<String>>,
@@ -70,7 +112,7 @@ impl QueryParamsSelect {
                 Some(distinct_str) => Some(normalize_columns(&distinct_str)?),
                 None => None,
             },
-            table: req.match_info().query("table").to_lowercase(),
+            table: req.match_info().query("table").trim().to_lowercase(),
             conditions: match query_string_params.r#where {
                 Some(where_string) => Some(where_string.trim().to_lowercase()),
                 None => None,
@@ -200,7 +242,7 @@ impl QueryParamsInsert {
             conflict_target,
             returning_columns,
             rows,
-            table: req.match_info().query("table").to_lowercase(),
+            table: req.match_info().query("table").trim().to_lowercase(),
         })
     }
 }
@@ -245,7 +287,7 @@ impl QueryParamsUpdate {
             }
             None => None,
         };
-        let table = req.match_info().query("table").to_lowercase();
+        let table = req.match_info().query("table").trim().to_lowercase();
         let conditions = match query_string_params.r#where {
             Some(where_string) => Some(where_string.trim().to_string()),
             None => None,

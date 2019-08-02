@@ -394,13 +394,13 @@ Obviously this request didn’t produce the most useful results, but it shows th
 
 ## To dos
 
-1. Recreate the Table API.
 1. Shortened alias syntax ("some_table a" vs "some_table AS a")
 1. parallelize all iters (with Rayon + par_iter).
 1. Add security, customizability, optimizations, etc.
 1. GraphQL API
 1. Optimization: Convert Strings to &str / statics.
 1. CSV, XML for REST API (nix for now?)
+1. Eventually support dot syntax in INSERT: [See this forum post](https://dba.stackexchange.com/questions/160674/insert-rows-in-two-tables-preserving-connection-to-a-third-table)
 
 ## To run tests
 

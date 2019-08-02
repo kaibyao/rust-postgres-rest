@@ -102,7 +102,7 @@ pub fn index() -> HttpResponse {
                     },
                 },
                 "DELETE": {
-                    "description": "Deletes table records (not implemented).",
+                    "description": "Deletes table records.",
                     "query_params": {
                         "where": {
                             "default": null,
@@ -112,7 +112,12 @@ pub fn index() -> HttpResponse {
                         "confirm_delete": {
                             "default": null,
                             "description": "This param is required in order for DELETE operation to process.",
-                        }
+                        },
+                        "returning_columns": {
+                            "default": null,
+                            "description": "Comma-separated list of columns to return from deleted rows.",
+                            "example": "id,name, field_2",
+                        },
                     }
                 },
             }},
