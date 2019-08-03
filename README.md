@@ -318,7 +318,6 @@ INSERT INTO public.player
   (3, 'Garrett Temple', 2),
   (4, 'Wilson Chandler', 2),
   (5, 'Russell Westbrook', 4);
-
 ```
 
 ##### Simple update
@@ -385,6 +384,108 @@ Garrett Temple and Wilson Chandler have been renamed to Doc Rivers.
 
 Obviously this request didn’t produce the most useful results, but it shows the possibilities of bulk updates.
 
+### `DELETE /{table}`
+
+Delete records in `{table}`. Returns the number of rows affected. Optionally, table columns of deleted rows can be returned using the `returning_columns` query parameter (see below). DOT (`.`) syntax can be used in `where` and `returning_columns` (see examples).
+
+#### Query Parameters for `DELETE /{table}`
+
+##### confirm_delete
+
+Required in order to process the DELETE operation. The endpoint returns a 400 error response otherwise.
+
+##### where (DELETE)
+
+The WHERE clause of an DELETE statement. Remember to URI-encode the final result. Example: `(field_1 >= field_2 AND id IN (1,2,3)) OR field_2 > field_1`.
+
+##### returning_columns (DELETE)
+
+Comma-separated list of columns to return from the DELETE operation. Example: `id,name, field_2`.
+
+#### Examples for `DELETE /{table}`
+
+Assume the following database schema for these examples:
+
+```postgre
+CREATE TABLE IF NOT EXISTS public.delete_b (
+  id BIGINT CONSTRAINT delete_b_id_key PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS public.delete_a (
+  id BIGINT CONSTRAINT delete_a_id_key PRIMARY KEY,
+  b_id BIGINT
+);
+CREATE TABLE IF NOT EXISTS public.delete_simple (
+  id BIGINT CONSTRAINT delete_simple_id_key PRIMARY KEY
+);
+
+ALTER TABLE public.delete_a ADD CONSTRAINT delete_a_b_reference FOREIGN KEY (b_id) REFERENCES public.delete_b(id);
+
+INSERT INTO public.delete_b (id) VALUES
+  (1),
+  (2),
+  (3),
+  (4);
+
+INSERT INTO public.delete_a
+  (id, b_id)
+  VALUES
+  (1, 1),
+  (2, 2),
+  (3, 2),
+  (4, 3),
+  (5, 4);
+
+INSERT INTO public.delete_simple (id) VALUES (1), (2), (3);
+```
+
+##### Simple delete
+
+```plaintext
+DELETE /api/delete_simple?confirm_delete
+
+Result:
+{ "num_rows": 3 }
+
+All rows are deleted from the table `delete_simple`.
+```
+
+##### Delete with `WHERE`
+
+```plaintext
+DELETE /api/delete_simple?confirm_delete&whereid%3D1
+
+Result:
+{ "num_rows": 1 }
+
+The first row is deleted from the table `delete_simple`.
+```
+
+##### Delete + return foreign key values of deleted rows
+
+Note that this does not remove rows from the table referenced by the foreign key.
+
+```plaintext
+DELETE /api/delete_a?confirm_delete&whereid%3D3&returning_columns=b_id.id
+
+Result:
+{ "b_id.id": 2 }
+
+The second row (with id = 3) is deleted from the table `delete_a`.
+```
+
+##### Returned rows can be aliases too
+
+Note that this does not remove rows from the table referenced by the foreign key.
+
+```plaintext
+DELETE /api/delete_a?confirm_delete&whereid%3D3&returning_columns=b_id.id as b_id
+
+Result:
+{ "b_id": 2 }
+
+The second row (with id = 3) is deleted from the table `delete_a`.
+```
+
 ## Not supported
 
 - HStore (`rust-sqlparser` doesn't support it). Use JSON/JSONB instead.
@@ -401,6 +502,7 @@ Obviously this request didn’t produce the most useful results, but it shows th
 1. Optimization: Convert Strings to &str / statics.
 1. CSV, XML for REST API (nix for now?)
 1. Eventually support dot syntax in INSERT: [See this forum post](https://dba.stackexchange.com/questions/160674/insert-rows-in-two-tables-preserving-connection-to-a-third-table)
+1. Maybe use Diesel's parser instead of SQLParser in order to support HStore and bit/varbit?
 
 ## To run tests
 

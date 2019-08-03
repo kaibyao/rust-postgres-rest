@@ -232,8 +232,7 @@ CREATE TABLE IF NOT EXISTS public.delete_b (
 );
 CREATE TABLE IF NOT EXISTS public.delete_a (
   id BIGINT CONSTRAINT delete_a_id_key PRIMARY KEY,
-  b_id BIGINT,
-  name TEXT
+  b_id BIGINT
 );
 CREATE TABLE IF NOT EXISTS public.delete_simple (
   id BIGINT CONSTRAINT delete_simple_id_key PRIMARY KEY
@@ -248,12 +247,12 @@ INSERT INTO public.delete_b (id) VALUES
   (4);
 
 INSERT INTO public.delete_a
-  (id, name, b_id)
+  (id, b_id)
   VALUES
-  (1, 'a', 1),
-  (2, 'b', 2),
-  (3, 'c', 2),
-  (4, 'd', 3),
-  (5, 'e', 4);
+  (1, 1),
+  (2, 2),
+  (3, 2),
+  (4, 3),
+  (5, 4);
 
 INSERT INTO public.delete_simple (id) VALUES (1), (2), (3);
