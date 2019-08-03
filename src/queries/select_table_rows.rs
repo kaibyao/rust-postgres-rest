@@ -14,8 +14,8 @@ use super::{
     query_types::QueryParamsSelect,
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
-        get_columns_str, get_where_string, validate_alias_identifier, validate_table_name,
-        validate_where_column, where_clause_str_to_ast,
+        conditions_params_to_ast, get_columns_str, get_where_string, validate_alias_identifier,
+        validate_table_name, validate_where_column,
     },
 };
 use crate::{db::connect, AppState, Error};
@@ -31,33 +31,27 @@ pub fn select_table_rows(
 
     // get list of every column being used in the query params (columns, where, distinct, group_by,
     // order_by). Used for finding all foreign key references
-    let mut columns: Vec<String> = params
+    let columns_result: Result<Vec<String>, Error> = params
         .columns
         .iter()
         .map(|col| {
-            if let Ok(Some((actual_column_ref, _alias))) = validate_alias_identifier(col) {
-                actual_column_ref.to_string()
+            if let Some((actual_column_ref, _alias)) = validate_alias_identifier(col)? {
+                Ok(actual_column_ref.to_string())
             } else {
-                col.to_string()
+                Ok(col.to_string())
             }
         })
-        .collect();
+        .collect::<Result<Vec<String>, Error>>();
 
-    // WHERE clause foreign key references
-    let where_ast = match &params.conditions {
-        Some(where_clause_str) => match where_clause_str_to_ast(where_clause_str) {
-            Ok(ast_opt) => match ast_opt {
-                Some(ast) => ast,
-                None => Expr::Identifier("".to_string()),
-            },
-            Err(_e) => {
-                return Either::A(err(Error::generate_error(
-                    "INVALID_SQL_SYNTAX",
-                    ["WHERE", where_clause_str].join(":"),
-                )));
-            }
-        },
-        None => Expr::Identifier("".to_string()),
+    let mut columns = match columns_result {
+        Ok(columns) => columns,
+        Err(e) => return Either::A(err(e)),
+    };
+
+    // WHERE clause w/ foreign key references
+    let where_ast = match conditions_params_to_ast(&params.conditions) {
+        Ok(ast) => ast,
+        Err(e) => return Either::A(err(e)),
     };
     columns.extend(fk_columns_from_where_ast(&where_ast));
 
@@ -465,13 +459,13 @@ mod build_select_statement_tests {
 
     #[test]
     fn conditions() {
-        let conditions = "(id > 10 OR id < 20) AND name = 'test'".to_string();
-        let where_ast = where_clause_str_to_ast(&conditions).unwrap().unwrap();
+        let conditions = "(id > 10 OR id < 20) AND name = 'test'";
+        let where_ast = conditions_params_to_ast(&Some(conditions.to_string())).unwrap();
 
         match build_select_statement(
             QueryParamsSelect {
                 columns: vec!["id".to_string()],
-                conditions: Some(conditions),
+                conditions: Some(conditions.to_string()),
                 distinct: None,
                 group_by: None,
                 limit: 10,
@@ -530,8 +524,8 @@ mod build_select_statement_tests {
 
     #[test]
     fn complex_query() {
-        let conditions = "id = 46327143679919107 AND test_name = 'a name'".to_string();
-        let where_ast = where_clause_str_to_ast(&conditions).unwrap().unwrap();
+        let conditions = "id = 46327143679919107 AND test_name = 'a name'";
+        let where_ast = conditions_params_to_ast(&Some(conditions.to_string())).unwrap();
 
         match build_select_statement(
             QueryParamsSelect {
@@ -540,7 +534,7 @@ mod build_select_statement_tests {
                     "test_bigint".to_string(),
                     "test_bigserial".to_string(),
                 ],
-                conditions: Some(conditions),
+                conditions: Some(conditions.to_string()),
                 distinct: Some(vec![
                     "test_date".to_string(),
                     "test_timestamptz".to_string(),

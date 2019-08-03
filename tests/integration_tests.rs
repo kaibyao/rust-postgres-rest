@@ -70,6 +70,9 @@ fn get_table_names() {
             "child",
             "coach",
             "company",
+            "delete_a",
+            "delete_b",
+            "delete_simple",
             "player",
             "school",
             "sibling",
@@ -896,5 +899,124 @@ fn put_table_records_nested_fk_in_returning_columns() {
         response_body,
         json!([{ "id": 2, "name": "Steve Kerr", "team_id.name": "Golden State Warriors", "team_id.coach_id.name": "Steve Kerr" }])
     );
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn put_table_records_nested_fk_in_returning_column_aliases() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=id%3D2&returning_columns=id, team_id.name as team_name",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"name": "team_id.coach_id.name"}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(
+        response_body,
+        json!([{ "id": 2, "team_name": "Golden State Warriors" }])
+    );
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn delete_table_records_no_confirm() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/delete_simple",
+    ]
+    .join("");
+    let res = Client::new().request(Method::DELETE, &url).send().unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn delete_table_records_simple() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/delete_simple?confirm_delete",
+    ]
+    .join("");
+    let mut res = Client::new().request(Method::DELETE, &url).send().unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!({ "num_rows": 3 }));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn delete_table_records_conditions() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/delete_a?confirm_delete&where=id%3D1",
+    ]
+    .join("");
+    let mut res = Client::new().request(Method::DELETE, &url).send().unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!({ "num_rows": 1 }));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn delete_table_records_conditions_return_fk_columns() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/delete_a?confirm_delete&where=id%3D3&returning_columns=b_id.id",
+    ]
+    .join("");
+    let mut res = Client::new().request(Method::DELETE, &url).send().unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!([{ "b_id.id": 2 }]));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn delete_table_records_return_fk_column_alias() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/delete_a?confirm_delete&where=id%3D5&returning_columns=b_id.id as b_id",
+    ]
+    .join("");
+    let mut res = Client::new().request(Method::DELETE, &url).send().unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!([{ "b_id": 4 }]));
     assert_eq!(res.status(), StatusCode::OK);
 }

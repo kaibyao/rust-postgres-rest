@@ -1,8 +1,14 @@
 use super::{
     foreign_keys::{fk_ast_nodes_from_where_ast, ForeignKeyReference},
+    postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
+    query_types::QueryResult,
     select_table_stats::TableColumnStat,
 };
-use crate::Error;
+use crate::{db::connect, Error};
+use futures::{
+    future::{Either, Future},
+    stream::Stream,
+};
 use lazy_static::lazy_static;
 use regex::Regex;
 use sqlparser::{
@@ -11,6 +17,87 @@ use sqlparser::{
     parser::Parser,
 };
 use std::{collections::HashMap, string::ToString};
+use tokio_postgres::types::ToSql;
+
+/// Converts a WHERE clause string into an Expr.
+pub fn conditions_params_to_ast(clause_opt: &Option<String>) -> Result<Expr, Error> {
+    match clause_opt {
+        Some(clause) => {
+            let full_statement = ["SELECT * FROM a_table WHERE ", clause].join("");
+            let dialect = PostgreSqlDialect {};
+
+            // convert the statement into an AST, and then extract the "WHERE" portion of the AST
+            let mut parsed = match Parser::parse_sql(&dialect, full_statement) {
+                Ok(ast) => ast,
+                Err(_e) => {
+                    return Err(Error::generate_error(
+                        "INVALID_SQL_SYNTAX",
+                        ["WHERE", clause].join(":"),
+                    ))
+                }
+            };
+            let statement_ast = parsed.remove(0);
+
+            if let Statement::Query(query_box) = statement_ast {
+                let expr = match extract_where_ast_from_setexpr(query_box.to_owned().body) {
+                    Some(ast) => ast,
+                    None => Expr::Identifier("".to_string()),
+                };
+                return Ok(expr);
+            }
+
+            Ok(Expr::Identifier("".to_string()))
+        }
+        None => Ok(Expr::Identifier("".to_string())),
+    }
+}
+
+/// Returns a Future resolving to a QueryResult.
+pub fn generate_query_result_from_db(
+    db_url: &str,
+    statement_str: String,
+    prepared_values: Vec<ColumnTypeValue>,
+    is_return_rows: bool,
+) -> impl Future<Item = QueryResult, Error = Error> {
+    connect(&db_url)
+        .map_err(Error::from)
+        .and_then(move |mut conn| {
+            conn.prepare(&statement_str)
+                .map_err(Error::from)
+                .and_then(move |statement| {
+                    let prep_values: Vec<&dyn ToSql> =
+                        prepared_values.iter().map(|v| v as _).collect();
+
+                    if is_return_rows {
+                        let return_rows_future = conn
+                            .query(&statement, &prep_values)
+                            .collect()
+                            .map_err(Error::from)
+                            .and_then(|rows| {
+                                match rows
+                                    .iter()
+                                    .map(|row| convert_row_fields(&row))
+                                    .collect::<Result<Vec<RowFields>, Error>>()
+                                {
+                                    Ok(row_fields) => Ok(QueryResult::QueryTableResult(row_fields)),
+                                    Err(e) => Err(e),
+                                }
+                            });
+
+                        Either::A(return_rows_future)
+                    } else {
+                        let return_row_count_future = conn.execute(&statement, &prep_values).then(
+                            move |result| match result {
+                                Ok(num_rows) => Ok(QueryResult::from_num_rows_affected(num_rows)),
+                                Err(e) => Err(Error::from(e)),
+                            },
+                        );
+
+                        Either::B(return_row_count_future)
+                    }
+                })
+        })
+}
 
 /// Generates the WHERE clause and a HashMap of column name : column type after taking foreign keys
 /// into account. Mutates the original AST.
@@ -242,22 +329,6 @@ pub fn validate_alias_identifier(identifier: &str) -> Result<Option<(&str, &str)
     validate_where_column(alias)?;
 
     Ok(Some((orig, alias)))
-}
-
-/// Converts a WHERE clause string into an Expr.
-pub fn where_clause_str_to_ast(clause: &str) -> Result<Option<Expr>, Error> {
-    let full_statement = ["SELECT * FROM a_table WHERE ", clause].join("");
-    let dialect = PostgreSqlDialect {};
-
-    // convert the statement into an AST, and then extract the "WHERE" portion of the AST
-    let mut parsed = Parser::parse_sql(&dialect, full_statement)?;
-    let statement_ast = parsed.remove(0);
-
-    if let Statement::Query(query_box) = statement_ast {
-        return Ok(extract_where_ast_from_setexpr(query_box.to_owned().body));
-    }
-
-    Ok(None)
 }
 
 /// Finds and returns the Expr that represents the WHERE clause of a SELECT statement
@@ -667,25 +738,25 @@ mod validate_alias_identifier_tests {
 }
 
 #[cfg(test)]
-mod where_clause_str_to_ast_tests {
+mod conditions_params_to_ast_tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use sqlparser::ast::BinaryOperator;
 
     #[test]
     fn basic() {
-        let clause = "a > b";
+        let clause = "a > b".to_string();
         let expected = Expr::BinaryOp {
             left: Box::new(Expr::Identifier("a".to_string())),
             op: BinaryOperator::Gt,
             right: Box::new(Expr::Identifier("b".to_string())),
         };
-        assert_eq!(where_clause_str_to_ast(clause).unwrap().unwrap(), expected);
+        assert_eq!(conditions_params_to_ast(&Some(clause)).unwrap(), expected);
     }
 
     #[test]
     fn foreign_keys() {
-        let clause = "a.b > c";
+        let clause = "a.b > c".to_string();
         let expected = Expr::BinaryOp {
             left: Box::new(Expr::CompoundIdentifier(vec![
                 "a".to_string(),
@@ -694,24 +765,24 @@ mod where_clause_str_to_ast_tests {
             op: BinaryOperator::Gt,
             right: Box::new(Expr::Identifier("c".to_string())),
         };
-        assert_eq!(where_clause_str_to_ast(clause).unwrap().unwrap(), expected);
+        assert_eq!(conditions_params_to_ast(&Some(clause)).unwrap(), expected);
     }
 
     #[test]
     fn empty_string_returns_error() {
-        let clause = "";
-        assert!(where_clause_str_to_ast(clause).is_err());
+        let clause = "".to_string();
+        assert!(conditions_params_to_ast(&Some(clause)).is_err());
     }
 
     #[test]
     fn empty_parentheses_returns_err() {
-        let clause = "()";
-        assert!(where_clause_str_to_ast(clause).is_err());
+        let clause = "()".to_string();
+        assert!(conditions_params_to_ast(&Some(clause)).is_err());
     }
 
     #[test]
     fn invalid_clause_returns_err() {
-        let clause = "not valid WHERE syntax";
-        assert!(where_clause_str_to_ast(clause).is_err());
+        let clause = "not valid WHERE syntax".to_string();
+        assert!(conditions_params_to_ast(&Some(clause)).is_err());
     }
 }
