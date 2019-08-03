@@ -1,10 +1,13 @@
+mod foreign_keys;
+
+mod delete_table_rows;
+pub use self::delete_table_rows::delete_table_rows;
+
 mod insert_into_table;
 pub use self::insert_into_table::insert_into_table;
 
 mod select_all_tables;
 pub use select_all_tables::select_all_tables;
-
-mod foreign_keys;
 
 mod select_table_rows;
 pub use self::select_table_rows::select_table_rows;
@@ -25,5 +28,3 @@ pub mod postgres_types;
 pub mod query_types;
 
 pub mod utils;
-
-// pub fn delete_table_rows(conn: &Connection) {}

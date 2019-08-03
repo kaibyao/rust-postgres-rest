@@ -220,3 +220,40 @@ INSERT INTO public.player
   (3, 'Garrett Temple', 2),
   (4, 'Wilson Chandler', 2),
   (5, 'Russell Westbrook', 4);
+
+-- For testing DELETEs
+
+DROP TABLE IF EXISTS public.delete_a;
+DROP TABLE IF EXISTS public.delete_b;
+DROP TABLE IF EXISTS public.delete_simple;
+
+CREATE TABLE IF NOT EXISTS public.delete_b (
+  id BIGINT CONSTRAINT delete_b_id_key PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS public.delete_a (
+  id BIGINT CONSTRAINT delete_a_id_key PRIMARY KEY,
+  b_id BIGINT,
+  name TEXT
+);
+CREATE TABLE IF NOT EXISTS public.delete_simple (
+  id BIGINT CONSTRAINT delete_simple_id_key PRIMARY KEY
+);
+
+ALTER TABLE public.delete_a ADD CONSTRAINT delete_a_b_reference FOREIGN KEY (b_id) REFERENCES public.delete_b(id);
+
+INSERT INTO public.delete_b (id) VALUES
+  (1),
+  (2),
+  (3),
+  (4);
+
+INSERT INTO public.delete_a
+  (id, name, b_id)
+  VALUES
+  (1, 'a', 1),
+  (2, 'b', 2),
+  (3, 'c', 2),
+  (4, 'd', 3),
+  (5, 'e', 4);
+
+INSERT INTO public.delete_simple (id) VALUES (1), (2), (3);

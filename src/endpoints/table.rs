@@ -13,15 +13,41 @@ use serde_json::{json, Value};
 use crate::{
     db::connect,
     queries::{
-        insert_into_table, query_types, select_all_tables, select_table_rows, select_table_stats,
-        update_table_rows,
+        delete_table_rows, insert_into_table, query_types, select_all_tables, select_table_rows,
+        select_table_stats, update_table_rows,
     },
     stats_cache::StatsCacheMessage,
     AppState, Error,
 };
 use query_types::{
-    QueryParamsInsert, QueryParamsSelect, QueryParamsUpdate, RequestQueryStringParams,
+    QueryParamsDelete, QueryParamsInsert, QueryParamsSelect, QueryParamsUpdate,
+    RequestQueryStringParams,
 };
+
+/// Deletes table rows and optionally returns the column data in the deleted rows.
+pub fn delete_table(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+    query_string_params: web::Query<RequestQueryStringParams>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    let params = match QueryParamsDelete::from_http_request(&req, query_string_params.into_inner())
+    {
+        Ok(params) => params,
+        Err(e) => return Either::A(err(e)),
+    };
+
+    if params.confirm_delete.is_none() {
+        return Either::A(err(Error::generate_error(
+            "REQUIRED_PARAMETER_MISSING",
+            "URL query parameter `confirm_delete` is necessary for table row deletion.".to_string(),
+        )));
+    }
+
+    let delete_table_future = delete_table_rows(state.get_ref(), params)
+        .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)));
+
+    Either::B(delete_table_future)
+}
 
 /// Retrieves a list of table names that exist in the DB.
 pub fn get_all_table_names(
