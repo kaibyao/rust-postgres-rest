@@ -122,7 +122,19 @@ pub fn index() -> HttpResponse {
                 },
             }},
             "/sql": {
-                "POST": "Runs a raw SQL statement. (not implemented)",
+                "POST": {
+                    "description": "Runs a custom SQL query. !!DANGER!! Be very careful with how this endpoint is exposed.",
+                    "body": {
+                        "description": "An SQL query as a plain-text string (pass a Content-Type header value of `text/plain`).",
+                        "example": "SELECT * FROM a_table;"
+                    },
+                    "query_params": {
+                        "is_return_rows": {
+                            "default": null,
+                            "description": "Pass in this parameter in order to return row data. Note that this is also needed for SELECT statements to return rows. This is due to a limitation of the parser library we are using.",
+                        }
+                    }
+                },
             },
         });
     }
