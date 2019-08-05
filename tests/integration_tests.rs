@@ -6,7 +6,7 @@ use setup::{setup_db, start_web_server};
 
 use lazy_static::lazy_static;
 use pretty_assertions::assert_eq;
-use reqwest::{self, Client, Method, StatusCode};
+use reqwest::{self, header, Client, Method, StatusCode};
 use serde_json::{self, json, Value};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -1018,5 +1018,63 @@ fn delete_table_records_return_fk_column_alias() {
     let response_body: Value = res.json().unwrap();
 
     assert_eq!(response_body, json!([{ "b_id": 4 }]));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn execute_sql_incorrect_content_type() {
+    run_setup();
+
+    let url = ["http://", &SERVER_IP, ":", &NO_CACHE_PORT, "/api/sql"].join("");
+    let res = Client::new()
+        .request(Method::POST, &url)
+        .header(header::CONTENT_TYPE, "application/json")
+        .send()
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn execute_sql_simple() {
+    run_setup();
+
+    let url = ["http://", &SERVER_IP, ":", &NO_CACHE_PORT, "/api/sql"].join("");
+    let mut res = Client::new()
+        .request(Method::POST, &url)
+        .header(header::CONTENT_TYPE, "text/plain")
+        .body("SELECT * FROM company;")
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!({ "num_rows": 1 }));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn execute_sql_simple_return_rows() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/sql?is_return_rows",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::POST, &url)
+        .header(header::CONTENT_TYPE, "text/plain")
+        .body("SELECT * FROM company;")
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(
+        response_body,
+        json!([{ "id": 100, "name": "Stark Corporation" }])
+    );
     assert_eq!(res.status(), StatusCode::OK);
 }
