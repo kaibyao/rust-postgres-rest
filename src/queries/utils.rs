@@ -1,6 +1,6 @@
 use super::{
     foreign_keys::{fk_ast_nodes_from_where_ast, ForeignKeyReference},
-    postgres_types::{row_to_row_values, ColumnTypeValue, RowValues},
+    postgres_types::{row_to_row_values, TypedColumnValue, RowValues},
     query_types::QueryResult,
     select_table_stats::TableColumnStat,
 };
@@ -56,7 +56,7 @@ pub fn conditions_params_to_ast(clause_opt: &Option<String>) -> Result<Expr, Err
 pub fn generate_query_result_from_db(
     db_url: &str,
     statement_str: String,
-    prepared_values: Vec<ColumnTypeValue>,
+    prepared_values: Vec<TypedColumnValue>,
     is_return_rows: bool,
 ) -> impl Future<Item = QueryResult, Error = Error> {
     connect(&db_url)

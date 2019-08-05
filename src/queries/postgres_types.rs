@@ -52,12 +52,12 @@ impl ToSql for MacAddress {
 #[serde(untagged)]
 /// Represents a single column value for a returned row. We have to have an Enum describing column
 /// data that is non-nullable vs nullable
-pub enum ColumnValue<T> {
+pub enum IsNullColumnValue<T> {
     Nullable(Option<T>),
     NotNullable(T),
 }
 
-impl<'a, T> FromSql<'a> for ColumnValue<T>
+impl<'a, T> FromSql<'a> for IsNullColumnValue<T>
 where
     T: FromSql<'a>,
 {
@@ -69,11 +69,11 @@ where
         ty: &Type,
         raw: &'a [u8],
     ) -> Result<Self, Box<dyn StdError + 'static + Send + Sync>> {
-        <T as FromSql>::from_sql(ty, raw).map(ColumnValue::NotNullable)
+        <T as FromSql>::from_sql(ty, raw).map(IsNullColumnValue::NotNullable)
     }
 
     fn from_sql_null(_: &Type) -> Result<Self, Box<dyn StdError + Sync + Send>> {
-        Ok(ColumnValue::Nullable(None))
+        Ok(IsNullColumnValue::Nullable(None))
     }
 
     fn from_sql_nullable(
@@ -87,7 +87,7 @@ where
     }
 }
 
-impl<T> ToSql for ColumnValue<T>
+impl<T> ToSql for IsNullColumnValue<T>
 where
     T: ToSql,
 {
@@ -97,8 +97,8 @@ where
         out: &mut Vec<u8>,
     ) -> Result<IsNull, Box<dyn StdError + 'static + Send + Sync>> {
         match self {
-            ColumnValue::Nullable(val_opt) => val_opt.to_sql(ty, out),
-            ColumnValue::NotNullable(val) => val.to_sql(ty, out),
+            IsNullColumnValue::Nullable(val_opt) => val_opt.to_sql(ty, out),
+            IsNullColumnValue::NotNullable(val) => val.to_sql(ty, out),
         }
     }
 
@@ -112,57 +112,57 @@ where
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 /// Represents a postgres column's type
-pub enum ColumnTypeValue {
-    BigInt(ColumnValue<i64>),
-    Bool(ColumnValue<bool>),
-    ByteA(ColumnValue<Vec<u8>>),
-    Char(ColumnValue<String>), // apparently it's a bad practice to use char(n)
-    Citext(ColumnValue<String>),
-    Date(ColumnValue<NaiveDate>),
-    Decimal(ColumnValue<Decimal>),
-    Float8(ColumnValue<f64>),
-    Int(ColumnValue<i32>),
-    Json(ColumnValue<JsonValue>),
-    JsonB(ColumnValue<JsonValue>),
-    MacAddr(ColumnValue<MacAddress>),
-    Name(ColumnValue<String>),
-    Oid(ColumnValue<u32>),
-    Real(ColumnValue<f32>),
-    SmallInt(ColumnValue<i16>),
-    Text(ColumnValue<String>),
-    Time(ColumnValue<NaiveTime>),
-    Timestamp(ColumnValue<NaiveDateTime>),
-    TimestampTz(ColumnValue<DateTime<Utc>>),
-    // Unknown(ColumnValue<String>),
-    Uuid(ColumnValue<Uuid>),
-    VarChar(ColumnValue<String>),
+pub enum TypedColumnValue {
+    BigInt(IsNullColumnValue<i64>),
+    Bool(IsNullColumnValue<bool>),
+    ByteA(IsNullColumnValue<Vec<u8>>),
+    Char(IsNullColumnValue<String>), // apparently it's a bad practice to use char(n)
+    Citext(IsNullColumnValue<String>),
+    Date(IsNullColumnValue<NaiveDate>),
+    Decimal(IsNullColumnValue<Decimal>),
+    Float8(IsNullColumnValue<f64>),
+    Int(IsNullColumnValue<i32>),
+    Json(IsNullColumnValue<JsonValue>),
+    JsonB(IsNullColumnValue<JsonValue>),
+    MacAddr(IsNullColumnValue<MacAddress>),
+    Name(IsNullColumnValue<String>),
+    Oid(IsNullColumnValue<u32>),
+    Real(IsNullColumnValue<f32>),
+    SmallInt(IsNullColumnValue<i16>),
+    Text(IsNullColumnValue<String>),
+    Time(IsNullColumnValue<NaiveTime>),
+    Timestamp(IsNullColumnValue<NaiveDateTime>),
+    TimestampTz(IsNullColumnValue<DateTime<Utc>>),
+    // Unknown(IsNullColumnValue<String>),
+    Uuid(IsNullColumnValue<Uuid>),
+    VarChar(IsNullColumnValue<String>),
 }
 
-impl<'a> FromSql<'a> for ColumnTypeValue {
+impl<'a> FromSql<'a> for TypedColumnValue {
     fn accepts(ty: &Type) -> bool {
         match ty.name() {
-            "int8" => <ColumnValue<i64> as FromSql>::accepts(ty),
-            "bool" => <ColumnValue<bool> as FromSql>::accepts(ty),
-            "bytea" => <ColumnValue<Vec<u8>> as FromSql>::accepts(ty),
-            "bpchar" => <ColumnValue<String> as FromSql>::accepts(ty),
-            "citext" => <ColumnValue<String> as FromSql>::accepts(ty),
-            "date" => <ColumnValue<NaiveDate> as FromSql>::accepts(ty),
-            "float4" => <ColumnValue<f32> as FromSql>::accepts(ty),
-            "float8" => <ColumnValue<f64> as FromSql>::accepts(ty),
-            "int2" => <ColumnValue<i16> as FromSql>::accepts(ty),
-            "int4" => <ColumnValue<i32> as FromSql>::accepts(ty),
-            "json" => <ColumnValue<JsonValue> as FromSql>::accepts(ty),
-            "jsonb" => <ColumnValue<JsonValue> as FromSql>::accepts(ty),
-            "macaddr" => <ColumnValue<MacAddress> as FromSql>::accepts(ty),
-            "name" => <ColumnValue<String> as FromSql>::accepts(ty),
-            "numeric" => <ColumnValue<Decimal> as FromSql>::accepts(ty),
-            "oid" => <ColumnValue<u32> as FromSql>::accepts(ty),
-            "text" => <ColumnValue<String> as FromSql>::accepts(ty),
-            "time" => <ColumnValue<NaiveTime> as FromSql>::accepts(ty),
-            "timestamp" => <ColumnValue<NaiveDateTime> as FromSql>::accepts(ty),
-            "timestamptz" => <ColumnValue<DateTime<Utc>> as FromSql>::accepts(ty),
-            "uuid" => <ColumnValue<Uuid> as FromSql>::accepts(ty),
-            "varchar" => <ColumnValue<String> as FromSql>::accepts(ty),
+            "int8" => <IsNullColumnValue<i64> as FromSql>::accepts(ty),
+            "bool" => <IsNullColumnValue<bool> as FromSql>::accepts(ty),
+            "bytea" => <IsNullColumnValue<Vec<u8>> as FromSql>::accepts(ty),
+            "bpchar" => <IsNullColumnValue<String> as FromSql>::accepts(ty),
+            "citext" => <IsNullColumnValue<String> as FromSql>::accepts(ty),
+            "date" => <IsNullColumnValue<NaiveDate> as FromSql>::accepts(ty),
+            "float4" => <IsNullColumnValue<f32> as FromSql>::accepts(ty),
+            "float8" => <IsNullColumnValue<f64> as FromSql>::accepts(ty),
+            "int2" => <IsNullColumnValue<i16> as FromSql>::accepts(ty),
+            "int4" => <IsNullColumnValue<i32> as FromSql>::accepts(ty),
+            "json" => <IsNullColumnValue<JsonValue> as FromSql>::accepts(ty),
+            "jsonb" => <IsNullColumnValue<JsonValue> as FromSql>::accepts(ty),
+            "macaddr" => <IsNullColumnValue<MacAddress> as FromSql>::accepts(ty),
+            "name" => <IsNullColumnValue<String> as FromSql>::accepts(ty),
+            "numeric" => <IsNullColumnValue<Decimal> as FromSql>::accepts(ty),
+            "oid" => <IsNullColumnValue<u32> as FromSql>::accepts(ty),
+            "text" => <IsNullColumnValue<String> as FromSql>::accepts(ty),
+            "time" => <IsNullColumnValue<NaiveTime> as FromSql>::accepts(ty),
+            "timestamp" => <IsNullColumnValue<NaiveDateTime> as FromSql>::accepts(ty),
+            "timestamptz" => <IsNullColumnValue<DateTime<Utc>> as FromSql>::accepts(ty),
+            "uuid" => <IsNullColumnValue<Uuid> as FromSql>::accepts(ty),
+            "varchar" => <IsNullColumnValue<String> as FromSql>::accepts(ty),
             &_ => false,
         }
     }
@@ -172,68 +172,72 @@ impl<'a> FromSql<'a> for ColumnTypeValue {
         raw: &'a [u8],
     ) -> Result<Self, Box<dyn StdError + 'static + Send + Sync>> {
         match ty.name() {
-            "int8" => Ok(Self::BigInt(<ColumnValue<i64> as FromSql>::from_sql(
+            "int8" => Ok(Self::BigInt(<IsNullColumnValue<i64> as FromSql>::from_sql(
                 ty, raw,
             )?)),
-            "bool" => Ok(Self::Bool(<ColumnValue<bool> as FromSql>::from_sql(
+            "bool" => Ok(Self::Bool(<IsNullColumnValue<bool> as FromSql>::from_sql(
                 ty, raw,
             )?)),
-            "bytea" => Ok(Self::ByteA(<ColumnValue<Vec<u8>> as FromSql>::from_sql(
-                ty, raw,
-            )?)),
-            "bpchar" => Ok(Self::Char(<ColumnValue<String> as FromSql>::from_sql(
-                ty, raw,
-            )?)),
-            "citext" => Ok(Self::Citext(<ColumnValue<String> as FromSql>::from_sql(
-                ty, raw,
-            )?)),
-            "date" => Ok(Self::Date(<ColumnValue<NaiveDate> as FromSql>::from_sql(
-                ty, raw,
-            )?)),
-            "float4" => Ok(Self::Real(<ColumnValue<f32> as FromSql>::from_sql(
-                ty, raw,
-            )?)),
-            "float8" => Ok(Self::Float8(<ColumnValue<f64> as FromSql>::from_sql(
-                ty, raw,
-            )?)),
-            "int2" => Ok(Self::SmallInt(<ColumnValue<i16> as FromSql>::from_sql(
-                ty, raw,
-            )?)),
-            "int4" => Ok(Self::Int(<ColumnValue<i32> as FromSql>::from_sql(ty, raw)?)),
-            "json" => Ok(Self::Json(<ColumnValue<JsonValue> as FromSql>::from_sql(
-                ty, raw,
-            )?)),
-            "jsonb" => Ok(Self::JsonB(<ColumnValue<JsonValue> as FromSql>::from_sql(
-                ty, raw,
-            )?)),
-            "macaddr" => Ok(Self::MacAddr(
-                <ColumnValue<MacAddress> as FromSql>::from_sql(ty, raw)?,
+            "bytea" => Ok(Self::ByteA(
+                <IsNullColumnValue<Vec<u8>> as FromSql>::from_sql(ty, raw)?,
             )),
-            "name" => Ok(Self::Name(<ColumnValue<String> as FromSql>::from_sql(
+            "bpchar" => Ok(Self::Char(
+                <IsNullColumnValue<String> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "citext" => Ok(Self::Citext(
+                <IsNullColumnValue<String> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "date" => Ok(Self::Date(
+                <IsNullColumnValue<NaiveDate> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "float4" => Ok(Self::Real(<IsNullColumnValue<f32> as FromSql>::from_sql(
                 ty, raw,
             )?)),
-            "numeric" => Ok(Self::Decimal(<ColumnValue<Decimal> as FromSql>::from_sql(
+            "float8" => Ok(Self::Float8(<IsNullColumnValue<f64> as FromSql>::from_sql(
                 ty, raw,
             )?)),
-            "oid" => Ok(Self::Oid(<ColumnValue<u32> as FromSql>::from_sql(ty, raw)?)),
-            "text" => Ok(Self::Text(<ColumnValue<String> as FromSql>::from_sql(
+            "int2" => Ok(Self::SmallInt(
+                <IsNullColumnValue<i16> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "int4" => Ok(Self::Int(<IsNullColumnValue<i32> as FromSql>::from_sql(
                 ty, raw,
             )?)),
-            "time" => Ok(Self::Time(<ColumnValue<NaiveTime> as FromSql>::from_sql(
+            "json" => Ok(Self::Json(
+                <IsNullColumnValue<JsonValue> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "jsonb" => Ok(Self::JsonB(
+                <IsNullColumnValue<JsonValue> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "macaddr" => Ok(Self::MacAddr(
+                <IsNullColumnValue<MacAddress> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "name" => Ok(Self::Name(
+                <IsNullColumnValue<String> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "numeric" => Ok(Self::Decimal(
+                <IsNullColumnValue<Decimal> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "oid" => Ok(Self::Oid(<IsNullColumnValue<u32> as FromSql>::from_sql(
                 ty, raw,
             )?)),
+            "text" => Ok(Self::Text(
+                <IsNullColumnValue<String> as FromSql>::from_sql(ty, raw)?,
+            )),
+            "time" => Ok(Self::Time(
+                <IsNullColumnValue<NaiveTime> as FromSql>::from_sql(ty, raw)?,
+            )),
             "timestamp" => Ok(Self::Timestamp(
-                <ColumnValue<NaiveDateTime> as FromSql>::from_sql(ty, raw)?,
+                <IsNullColumnValue<NaiveDateTime> as FromSql>::from_sql(ty, raw)?,
             )),
             "timestamptz" => Ok(Self::TimestampTz(
-                <ColumnValue<DateTime<Utc>> as FromSql>::from_sql(ty, raw)?,
+                <IsNullColumnValue<DateTime<Utc>> as FromSql>::from_sql(ty, raw)?,
             )),
-            "uuid" => Ok(Self::Uuid(<ColumnValue<Uuid> as FromSql>::from_sql(
+            "uuid" => Ok(Self::Uuid(<IsNullColumnValue<Uuid> as FromSql>::from_sql(
                 ty, raw,
             )?)),
-            "varchar" => Ok(Self::VarChar(<ColumnValue<String> as FromSql>::from_sql(
-                ty, raw,
-            )?)),
+            "varchar" => Ok(Self::VarChar(
+                <IsNullColumnValue<String> as FromSql>::from_sql(ty, raw)?,
+            )),
             &_ => Err(Box::new(
                 Error::generate_error("TABLE_COLUMN_TYPE_NOT_FOUND", ty.name().to_string())
                     .compat(),
@@ -242,7 +246,7 @@ impl<'a> FromSql<'a> for ColumnTypeValue {
     }
 
     fn from_sql_null(_: &Type) -> Result<Self, Box<dyn StdError + Sync + Send>> {
-        Ok(Self::BigInt(ColumnValue::Nullable(None)))
+        Ok(Self::BigInt(IsNullColumnValue::Nullable(None)))
     }
 
     fn from_sql_nullable(
@@ -256,7 +260,7 @@ impl<'a> FromSql<'a> for ColumnTypeValue {
     }
 }
 
-impl ToSql for ColumnTypeValue {
+impl ToSql for TypedColumnValue {
     fn to_sql(
         &self,
         ty: &Type,
@@ -290,28 +294,28 @@ impl ToSql for ColumnTypeValue {
 
     fn accepts(ty: &Type) -> bool {
         match ty.name() {
-            "int8" => <ColumnValue<i64> as ToSql>::accepts(ty),
-            "bool" => <ColumnValue<bool> as ToSql>::accepts(ty),
-            "bytea" => <ColumnValue<Vec<u8>> as ToSql>::accepts(ty),
-            "bpchar" => <ColumnValue<String> as ToSql>::accepts(ty),
-            "citext" => <ColumnValue<String> as ToSql>::accepts(ty),
-            "date" => <ColumnValue<NaiveDate> as ToSql>::accepts(ty),
-            "float4" => <ColumnValue<f32> as ToSql>::accepts(ty),
-            "float8" => <ColumnValue<f64> as ToSql>::accepts(ty),
-            "int2" => <ColumnValue<i16> as ToSql>::accepts(ty),
-            "int4" => <ColumnValue<i32> as ToSql>::accepts(ty),
-            "json" => <ColumnValue<JsonValue> as ToSql>::accepts(ty),
-            "jsonb" => <ColumnValue<JsonValue> as ToSql>::accepts(ty),
-            "macaddr" => <ColumnValue<MacAddress> as ToSql>::accepts(ty),
-            "name" => <ColumnValue<String> as ToSql>::accepts(ty),
-            "numeric" => <ColumnValue<Decimal> as ToSql>::accepts(ty),
-            "oid" => <ColumnValue<u32> as ToSql>::accepts(ty),
-            "text" => <ColumnValue<String> as ToSql>::accepts(ty),
-            "time" => <ColumnValue<NaiveTime> as ToSql>::accepts(ty),
-            "timestamp" => <ColumnValue<NaiveDateTime> as ToSql>::accepts(ty),
-            "timestamptz" => <ColumnValue<DateTime<Utc>> as ToSql>::accepts(ty),
-            "uuid" => <ColumnValue<Uuid> as ToSql>::accepts(ty),
-            "varchar" => <ColumnValue<String> as ToSql>::accepts(ty),
+            "int8" => <IsNullColumnValue<i64> as ToSql>::accepts(ty),
+            "bool" => <IsNullColumnValue<bool> as ToSql>::accepts(ty),
+            "bytea" => <IsNullColumnValue<Vec<u8>> as ToSql>::accepts(ty),
+            "bpchar" => <IsNullColumnValue<String> as ToSql>::accepts(ty),
+            "citext" => <IsNullColumnValue<String> as ToSql>::accepts(ty),
+            "date" => <IsNullColumnValue<NaiveDate> as ToSql>::accepts(ty),
+            "float4" => <IsNullColumnValue<f32> as ToSql>::accepts(ty),
+            "float8" => <IsNullColumnValue<f64> as ToSql>::accepts(ty),
+            "int2" => <IsNullColumnValue<i16> as ToSql>::accepts(ty),
+            "int4" => <IsNullColumnValue<i32> as ToSql>::accepts(ty),
+            "json" => <IsNullColumnValue<JsonValue> as ToSql>::accepts(ty),
+            "jsonb" => <IsNullColumnValue<JsonValue> as ToSql>::accepts(ty),
+            "macaddr" => <IsNullColumnValue<MacAddress> as ToSql>::accepts(ty),
+            "name" => <IsNullColumnValue<String> as ToSql>::accepts(ty),
+            "numeric" => <IsNullColumnValue<Decimal> as ToSql>::accepts(ty),
+            "oid" => <IsNullColumnValue<u32> as ToSql>::accepts(ty),
+            "text" => <IsNullColumnValue<String> as ToSql>::accepts(ty),
+            "time" => <IsNullColumnValue<NaiveTime> as ToSql>::accepts(ty),
+            "timestamp" => <IsNullColumnValue<NaiveDateTime> as ToSql>::accepts(ty),
+            "timestamptz" => <IsNullColumnValue<DateTime<Utc>> as ToSql>::accepts(ty),
+            "uuid" => <IsNullColumnValue<Uuid> as ToSql>::accepts(ty),
+            "varchar" => <IsNullColumnValue<String> as ToSql>::accepts(ty),
             &_ => false,
         }
     }
@@ -319,7 +323,7 @@ impl ToSql for ColumnTypeValue {
     to_sql_checked!();
 }
 
-impl ColumnTypeValue {
+impl TypedColumnValue {
     /// Parses a Value and returns the Rust-Typed version.
     pub fn from_json(column_type: &str, value: &JsonValue) -> Result<Self, Error> {
         match column_type {
@@ -354,137 +358,145 @@ impl ColumnTypeValue {
 
     pub fn from_parsed_sql_value(column_type: &str, value: ParsedSQLValue) -> Result<Self, Error> {
         match column_type {
-            "int8" => Ok(ColumnTypeValue::BigInt(match value {
-                ParsedSQLValue::Int8(val) => ColumnValue::NotNullable(val),
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+            "int8" => Ok(TypedColumnValue::BigInt(match value {
+                ParsedSQLValue::Int8(val) => IsNullColumnValue::NotNullable(val),
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to int8.", value),
             })),
-            "bool" => Ok(ColumnTypeValue::Bool(match value {
-                ParsedSQLValue::Boolean(val) => ColumnValue::NotNullable(val),
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+            "bool" => Ok(TypedColumnValue::Bool(match value {
+                ParsedSQLValue::Boolean(val) => IsNullColumnValue::NotNullable(val),
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to bool.", value),
             })),
-            "bytea" => Ok(ColumnTypeValue::ByteA(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
-                ParsedSQLValue::String(val) => ColumnValue::NotNullable(val.into_bytes()),
+            "bytea" => Ok(TypedColumnValue::ByteA(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => IsNullColumnValue::NotNullable(val.into_bytes()),
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to bytea.", value),
             })),
-            "bpchar" => Ok(ColumnTypeValue::Char(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
-                ParsedSQLValue::String(val) => ColumnValue::NotNullable(val),
+            "bpchar" => Ok(TypedColumnValue::Char(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => IsNullColumnValue::NotNullable(val),
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to bpchar.", value),
             })),
-            "citext" => Ok(ColumnTypeValue::Citext(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
-                ParsedSQLValue::String(val) => ColumnValue::NotNullable(val),
+            "citext" => Ok(TypedColumnValue::Citext(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => IsNullColumnValue::NotNullable(val),
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to citext.", value),
             })),
-            "date" => Ok(ColumnTypeValue::Date(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
-                ParsedSQLValue::String(val) => ColumnValue::NotNullable(NaiveDate::from_str(&val)?),
+            "date" => Ok(TypedColumnValue::Date(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => {
+                    IsNullColumnValue::NotNullable(NaiveDate::from_str(&val)?)
+                }
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to date.", value),
             })),
-            "float4" => Ok(ColumnTypeValue::Real(match value {
-                ParsedSQLValue::Float(val) => ColumnValue::NotNullable(val as f32),
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+            "float4" => Ok(TypedColumnValue::Real(match value {
+                ParsedSQLValue::Float(val) => IsNullColumnValue::NotNullable(val as f32),
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to float4.", value),
             })),
-            "float8" => Ok(ColumnTypeValue::Float8(match value {
-                ParsedSQLValue::Float(val) => ColumnValue::NotNullable(val),
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+            "float8" => Ok(TypedColumnValue::Float8(match value {
+                ParsedSQLValue::Float(val) => IsNullColumnValue::NotNullable(val),
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to float8.", value),
             })),
-            "int2" => Ok(ColumnTypeValue::SmallInt(match value {
-                ParsedSQLValue::Int8(val) => ColumnValue::NotNullable(val as i16),
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+            "int2" => Ok(TypedColumnValue::SmallInt(match value {
+                ParsedSQLValue::Int8(val) => IsNullColumnValue::NotNullable(val as i16),
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to int2.", value),
             })),
-            "int4" => Ok(ColumnTypeValue::Int(match value {
-                ParsedSQLValue::Int8(val) => ColumnValue::NotNullable(val as i32),
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+            "int4" => Ok(TypedColumnValue::Int(match value {
+                ParsedSQLValue::Int8(val) => IsNullColumnValue::NotNullable(val as i32),
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to int4.", value),
             })),
-            "json" => Ok(ColumnTypeValue::Json(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+            "json" => Ok(TypedColumnValue::Json(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
                 ParsedSQLValue::String(val) => {
-                    ColumnValue::NotNullable(serde_json::from_str(&val)?)
+                    IsNullColumnValue::NotNullable(serde_json::from_str(&val)?)
                 }
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to json.", value),
             })),
-            "jsonb" => Ok(ColumnTypeValue::JsonB(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+            "jsonb" => Ok(TypedColumnValue::JsonB(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
                 ParsedSQLValue::String(val) => {
-                    ColumnValue::NotNullable(serde_json::from_str(&val)?)
+                    IsNullColumnValue::NotNullable(serde_json::from_str(&val)?)
                 }
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to json.", value),
             })),
-            "macaddr" => Ok(ColumnTypeValue::MacAddr(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+            "macaddr" => Ok(TypedColumnValue::MacAddr(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
                 ParsedSQLValue::String(val) => {
-                    ColumnValue::NotNullable(MacAddress(Eui48MacAddress::from_str(&val)?))
+                    IsNullColumnValue::NotNullable(MacAddress(Eui48MacAddress::from_str(&val)?))
                 }
                 _ => unimplemented!(
                     "Cannot convert from ParsedSQLValue: `{}` to macaddr.",
                     value
                 ),
             })),
-            "name" => Ok(ColumnTypeValue::Name(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
-                ParsedSQLValue::String(val) => ColumnValue::NotNullable(val),
+            "name" => Ok(TypedColumnValue::Name(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => IsNullColumnValue::NotNullable(val),
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to name.", value),
             })),
-            "numeric" => Ok(ColumnTypeValue::Decimal(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
-                ParsedSQLValue::String(val) => ColumnValue::NotNullable(Decimal::from_str(&val)?),
+            "numeric" => Ok(TypedColumnValue::Decimal(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => {
+                    IsNullColumnValue::NotNullable(Decimal::from_str(&val)?)
+                }
                 _ => unimplemented!(
                     "Cannot convert from ParsedSQLValue: `{}` to numeric.",
                     value
                 ),
             })),
-            "oid" => Ok(ColumnTypeValue::Oid(match value {
-                ParsedSQLValue::Int8(val) => ColumnValue::NotNullable(val as u32),
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+            "oid" => Ok(TypedColumnValue::Oid(match value {
+                ParsedSQLValue::Int8(val) => IsNullColumnValue::NotNullable(val as u32),
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to oid.", value),
             })),
-            "text" => Ok(ColumnTypeValue::Text(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
-                ParsedSQLValue::String(val) => ColumnValue::NotNullable(val),
+            "text" => Ok(TypedColumnValue::Text(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => IsNullColumnValue::NotNullable(val),
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to text.", value),
             })),
-            "time" => Ok(ColumnTypeValue::Time(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
-                ParsedSQLValue::String(val) => ColumnValue::NotNullable(NaiveTime::from_str(&val)?),
+            "time" => Ok(TypedColumnValue::Time(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => {
+                    IsNullColumnValue::NotNullable(NaiveTime::from_str(&val)?)
+                }
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to time.", value),
             })),
-            "timestamp" => Ok(ColumnTypeValue::Timestamp(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+            "timestamp" => Ok(TypedColumnValue::Timestamp(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
                 ParsedSQLValue::String(val) => {
-                    ColumnValue::NotNullable(NaiveDateTime::from_str(&val)?)
+                    IsNullColumnValue::NotNullable(NaiveDateTime::from_str(&val)?)
                 }
                 _ => unimplemented!(
                     "Cannot convert from ParsedSQLValue: `{}` to timestamp.",
                     value
                 ),
             })),
-            "timestamptz" => Ok(ColumnTypeValue::TimestampTz(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+            "timestamptz" => Ok(TypedColumnValue::TimestampTz(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
                 ParsedSQLValue::String(val) => {
                     let timestamp = DateTime::from_str(&val)?;
-                    ColumnValue::NotNullable(timestamp)
+                    IsNullColumnValue::NotNullable(timestamp)
                 }
                 _ => unimplemented!(
                     "Cannot convert from ParsedSQLValue: `{}` to timestamptz.",
                     value
                 ),
             })),
-            "uuid" => Ok(ColumnTypeValue::Uuid(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
-                ParsedSQLValue::String(val) => ColumnValue::NotNullable(Uuid::from_str(&val)?),
+            "uuid" => Ok(TypedColumnValue::Uuid(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => {
+                    IsNullColumnValue::NotNullable(Uuid::from_str(&val)?)
+                }
                 _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to uuid.", value),
             })),
-            "varchar" => Ok(ColumnTypeValue::VarChar(match value {
-                ParsedSQLValue::Null => ColumnValue::Nullable(None),
-                ParsedSQLValue::String(val) => ColumnValue::NotNullable(val),
+            "varchar" => Ok(TypedColumnValue::VarChar(match value {
+                ParsedSQLValue::Null => IsNullColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => IsNullColumnValue::NotNullable(val),
                 _ => unimplemented!(
                     "Cannot convert from ParsedSQLValue: `{}` to varchar.",
                     value
@@ -498,13 +510,13 @@ impl ColumnTypeValue {
     }
 
     /// Parses a given AST and returns a tuple: (String [the converted expression that uses PREPARE
-    /// parameters], Vec<ColumnTypeValue>).
+    /// parameters], Vec<TypedColumnValue>).
     pub fn generate_prepared_statement_from_ast_expr(
         ast: &Expr,
         table: &str,
         column_types: &HashMap<String, &'static str>,
         starting_pos: Option<&mut usize>,
-    ) -> Result<(String, Vec<ColumnTypeValue>), Error> {
+    ) -> Result<(String, Vec<TypedColumnValue>), Error> {
         let mut ast = ast.clone();
         // mutates `ast`
         let prepared_values =
@@ -520,7 +532,7 @@ impl ColumnTypeValue {
         table: &str,
         column_types: &HashMap<String, &'static str>,
         prepared_param_pos_opt: Option<&mut usize>,
-    ) -> Result<Vec<ColumnTypeValue>, Error> {
+    ) -> Result<Vec<TypedColumnValue>, Error> {
         let mut prepared_statement_values = vec![];
         let mut default_pos = 1;
         let prepared_param_pos = if let Some(pos) = prepared_param_pos_opt {
@@ -754,14 +766,14 @@ impl ColumnTypeValue {
     }
 
     /// Attempts to swap a Value with a prepared parameter string ($1, $2, etc.) and extract that
-    /// value as a ColumnTypeValue.
+    /// value as a TypedColumnValue.
     fn attempt_prepared_value_extraction(
         table: &str,
         column_types: &HashMap<String, &'static str>,
         prepared_param_pos: &mut usize,
         column_name_opt: &Option<String>,
         expr: &mut Expr,
-        prepared_statement_values: &mut Vec<ColumnTypeValue>,
+        prepared_statement_values: &mut Vec<TypedColumnValue>,
     ) -> Result<Option<Expr>, Error> {
         let val_opt = ParsedSQLValue::attempt_extract_prepared_value_from_expr(expr);
 
@@ -788,7 +800,9 @@ impl ColumnTypeValue {
 
     fn convert_json_value_to_bigint(value: &JsonValue) -> Result<Self, Error> {
         match value.as_i64() {
-            Some(val) => Ok(ColumnTypeValue::BigInt(ColumnValue::NotNullable(val))),
+            Some(val) => Ok(TypedColumnValue::BigInt(IsNullColumnValue::NotNullable(
+                val,
+            ))),
             None => Err(Error::generate_error(
                 "INVALID_JSON_TYPE_CONVERSION",
                 format!("Value must be an integer: `{}`.", value),
@@ -798,7 +812,7 @@ impl ColumnTypeValue {
 
     fn convert_json_value_to_bool(value: &JsonValue) -> Result<Self, Error> {
         match value.as_bool() {
-            Some(val) => Ok(ColumnTypeValue::Bool(ColumnValue::NotNullable(val))),
+            Some(val) => Ok(TypedColumnValue::Bool(IsNullColumnValue::NotNullable(val))),
             None => Err(Error::generate_error(
                 "INVALID_JSON_TYPE_CONVERSION",
                 format!("Value must be boolean: `{}`.", value),
@@ -821,9 +835,9 @@ impl ColumnTypeValue {
                     .collect();
 
                 match bytea_conversion {
-                    Ok(bytea_vec) => {
-                        Ok(ColumnTypeValue::ByteA(ColumnValue::NotNullable(bytea_vec)))
-                    }
+                    Ok(bytea_vec) => Ok(TypedColumnValue::ByteA(IsNullColumnValue::NotNullable(
+                        bytea_vec,
+                    ))),
                     Err(e) => Err(e),
                 }
             }
@@ -836,7 +850,7 @@ impl ColumnTypeValue {
 
     fn convert_json_value_to_char(value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
-            Some(val) => Ok(ColumnTypeValue::Char(ColumnValue::NotNullable(
+            Some(val) => Ok(TypedColumnValue::Char(IsNullColumnValue::NotNullable(
                 val.to_string(),
             ))),
             None => Err(Error::generate_error(
@@ -848,7 +862,7 @@ impl ColumnTypeValue {
 
     fn convert_json_value_to_citext(value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
-            Some(val) => Ok(ColumnTypeValue::Citext(ColumnValue::NotNullable(
+            Some(val) => Ok(TypedColumnValue::Citext(IsNullColumnValue::NotNullable(
                 val.to_string(),
             ))),
             None => Err(Error::generate_error(
@@ -861,7 +875,7 @@ impl ColumnTypeValue {
     fn convert_json_value_to_date(value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match NaiveDate::from_str(val) {
-                Ok(date) => Ok(ColumnTypeValue::Date(ColumnValue::NotNullable(date))),
+                Ok(date) => Ok(TypedColumnValue::Date(IsNullColumnValue::NotNullable(date))),
                 Err(e) => Err(Error::generate_error(
                     "INVALID_JSON_TYPE_CONVERSION",
                     format!("Value must be a valid date: `{}`. Message: `{}`.", value, e),
@@ -877,7 +891,9 @@ impl ColumnTypeValue {
     fn convert_json_value_to_decimal(value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match Decimal::from_str(val) {
-                Ok(decimal) => Ok(ColumnTypeValue::Decimal(ColumnValue::NotNullable(decimal))),
+                Ok(decimal) => Ok(TypedColumnValue::Decimal(IsNullColumnValue::NotNullable(
+                    decimal,
+                ))),
                 Err(e) => Err(Error::generate_error(
                     "INVALID_JSON_TYPE_CONVERSION",
                     format!(
@@ -895,7 +911,7 @@ impl ColumnTypeValue {
 
     fn convert_json_value_to_float8(value: &JsonValue) -> Result<Self, Error> {
         match value.as_f64() {
-            Some(n) => Ok(ColumnTypeValue::Float8(ColumnValue::NotNullable(n))),
+            Some(n) => Ok(TypedColumnValue::Float8(IsNullColumnValue::NotNullable(n))),
             None => Err(Error::generate_error(
                 "INVALID_JSON_TYPE_CONVERSION",
                 format!("Value must be a floating number: `{}`.", value),
@@ -905,7 +921,9 @@ impl ColumnTypeValue {
 
     fn convert_json_value_to_int(value: &JsonValue) -> Result<Self, Error> {
         match value.as_i64() {
-            Some(n) => Ok(ColumnTypeValue::Int(ColumnValue::NotNullable(n as i32))),
+            Some(n) => Ok(TypedColumnValue::Int(IsNullColumnValue::NotNullable(
+                n as i32,
+            ))),
             None => Err(Error::generate_error(
                 "INVALID_JSON_TYPE_CONVERSION",
                 format!("Value must be an integer: `{}`.", value),
@@ -914,13 +932,13 @@ impl ColumnTypeValue {
     }
 
     fn convert_json_value_to_json(value: &JsonValue) -> Result<Self, Error> {
-        Ok(ColumnTypeValue::Json(ColumnValue::NotNullable(
+        Ok(TypedColumnValue::Json(IsNullColumnValue::NotNullable(
             value.clone(),
         )))
     }
 
     fn convert_json_value_to_jsonb(value: &JsonValue) -> Result<Self, Error> {
-        Ok(ColumnTypeValue::JsonB(ColumnValue::NotNullable(
+        Ok(TypedColumnValue::JsonB(IsNullColumnValue::NotNullable(
             value.clone(),
         )))
     }
@@ -928,7 +946,7 @@ impl ColumnTypeValue {
     fn convert_json_value_to_macaddr(value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match Eui48MacAddress::from_str(val) {
-                Ok(mac) => Ok(ColumnTypeValue::MacAddr(ColumnValue::NotNullable(
+                Ok(mac) => Ok(TypedColumnValue::MacAddr(IsNullColumnValue::NotNullable(
                     MacAddress(mac),
                 ))),
                 Err(e) => Err(Error::generate_error(
@@ -948,7 +966,7 @@ impl ColumnTypeValue {
 
     fn convert_json_value_to_name(value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
-            Some(val) => Ok(ColumnTypeValue::Name(ColumnValue::NotNullable(
+            Some(val) => Ok(TypedColumnValue::Name(IsNullColumnValue::NotNullable(
                 val.to_string(),
             ))),
             None => Err(Error::generate_error(
@@ -960,7 +978,9 @@ impl ColumnTypeValue {
 
     fn convert_json_value_to_oid(value: &JsonValue) -> Result<Self, Error> {
         match value.as_u64() {
-            Some(val) => Ok(ColumnTypeValue::Oid(ColumnValue::NotNullable(val as u32))),
+            Some(val) => Ok(TypedColumnValue::Oid(IsNullColumnValue::NotNullable(
+                val as u32,
+            ))),
             None => Err(Error::generate_error(
                 "INVALID_JSON_TYPE_CONVERSION",
                 format!("Value must be an unsigned integer: `{}`.", value),
@@ -970,7 +990,9 @@ impl ColumnTypeValue {
 
     fn convert_json_value_to_real(value: &JsonValue) -> Result<Self, Error> {
         match value.as_f64() {
-            Some(n) => Ok(ColumnTypeValue::Real(ColumnValue::NotNullable(n as f32))),
+            Some(n) => Ok(TypedColumnValue::Real(IsNullColumnValue::NotNullable(
+                n as f32,
+            ))),
             None => Err(Error::generate_error(
                 "INVALID_JSON_TYPE_CONVERSION",
                 format!("Value must be a floating number: `{}`.", value),
@@ -980,7 +1002,7 @@ impl ColumnTypeValue {
 
     fn convert_json_value_to_smallint(value: &JsonValue) -> Result<Self, Error> {
         match value.as_i64() {
-            Some(n) => Ok(ColumnTypeValue::SmallInt(ColumnValue::NotNullable(
+            Some(n) => Ok(TypedColumnValue::SmallInt(IsNullColumnValue::NotNullable(
                 n as i16,
             ))),
             None => Err(Error::generate_error(
@@ -992,7 +1014,7 @@ impl ColumnTypeValue {
 
     fn convert_json_value_to_text(value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
-            Some(val) => Ok(ColumnTypeValue::Text(ColumnValue::NotNullable(
+            Some(val) => Ok(TypedColumnValue::Text(IsNullColumnValue::NotNullable(
                 val.to_string(),
             ))),
             None => Err(Error::generate_error(
@@ -1005,7 +1027,7 @@ impl ColumnTypeValue {
     fn convert_json_value_to_time(value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match NaiveTime::from_str(val) {
-                Ok(time) => Ok(ColumnTypeValue::Time(ColumnValue::NotNullable(time))),
+                Ok(time) => Ok(TypedColumnValue::Time(IsNullColumnValue::NotNullable(time))),
                 Err(e) => Err(Error::generate_error(
                     "INVALID_JSON_TYPE_CONVERSION",
                     format!("Value must be a valid time: `{}`. Message: `{}`.", value, e),
@@ -1021,7 +1043,7 @@ impl ColumnTypeValue {
     fn convert_json_value_to_timestamp(value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match NaiveDateTime::from_str(val) {
-                Ok(timestamp) => Ok(ColumnTypeValue::Timestamp(ColumnValue::NotNullable(
+                Ok(timestamp) => Ok(TypedColumnValue::Timestamp(IsNullColumnValue::NotNullable(
                     timestamp,
                 ))),
                 Err(e) => Err(Error::generate_error(
@@ -1042,9 +1064,9 @@ impl ColumnTypeValue {
     fn convert_json_value_to_timestamptz(value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match DateTime::from_str(val) {
-                Ok(timestamptz) => Ok(ColumnTypeValue::TimestampTz(ColumnValue::NotNullable(
-                    timestamptz,
-                ))),
+                Ok(timestamptz) => Ok(TypedColumnValue::TimestampTz(
+                    IsNullColumnValue::NotNullable(timestamptz),
+                )),
                 Err(e) => Err(Error::generate_error(
                     "INVALID_JSON_TYPE_CONVERSION",
                     format!(
@@ -1063,7 +1085,9 @@ impl ColumnTypeValue {
     fn convert_json_value_to_uuid(value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
             Some(val) => match Uuid::parse_str(val) {
-                Ok(uuid_val) => Ok(ColumnTypeValue::Uuid(ColumnValue::NotNullable(uuid_val))),
+                Ok(uuid_val) => Ok(TypedColumnValue::Uuid(IsNullColumnValue::NotNullable(
+                    uuid_val,
+                ))),
                 Err(e) => Err(Error::generate_error(
                     "INVALID_JSON_TYPE_CONVERSION",
                     format!("Value must be a valid UUID: `{}`. Message: `{}`.", value, e),
@@ -1078,7 +1102,7 @@ impl ColumnTypeValue {
 
     fn convert_json_value_to_varchar(value: &JsonValue) -> Result<Self, Error> {
         match value.as_str() {
-            Some(val) => Ok(ColumnTypeValue::VarChar(ColumnValue::NotNullable(
+            Some(val) => Ok(TypedColumnValue::VarChar(IsNullColumnValue::NotNullable(
                 val.to_string(),
             ))),
             None => Err(Error::generate_error(
@@ -1090,7 +1114,7 @@ impl ColumnTypeValue {
 }
 
 /// A HashMap of column names and their values for a single table row.
-pub type RowValues = HashMap<String, ColumnTypeValue>;
+pub type RowValues = HashMap<String, TypedColumnValue>;
 
 /// Analyzes a table postgres row and returns the Rust-equivalent value.
 pub fn row_to_row_values(row: &Row) -> Result<RowValues, Error> {
@@ -1101,36 +1125,36 @@ pub fn row_to_row_values(row: &Row) -> Result<RowValues, Error> {
         row_values.insert(
             column.name().to_string(),
             match column_type_name {
-                "int8" => ColumnTypeValue::BigInt(row.get(i)),
-                "bool" => ColumnTypeValue::Bool(row.get(i)),
+                "int8" => TypedColumnValue::BigInt(row.get(i)),
+                "bool" => TypedColumnValue::Bool(row.get(i)),
                 "bytea" => {
                     // byte array (binary)
-                    ColumnTypeValue::ByteA(row.get(i))
+                    TypedColumnValue::ByteA(row.get(i))
                 }
-                "bpchar" => ColumnTypeValue::Char(row.get(i)), // char
-                "citext" => ColumnTypeValue::Citext(row.get(i)),
-                "date" => ColumnTypeValue::Date(row.get(i)),
-                "float4" => ColumnTypeValue::Real(row.get(i)),
-                "float8" => ColumnTypeValue::Float8(row.get(i)),
-                "int2" => ColumnTypeValue::SmallInt(row.get(i)),
-                "int4" => ColumnTypeValue::Int(row.get(i)), // int
-                "json" => ColumnTypeValue::Json(row.get(i)),
-                "jsonb" => ColumnTypeValue::JsonB(row.get(i)),
-                "macaddr" => ColumnTypeValue::MacAddr(row.get(i)),
-                "name" => ColumnTypeValue::Name(row.get(i)),
+                "bpchar" => TypedColumnValue::Char(row.get(i)), // char
+                "citext" => TypedColumnValue::Citext(row.get(i)),
+                "date" => TypedColumnValue::Date(row.get(i)),
+                "float4" => TypedColumnValue::Real(row.get(i)),
+                "float8" => TypedColumnValue::Float8(row.get(i)),
+                "int2" => TypedColumnValue::SmallInt(row.get(i)),
+                "int4" => TypedColumnValue::Int(row.get(i)), // int
+                "json" => TypedColumnValue::Json(row.get(i)),
+                "jsonb" => TypedColumnValue::JsonB(row.get(i)),
+                "macaddr" => TypedColumnValue::MacAddr(row.get(i)),
+                "name" => TypedColumnValue::Name(row.get(i)),
                 // using rust-decimal per discussion at https://www.reddit.com/r/rust/comments/a7frqj/have_anyone_reviewed_any_of_the_decimal_crates/.
                 // keep in mind that at the time of this writing, diesel uses bigdecimal
-                "numeric" => ColumnTypeValue::Decimal(row.get(i)),
-                "oid" => ColumnTypeValue::Oid(row.get(i)),
-                "text" => ColumnTypeValue::Text(row.get(i)),
-                "time" => ColumnTypeValue::Time(row.get(i)),
-                "timestamp" => ColumnTypeValue::Timestamp(row.get(i)),
-                "timestamptz" => ColumnTypeValue::TimestampTz(row.get(i)),
-                "uuid" => ColumnTypeValue::Uuid(row.get(i)),
+                "numeric" => TypedColumnValue::Decimal(row.get(i)),
+                "oid" => TypedColumnValue::Oid(row.get(i)),
+                "text" => TypedColumnValue::Text(row.get(i)),
+                "time" => TypedColumnValue::Time(row.get(i)),
+                "timestamp" => TypedColumnValue::Timestamp(row.get(i)),
+                "timestamptz" => TypedColumnValue::TimestampTz(row.get(i)),
+                "uuid" => TypedColumnValue::Uuid(row.get(i)),
                 // "varbit" => {
-                //     ColumnTypeValue::VarBit(row.get(i))
+                //     TypedColumnValue::VarBit(row.get(i))
                 // }
-                "varchar" => ColumnTypeValue::VarChar(row.get(i)),
+                "varchar" => TypedColumnValue::VarChar(row.get(i)),
                 _ => {
                     return Err(Error::generate_error(
                         "UNSUPPORTED_DATA_TYPE",

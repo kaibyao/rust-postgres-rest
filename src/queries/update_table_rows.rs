@@ -1,6 +1,6 @@
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
-    postgres_types::ColumnTypeValue,
+    postgres_types::TypedColumnValue,
     query_types::{QueryParamsUpdate, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
@@ -150,7 +150,7 @@ fn build_update_statement(
     stats: Vec<TableColumnStat>,
     fks: Vec<ForeignKeyReference>,
     mut where_ast: Expr,
-) -> Result<(String, Vec<ColumnTypeValue>), Error> {
+) -> Result<(String, Vec<TypedColumnValue>), Error> {
     let mut query_str_arr = vec!["UPDATE ", &params.table, " SET "];
     let mut prepared_statement_values = vec![];
     let mut prepared_value_pos: usize = 1;
@@ -167,7 +167,7 @@ fn build_update_statement(
 
         // pretty sure function in a loop is a zero-cost abstraction?
         let mut append_prepared_value = |val: &JsonValue| -> Result<(), Error> {
-            let val = ColumnTypeValue::from_json(column_type, &val)?;
+            let val = TypedColumnValue::from_json(column_type, &val)?;
             prepared_statement_values.push(val);
 
             let actual_column_tokens = get_db_column_str(col, &params.table, &fks, false, false)?;
@@ -258,7 +258,7 @@ fn build_update_statement(
             // parse through the `WHERE` AST and return a tuple: (expression-with-prepared-params
             // string, Vec of tuples (position, Value)).
             let (where_string_with_prepared_positions, prepared_values_vec) =
-                ColumnTypeValue::generate_prepared_statement_from_ast_expr(
+                TypedColumnValue::generate_prepared_statement_from_ast_expr(
                     &where_ast,
                     &params.table,
                     &where_column_types,
@@ -297,7 +297,7 @@ fn build_update_statement(
 #[cfg(test)]
 mod build_update_statement_tests {
     use super::*;
-    use crate::queries::{postgres_types::ColumnValue, query_types::QueryParamsUpdate};
+    use crate::queries::{postgres_types::IsNullColumnValue, query_types::QueryParamsUpdate};
     use pretty_assertions::assert_eq;
     use serde_json::json;
 
@@ -329,7 +329,7 @@ mod build_update_statement_tests {
         assert_eq!(&sql_str, "UPDATE a_table SET name = $1;");
         assert_eq!(
             prepared_values,
-            vec![ColumnTypeValue::Text(ColumnValue::NotNullable(
+            vec![TypedColumnValue::Text(IsNullColumnValue::NotNullable(
                 "test".to_string()
             ))]
         );
@@ -431,7 +431,7 @@ mod build_update_statement_tests {
         );
         assert_eq!(
             prepared_values,
-            vec![ColumnTypeValue::BigInt(ColumnValue::NotNullable(2))]
+            vec![TypedColumnValue::BigInt(IsNullColumnValue::NotNullable(2))]
         );
     }
 
@@ -612,7 +612,7 @@ mod build_update_statement_tests {
         );
         assert_eq!(
             prepared_values,
-            vec![ColumnTypeValue::BigInt(ColumnValue::NotNullable(1))]
+            vec![TypedColumnValue::BigInt(IsNullColumnValue::NotNullable(1))]
         );
     }
 }

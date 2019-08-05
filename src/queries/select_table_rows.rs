@@ -10,7 +10,7 @@ use tokio_postgres::types::ToSql;
 
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
-    postgres_types::{row_to_row_values, ColumnTypeValue, RowValues},
+    postgres_types::{row_to_row_values, RowValues, TypedColumnValue},
     query_types::QueryParamsSelect,
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
@@ -137,7 +137,7 @@ fn build_select_statement(
     stats: Vec<TableColumnStat>,
     fks: Vec<ForeignKeyReference>,
     mut where_ast: Expr,
-) -> Result<(String, Vec<ColumnTypeValue>), Error> {
+) -> Result<(String, Vec<TypedColumnValue>), Error> {
     let mut statement = vec!["SELECT "];
     let is_fks_exist = !fks.is_empty();
 
@@ -195,7 +195,7 @@ fn build_select_statement(
         // parse through the `WHERE` AST and return a tuple: (expression-with-prepared-params
         // string, Vec of tuples (position, Value)).
         let (where_string_with_prepared_positions, prepared_values_vec) =
-            ColumnTypeValue::generate_prepared_statement_from_ast_expr(
+            TypedColumnValue::generate_prepared_statement_from_ast_expr(
                 &where_ast,
                 &params.table,
                 &column_types,
@@ -289,7 +289,7 @@ fn build_select_statement(
 #[cfg(test)]
 mod build_select_statement_tests {
     use super::*;
-    use crate::queries::{postgres_types::ColumnValue, query_types::QueryParamsSelect};
+    use crate::queries::{postgres_types::IsNullColumnValue, query_types::QueryParamsSelect};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -510,9 +510,9 @@ mod build_select_statement_tests {
                 assert_eq!(
                     prepared_values,
                     vec![
-                        ColumnTypeValue::BigInt(ColumnValue::NotNullable(10)),
-                        ColumnTypeValue::BigInt(ColumnValue::NotNullable(20)),
-                        ColumnTypeValue::Text(ColumnValue::NotNullable("test".to_string())),
+                        TypedColumnValue::BigInt(IsNullColumnValue::NotNullable(10)),
+                        TypedColumnValue::BigInt(IsNullColumnValue::NotNullable(20)),
+                        TypedColumnValue::Text(IsNullColumnValue::NotNullable("test".to_string())),
                     ]
                 );
             }
@@ -643,10 +643,12 @@ mod build_select_statement_tests {
                 assert_eq!(
                     prepared_values,
                     vec![
-                        ColumnTypeValue::BigInt(ColumnValue::NotNullable(
+                        TypedColumnValue::BigInt(IsNullColumnValue::NotNullable(
                             46_327_143_679_919_107i64
                         )),
-                        ColumnTypeValue::Text(ColumnValue::NotNullable("a name".to_string())),
+                        TypedColumnValue::Text(IsNullColumnValue::NotNullable(
+                            "a name".to_string()
+                        )),
                     ]
                 );
             }

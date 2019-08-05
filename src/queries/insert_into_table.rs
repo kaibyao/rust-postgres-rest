@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use tokio_postgres::{types::ToSql, Client};
 
 use super::{
-    postgres_types::{row_to_row_values, ColumnTypeValue, RowValues},
+    postgres_types::{row_to_row_values, TypedColumnValue, RowValues},
     query_types::{QueryParamsInsert, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{get_columns_str, validate_where_column},
@@ -348,17 +348,17 @@ fn generate_insert_params(
     rows: &[Map<String, Value>],
     columns: &[&str],
     column_types: &HashMap<String, &'static str>,
-) -> Result<(String, Vec<ColumnTypeValue>), Error> {
+) -> Result<(String, Vec<TypedColumnValue>), Error> {
     let mut prep_column_number = 1;
     let mut row_strs = vec![];
 
     // generate the array of json-converted-to-rust_postgres values to insert.
-    let nested_column_values_result: Result<Vec<Vec<ColumnTypeValue>>, Error> = rows
+    let nested_column_values_result: Result<Vec<Vec<TypedColumnValue>>, Error> = rows
         .iter()
-        .map(|row| -> Result<Vec<ColumnTypeValue>, Error> {
+        .map(|row| -> Result<Vec<TypedColumnValue>, Error> {
             // row_str_arr is used for the prepared statement parameter string
             let mut row_str_arr: Vec<String> = vec![];
-            let mut column_values: Vec<ColumnTypeValue> = vec![];
+            let mut column_values: Vec<TypedColumnValue> = vec![];
 
             for column in columns.iter() {
                 // if the "row" json object has a value for column, then use the rust-converted
@@ -371,7 +371,7 @@ fn generate_insert_params(
                         prep_column_number += 1;
 
                         let column_type = &column_types[*column];
-                        match ColumnTypeValue::from_json(column_type, val) {
+                        match TypedColumnValue::from_json(column_type, val) {
                             Ok(column_type_value) => {
                                 column_values.push(column_type_value);
                             }
@@ -392,7 +392,7 @@ fn generate_insert_params(
     let values_str = row_strs.join(", ");
 
     let nested_column_values = nested_column_values_result?;
-    let column_values: Vec<ColumnTypeValue> = nested_column_values.into_iter().flatten().collect();
+    let column_values: Vec<TypedColumnValue> = nested_column_values.into_iter().flatten().collect();
 
     Ok((values_str, column_values))
 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
-    postgres_types::ColumnTypeValue,
+    postgres_types::TypedColumnValue,
     query_types::{QueryParamsDelete, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
@@ -109,7 +109,7 @@ fn build_delete_statement(
     stats: Vec<TableColumnStat>,
     fks: Vec<ForeignKeyReference>,
     mut where_ast: Expr,
-) -> Result<(String, Vec<ColumnTypeValue>), Error> {
+) -> Result<(String, Vec<TypedColumnValue>), Error> {
     let mut query_str_arr = vec!["DELETE FROM\n  ", &params.table];
     let mut prepared_statement_values = vec![];
 
@@ -147,7 +147,7 @@ fn build_delete_statement(
         query_str_arr.push("\nWHERE (\n  ");
 
         let (where_string_with_prepared_positions, prepared_values_vec) =
-            ColumnTypeValue::generate_prepared_statement_from_ast_expr(
+            TypedColumnValue::generate_prepared_statement_from_ast_expr(
                 &where_ast,
                 &params.table,
                 &where_column_types,
@@ -182,7 +182,7 @@ fn build_delete_statement(
 #[cfg(test)]
 mod build_delete_statement_tests {
     use super::*;
-    use crate::queries::{postgres_types::ColumnValue, query_types::QueryParamsDelete};
+    use crate::queries::{postgres_types::IsNullColumnValue, query_types::QueryParamsDelete};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -432,7 +432,7 @@ mod build_delete_statement_tests {
         );
         assert_eq!(
             prepared_values,
-            vec![ColumnTypeValue::BigInt(ColumnValue::NotNullable(1))]
+            vec![TypedColumnValue::BigInt(IsNullColumnValue::NotNullable(1))]
         );
     }
 
@@ -527,7 +527,7 @@ mod build_delete_statement_tests {
         assert_eq!(&sql_str, "DELETE FROM\n  a_table\nUSING\n  b_table\nWHERE (\n  b_table.id = $1 AND\n  a_table.b_id = b_table.id\n);");
         assert_eq!(
             prepared_values,
-            vec![ColumnTypeValue::BigInt(ColumnValue::NotNullable(1))]
+            vec![TypedColumnValue::BigInt(IsNullColumnValue::NotNullable(1))]
         );
     }
 }
