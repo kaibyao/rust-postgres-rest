@@ -486,6 +486,55 @@ Result:
 The second row (with id = 3) is deleted from the table `delete_a`.
 ```
 
+### `POST /sql`
+
+Runs any passed-in SQL query (which is dangerous). This is here in case the above endpoints aren’t sufficient for complex operations you might need. Be careful if/how you expose this endpoint (honestly it should never be exposed and if used, only used internally with hardcoded or extremely sanitized values).
+
+#### Body schema for `POST /sql`
+
+A plain-text string with the SQL query to run. A `Content-Type` header value of `text/plain` must be sent to this endpoint or else a 400 error will be returned.
+
+Example: `SELECT * FROM a_table;`.
+
+#### Query Parameters for `POST /sql`
+
+##### is_returning_columns
+
+Pass in this parameter in order to return row data. Note that this is also needed for SELECT statements to return rows. Otherwise, the endpoint only returns the number of rows affected by the query. This is due to a limitation of the parser library we are using.
+
+#### Examples for `POST /sql`
+
+Assume the following database schema for these examples:
+
+```postgre
+CREATE TABLE IF NOT EXISTS public.company (
+  id BIGINT CONSTRAINT company_id_key PRIMARY KEY,
+  name TEXT
+);
+
+INSERT INTO public.company (id, name) VALUES (1, 'Stark Corporation');
+```
+
+##### Simple query
+
+```plaintext
+POST /api/sql
+SELECT * FROM company;
+
+Result:
+{ "num_rows": 1 }
+```
+
+##### Execute SQL and return rows
+
+```plaintext
+POST /api/sql?is_return_rows
+SELECT * FROM company;
+
+Result:
+{ "id": 1, "name": "Stark Corporation" }
+```
+
 ## Not supported
 
 - HStore (`rust-sqlparser` doesn't support it). Use JSON/JSONB instead.

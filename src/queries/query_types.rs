@@ -37,6 +37,9 @@ pub struct RequestQueryStringParams {
     pub offset: Option<usize>,
     /// Comma-separated list of columns to return from the POST/INSERT operation.
     pub returning_columns: Option<String>,
+    /// Used for the custom execute SQL endpoint. If `is_some()`, returns query result rows.
+    /// Otherwise, returns the number of rows affected.
+    pub is_return_rows: Option<String>,
 }
 
 #[derive(Debug)]
@@ -79,6 +82,13 @@ impl QueryParamsDelete {
 
         Ok(params)
     }
+}
+
+#[derive(Debug)]
+/// Represents a custom SQL query
+pub struct QueryParamsExecute {
+    pub statement: String,
+    pub is_return_rows: bool,
 }
 
 #[derive(Debug)]

@@ -3,6 +3,9 @@ mod foreign_keys;
 mod delete_table_rows;
 pub use self::delete_table_rows::delete_table_rows;
 
+mod execute_sql_query;
+pub use self::execute_sql_query::execute_sql_query;
+
 mod insert_into_table;
 pub use self::insert_into_table::insert_into_table;
 

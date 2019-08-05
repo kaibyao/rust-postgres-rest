@@ -194,6 +194,15 @@ impl Error {
                 offender,
             },
 
+            "INVALID_CONTENT_TYPE" => Error::UserError {
+                category: MessageCategory::Error,
+                code: err_id,
+                details: "The `Content-Type` header value is not valid for this request".to_string(),
+                http_status: 400,
+                message: "The `Content-Type` must be `text/plain`.",
+                offender,
+            },
+
             "INVALID_DB_CONFIG" => Error::UserError {
                 category: MessageCategory::Error,
                 code: err_id,

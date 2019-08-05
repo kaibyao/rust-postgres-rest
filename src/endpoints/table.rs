@@ -2,7 +2,7 @@ use actix_web::{
     dev::HttpResponseBuilder,
     http::StatusCode,
     web::{self, Json},
-    HttpRequest, HttpResponse,
+    HttpMessage, HttpRequest, HttpResponse,
 };
 use futures::{
     future::{err, ok, Either},
@@ -13,14 +13,14 @@ use serde_json::{json, Value};
 use crate::{
     db::connect,
     queries::{
-        delete_table_rows, insert_into_table, query_types, select_all_tables, select_table_rows,
-        select_table_stats, update_table_rows,
+        delete_table_rows, execute_sql_query, insert_into_table, query_types, select_all_tables,
+        select_table_rows, select_table_stats, update_table_rows,
     },
     stats_cache::StatsCacheMessage,
     AppState, Error,
 };
 use query_types::{
-    QueryParamsDelete, QueryParamsInsert, QueryParamsSelect, QueryParamsUpdate,
+    QueryParamsDelete, QueryParamsExecute, QueryParamsInsert, QueryParamsSelect, QueryParamsUpdate,
     RequestQueryStringParams,
 };
 
@@ -47,6 +47,34 @@ pub fn delete_table(
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)));
 
     Either::B(delete_table_future)
+}
+
+/// Executes the given SQL statement
+pub fn execute_sql(
+    req: HttpRequest,
+    body: String,
+    state: web::Data<AppState>,
+    query_string_params: web::Query<RequestQueryStringParams>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    let content_type = req.content_type().to_lowercase();
+    if &content_type != "text/plain" {
+        return Either::A(err(Error::generate_error(
+            "INVALID_CONTENT_TYPE",
+            format!("Content type sent was: `{}`.", content_type),
+        )));
+    }
+
+    let params = QueryParamsExecute {
+        statement: body,
+        is_return_rows: query_string_params.is_return_rows.is_some(),
+    };
+
+    let execute_sql_future = connect(state.config.db_url)
+        .map_err(Error::from)
+        .and_then(|client| execute_sql_query(client, params))
+        .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)));
+
+    Either::B(execute_sql_future)
 }
 
 /// Retrieves a list of table names that exist in the DB.
