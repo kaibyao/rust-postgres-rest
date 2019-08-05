@@ -1,6 +1,6 @@
 use super::{
     foreign_keys::{fk_ast_nodes_from_where_ast, ForeignKeyReference},
-    postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
+    postgres_types::{row_to_row_values, ColumnTypeValue, RowValues},
     query_types::QueryResult,
     select_table_stats::TableColumnStat,
 };
@@ -76,10 +76,10 @@ pub fn generate_query_result_from_db(
                             .and_then(|rows| {
                                 match rows
                                     .iter()
-                                    .map(|row| convert_row_fields(&row))
-                                    .collect::<Result<Vec<RowFields>, Error>>()
+                                    .map(|row| row_to_row_values(&row))
+                                    .collect::<Result<Vec<RowValues>, Error>>()
                                 {
-                                    Ok(row_fields) => Ok(QueryResult::QueryTableResult(row_fields)),
+                                    Ok(row_values) => Ok(QueryResult::QueryTableResult(row_values)),
                                     Err(e) => Err(e),
                                 }
                             });

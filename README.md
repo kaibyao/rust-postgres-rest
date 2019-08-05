@@ -546,12 +546,14 @@ Result:
 
 1. Shortened alias syntax ("some_table a" vs "some_table AS a")
 1. parallelize all iters (with Rayon + par_iter).
-1. Add security, customizability, optimizations, etc.
+1. Errors section in docs
+1. TOC in docs
+1. Make an option to enable /sql endpoint and make it disabled by default
 1. GraphQL API
 1. Optimization: Convert Strings to &str / statics.
 1. CSV, XML for REST API (nix for now?)
 1. Eventually support dot syntax in INSERT: [See this forum post](https://dba.stackexchange.com/questions/160674/insert-rows-in-two-tables-preserving-connection-to-a-third-table)
-1. Maybe use Diesel's parser instead of SQLParser in order to support HStore and bit/varbit?
+1. Maybe use Diesel's parser instead of SQLParser in order to support HStore, bit/varbit, and RETURNING (would eliminate need for `is_returning_rows`)?
 
 ## To run tests
 

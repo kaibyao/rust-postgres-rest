@@ -352,203 +352,141 @@ impl ColumnTypeValue {
         }
     }
 
-    pub fn from_prepared_statement_value(
-        column_type: &str,
-        value: PreparedStatementValue,
-    ) -> Result<Self, Error> {
+    pub fn from_parsed_sql_value(column_type: &str, value: ParsedSQLValue) -> Result<Self, Error> {
         match column_type {
             "int8" => Ok(ColumnTypeValue::BigInt(match value {
-                PreparedStatementValue::Int8(val) => ColumnValue::NotNullable(val),
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to int8.",
-                    value
-                ),
+                ParsedSQLValue::Int8(val) => ColumnValue::NotNullable(val),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to int8.", value),
             })),
             "bool" => Ok(ColumnTypeValue::Bool(match value {
-                PreparedStatementValue::Boolean(val) => ColumnValue::NotNullable(val),
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to bool.",
-                    value
-                ),
+                ParsedSQLValue::Boolean(val) => ColumnValue::NotNullable(val),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to bool.", value),
             })),
             "bytea" => Ok(ColumnTypeValue::ByteA(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => ColumnValue::NotNullable(val.into_bytes()),
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to bytea.",
-                    value
-                ),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => ColumnValue::NotNullable(val.into_bytes()),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to bytea.", value),
             })),
             "bpchar" => Ok(ColumnTypeValue::Char(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => ColumnValue::NotNullable(val),
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to bpchar.",
-                    value
-                ),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => ColumnValue::NotNullable(val),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to bpchar.", value),
             })),
             "citext" => Ok(ColumnTypeValue::Citext(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => ColumnValue::NotNullable(val),
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to citext.",
-                    value
-                ),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => ColumnValue::NotNullable(val),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to citext.", value),
             })),
             "date" => Ok(ColumnTypeValue::Date(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => {
-                    ColumnValue::NotNullable(NaiveDate::from_str(&val)?)
-                }
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to date.",
-                    value
-                ),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => ColumnValue::NotNullable(NaiveDate::from_str(&val)?),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to date.", value),
             })),
             "float4" => Ok(ColumnTypeValue::Real(match value {
-                PreparedStatementValue::Float(val) => ColumnValue::NotNullable(val as f32),
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to float4.",
-                    value
-                ),
+                ParsedSQLValue::Float(val) => ColumnValue::NotNullable(val as f32),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to float4.", value),
             })),
             "float8" => Ok(ColumnTypeValue::Float8(match value {
-                PreparedStatementValue::Float(val) => ColumnValue::NotNullable(val),
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to float8.",
-                    value
-                ),
+                ParsedSQLValue::Float(val) => ColumnValue::NotNullable(val),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to float8.", value),
             })),
             "int2" => Ok(ColumnTypeValue::SmallInt(match value {
-                PreparedStatementValue::Int8(val) => ColumnValue::NotNullable(val as i16),
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to int2.",
-                    value
-                ),
+                ParsedSQLValue::Int8(val) => ColumnValue::NotNullable(val as i16),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to int2.", value),
             })),
             "int4" => Ok(ColumnTypeValue::Int(match value {
-                PreparedStatementValue::Int8(val) => ColumnValue::NotNullable(val as i32),
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to int4.",
-                    value
-                ),
+                ParsedSQLValue::Int8(val) => ColumnValue::NotNullable(val as i32),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to int4.", value),
             })),
             "json" => Ok(ColumnTypeValue::Json(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => {
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => {
                     ColumnValue::NotNullable(serde_json::from_str(&val)?)
                 }
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to json.",
-                    value
-                ),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to json.", value),
             })),
             "jsonb" => Ok(ColumnTypeValue::JsonB(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => {
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => {
                     ColumnValue::NotNullable(serde_json::from_str(&val)?)
                 }
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to json.",
-                    value
-                ),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to json.", value),
             })),
             "macaddr" => Ok(ColumnTypeValue::MacAddr(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => {
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => {
                     ColumnValue::NotNullable(MacAddress(Eui48MacAddress::from_str(&val)?))
                 }
                 _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to macaddr.",
+                    "Cannot convert from ParsedSQLValue: `{}` to macaddr.",
                     value
                 ),
             })),
             "name" => Ok(ColumnTypeValue::Name(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => ColumnValue::NotNullable(val),
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to name.",
-                    value
-                ),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => ColumnValue::NotNullable(val),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to name.", value),
             })),
             "numeric" => Ok(ColumnTypeValue::Decimal(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => {
-                    ColumnValue::NotNullable(Decimal::from_str(&val)?)
-                }
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => ColumnValue::NotNullable(Decimal::from_str(&val)?),
                 _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to numeric.",
+                    "Cannot convert from ParsedSQLValue: `{}` to numeric.",
                     value
                 ),
             })),
             "oid" => Ok(ColumnTypeValue::Oid(match value {
-                PreparedStatementValue::Int8(val) => ColumnValue::NotNullable(val as u32),
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to oid.",
-                    value
-                ),
+                ParsedSQLValue::Int8(val) => ColumnValue::NotNullable(val as u32),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to oid.", value),
             })),
             "text" => Ok(ColumnTypeValue::Text(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => ColumnValue::NotNullable(val),
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to text.",
-                    value
-                ),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => ColumnValue::NotNullable(val),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to text.", value),
             })),
             "time" => Ok(ColumnTypeValue::Time(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => {
-                    ColumnValue::NotNullable(NaiveTime::from_str(&val)?)
-                }
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to time.",
-                    value
-                ),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => ColumnValue::NotNullable(NaiveTime::from_str(&val)?),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to time.", value),
             })),
             "timestamp" => Ok(ColumnTypeValue::Timestamp(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => {
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => {
                     ColumnValue::NotNullable(NaiveDateTime::from_str(&val)?)
                 }
                 _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to timestamp.",
+                    "Cannot convert from ParsedSQLValue: `{}` to timestamp.",
                     value
                 ),
             })),
             "timestamptz" => Ok(ColumnTypeValue::TimestampTz(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => {
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => {
                     let timestamp = DateTime::from_str(&val)?;
                     ColumnValue::NotNullable(timestamp)
                 }
                 _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to timestamptz.",
+                    "Cannot convert from ParsedSQLValue: `{}` to timestamptz.",
                     value
                 ),
             })),
             "uuid" => Ok(ColumnTypeValue::Uuid(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => {
-                    ColumnValue::NotNullable(Uuid::from_str(&val)?)
-                }
-                _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to uuid.",
-                    value
-                ),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => ColumnValue::NotNullable(Uuid::from_str(&val)?),
+                _ => unimplemented!("Cannot convert from ParsedSQLValue: `{}` to uuid.", value),
             })),
             "varchar" => Ok(ColumnTypeValue::VarChar(match value {
-                PreparedStatementValue::Null => ColumnValue::Nullable(None),
-                PreparedStatementValue::String(val) => ColumnValue::NotNullable(val),
+                ParsedSQLValue::Null => ColumnValue::Nullable(None),
+                ParsedSQLValue::String(val) => ColumnValue::NotNullable(val),
                 _ => unimplemented!(
-                    "Cannot convert from PreparedStatementValue: `{}` to varchar.",
+                    "Cannot convert from ParsedSQLValue: `{}` to varchar.",
                     value
                 ),
             })),
@@ -825,14 +763,12 @@ impl ColumnTypeValue {
         expr: &mut Expr,
         prepared_statement_values: &mut Vec<ColumnTypeValue>,
     ) -> Result<Option<Expr>, Error> {
-        let val_opt = PreparedStatementValue::attempt_extract_prepared_value_from_expr(expr);
+        let val_opt = ParsedSQLValue::attempt_extract_prepared_value_from_expr(expr);
 
         if let (Some(column_name), true) = (column_name_opt, val_opt.is_some()) {
             if let Some(column_type) = column_types.get(column_name) {
-                prepared_statement_values.push(Self::from_prepared_statement_value(
-                    column_type,
-                    val_opt.unwrap(),
-                )?);
+                prepared_statement_values
+                    .push(Self::from_parsed_sql_value(column_type, val_opt.unwrap())?);
                 let new_node = Expr::Identifier(format!("${}", prepared_param_pos));
                 *prepared_param_pos += 1;
 
@@ -1153,16 +1089,16 @@ impl ColumnTypeValue {
     }
 }
 
-/// The field names and their values for a single table row.
-pub type RowFields = HashMap<String, ColumnTypeValue>;
+/// A HashMap of column names and their values for a single table row.
+pub type RowValues = HashMap<String, ColumnTypeValue>;
 
 /// Analyzes a table postgres row and returns the Rust-equivalent value.
-pub fn convert_row_fields(row: &Row) -> Result<RowFields, Error> {
-    let mut row_fields = HashMap::new();
+pub fn row_to_row_values(row: &Row) -> Result<RowValues, Error> {
+    let mut row_values = HashMap::new();
     for (i, column) in row.columns().iter().enumerate() {
         let column_type_name = column.type_().name();
 
-        row_fields.insert(
+        row_values.insert(
             column.name().to_string(),
             match column_type_name {
                 "int8" => ColumnTypeValue::BigInt(row.get(i)),
@@ -1209,12 +1145,12 @@ pub fn convert_row_fields(row: &Row) -> Result<RowFields, Error> {
         );
     }
 
-    Ok(row_fields)
+    Ok(row_values)
 }
 
 #[derive(Debug, PartialEq)]
 /// Possible values that can be passed into a prepared statement Vec.
-pub enum PreparedStatementValue {
+pub enum ParsedSQLValue {
     Boolean(bool),
     Float(f64),
     Int8(i64),
@@ -1222,7 +1158,7 @@ pub enum PreparedStatementValue {
     String(String),
 }
 
-impl fmt::Display for PreparedStatementValue {
+impl fmt::Display for ParsedSQLValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Boolean(v) => write!(f, "{}", v,),
@@ -1234,7 +1170,7 @@ impl fmt::Display for PreparedStatementValue {
     }
 }
 
-impl From<SqlValue> for PreparedStatementValue {
+impl From<SqlValue> for ParsedSQLValue {
     fn from(v: SqlValue) -> Self {
         match v {
             SqlValue::Boolean(v) => Self::Boolean(v),
@@ -1252,11 +1188,11 @@ impl From<SqlValue> for PreparedStatementValue {
     }
 }
 
-impl PreparedStatementValue {
+impl ParsedSQLValue {
     /// Tries to extract a prepared statement value from an Expr.
     pub fn attempt_extract_prepared_value_from_expr(expr: &Expr) -> Option<Self> {
         match expr {
-            Expr::Value(val) => Some(PreparedStatementValue::from(val.clone())),
+            Expr::Value(val) => Some(ParsedSQLValue::from(val.clone())),
             Expr::UnaryOp {
                 expr: unary_expr_box,
                 op,
@@ -1264,7 +1200,7 @@ impl PreparedStatementValue {
                 let borrowed_expr = unary_expr_box.borrow();
 
                 if let Expr::Value(val) = borrowed_expr {
-                    let mut prepared_val = PreparedStatementValue::from(val.clone());
+                    let mut prepared_val = ParsedSQLValue::from(val.clone());
                     match op {
                         UnaryOperator::Minus => prepared_val.invert(),
                         UnaryOperator::Not => prepared_val.invert(),

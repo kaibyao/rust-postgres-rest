@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use tokio_postgres::{types::ToSql, Client};
 
 use super::{
-    postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
+    postgres_types::{row_to_row_values, ColumnTypeValue, RowValues},
     query_types::{QueryParamsInsert, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{get_columns_str, validate_where_column},
@@ -18,7 +18,7 @@ static INSERT_ROWS_BATCH_COUNT: usize = 100;
 
 /// Used for returning either number of rows or actual row values in INSERT/UPDATE statements.
 pub enum InsertResult {
-    Rows(Vec<RowFields>),
+    Rows(Vec<RowValues>),
     NumRowsAffected(u64),
 }
 
@@ -249,11 +249,11 @@ fn execute_insert<'a>(
                         Ok(rows) => {
                             match rows
                                 .iter()
-                                .map(|row| convert_row_fields(&row))
-                                .collect::<Result<Vec<RowFields>, Error>>()
+                                .map(|row| row_to_row_values(&row))
+                                .collect::<Result<Vec<RowValues>, Error>>()
                             {
-                                Ok(row_fields) => {
-                                    Ok((conn, params, column_types, InsertResult::Rows(row_fields)))
+                                Ok(row_values) => {
+                                    Ok((conn, params, column_types, InsertResult::Rows(row_values)))
                                 }
                                 Err(e) => Err((e, conn)),
                             }

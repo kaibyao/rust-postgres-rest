@@ -10,7 +10,7 @@ use tokio_postgres::types::ToSql;
 
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
-    postgres_types::{convert_row_fields, ColumnTypeValue, RowFields},
+    postgres_types::{row_to_row_values, ColumnTypeValue, RowValues},
     query_types::QueryParamsSelect,
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
@@ -24,7 +24,7 @@ use crate::{db::connect, AppState, Error};
 pub fn select_table_rows(
     state: &AppState,
     params: QueryParamsSelect,
-) -> impl Future<Item = Vec<RowFields>, Error = Error> {
+) -> impl Future<Item = Vec<RowValues>, Error = Error> {
     if let Err(e) = validate_table_name(&params.table) {
         return Either::A(err(e));
     }
@@ -118,10 +118,10 @@ pub fn select_table_rows(
             .and_then(|rows| {
                 match rows
                     .iter()
-                    .map(convert_row_fields)
-                    .collect::<Result<Vec<RowFields>, Error>>()
+                    .map(row_to_row_values)
+                    .collect::<Result<Vec<RowValues>, Error>>()
                 {
-                    Ok(row_fields) => Ok(row_fields),
+                    Ok(row_values) => Ok(row_values),
                     Err(e) => Err(e),
                 }
             });

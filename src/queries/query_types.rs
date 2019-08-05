@@ -1,4 +1,4 @@
-use super::{postgres_types::RowFields, utils::normalize_columns};
+use super::{postgres_types::RowValues, utils::normalize_columns};
 use crate::Error;
 use actix_web::HttpRequest;
 use serde::{Deserialize, Serialize};
@@ -321,7 +321,7 @@ pub struct RowsAffectedQueryResult {
 #[serde(untagged)]
 /// Represents the response from sending a QueryTask to DbExecutor
 pub enum QueryResult {
-    QueryTableResult(Vec<RowFields>),
+    QueryTableResult(Vec<RowValues>),
     RowsAffected(RowsAffectedQueryResult),
 }
 

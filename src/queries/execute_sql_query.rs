@@ -1,5 +1,5 @@
 use super::{
-    postgres_types::{convert_row_fields, RowFields},
+    postgres_types::{row_to_row_values, RowValues},
     query_types::{QueryParamsExecute, QueryResult},
 };
 use crate::Error;
@@ -23,8 +23,8 @@ pub fn execute_sql_query(
                     .map_err(Error::from)
                     .collect()
                     .and_then(|rows| {
-                        let convert_row_result: Result<Vec<RowFields>, Error> =
-                            rows.iter().map(convert_row_fields).collect();
+                        let convert_row_result: Result<Vec<RowValues>, Error> =
+                            rows.iter().map(row_to_row_values).collect();
 
                         convert_row_result
                     })

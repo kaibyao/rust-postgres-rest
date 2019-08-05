@@ -226,7 +226,7 @@ impl Error {
                 code: err_id,
                 details: ".".to_string(),
                 http_status: 400,
-                message: "Could not convert PreparedStatementValue type to ColumnTypeValue.",
+                message: "Could not convert ParsedSQLValue type to ColumnTypeValue.",
                 offender
             },
 
