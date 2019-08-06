@@ -8,6 +8,7 @@ use crate::Error;
 use futures::stream::Stream;
 use futures03::{compat::Future01CompatExt, future::try_join3};
 use lazy_static::lazy_static;
+use rayon::prelude::*;
 use std::collections::HashMap;
 
 use tokio_postgres::{impls::Prepare, row::Row, Client};
@@ -19,7 +20,7 @@ pub async fn select_all_table_stats(
     tables: Vec<String>,
 ) -> Result<HashMap<String, TableStats>, Error> {
     let tables_str: String = match tables
-        .iter()
+        .par_iter()
         .map(|table| -> Result<String, Error> {
             validate_table_name(table)?;
             Ok(["'", table, "'"].join(""))
@@ -237,8 +238,8 @@ fn process_column_stats(rows: Vec<Row>) -> Result<HashMap<String, Vec<TableColum
 
         let column_type: String = row.get(2);
         let column_type: &'static str = match COLUMN_TYPES
-            .iter()
-            .find(|static_column_type| *static_column_type == &column_type)
+            .par_iter()
+            .find_any(|static_column_type| *static_column_type == &column_type)
         {
             Some(found_column_type) => found_column_type,
             None => {
@@ -255,7 +256,7 @@ fn process_column_stats(rows: Vec<Row>) -> Result<HashMap<String, Vec<TableColum
         let foreign_key_column: Option<String> = row.get(9);
         let foreign_key_column_type: Option<String> = row.get(10);
         let foreign_key_column_type: Option<&'static str> = if foreign_key_column_type.is_some() {
-            match COLUMN_TYPES.iter().find(|static_column_type| {
+            match COLUMN_TYPES.par_iter().find_any(|static_column_type| {
                 **static_column_type == foreign_key_column_type.as_ref().unwrap()
             }) {
                 Some(found_column_type) => Some(found_column_type),
@@ -338,7 +339,7 @@ WHERE (
     ];
 
     let tables_where_vec = &tables
-        .iter()
+        .par_iter()
         .map(|table| ["pg_get_constraintdef(c.oid) LIKE '%", table, "(%'"])
         .collect::<Vec<[&str; 3]>>();
     for (i, tables_where_arr) in tables_where_vec.iter().enumerate() {

@@ -10,6 +10,7 @@ use futures::{
     stream::Stream,
 };
 use lazy_static::lazy_static;
+use rayon::prelude::*;
 use regex::{Regex, RegexSet};
 use sqlparser::{
     ast::{Expr, SetExpr, Statement},
@@ -91,7 +92,7 @@ pub fn generate_query_result_from_db(
                             .map_err(Error::from)
                             .and_then(|rows| {
                                 match rows
-                                    .iter()
+                                    .par_iter()
                                     .map(|row| row_to_row_values(&row))
                                     .collect::<Result<Vec<RowValues>, Error>>()
                                 {
@@ -145,8 +146,8 @@ pub fn get_where_string<'a>(
 
                     let fk_column_stat = fk_ref
                         .foreign_key_table_stats
-                        .iter()
-                        .find(|stat| stat.column_name == fk_column)
+                        .par_iter()
+                        .find_any(|stat| stat.column_name == fk_column)
                         .unwrap();
 
                     column_types.insert(actual_column_name.join("."), fk_column_stat.column_type);
@@ -158,7 +159,10 @@ pub fn get_where_string<'a>(
             };
 
             *ast_node = replacement_node;
-        } else if let Some(stat) = stats.iter().find(|s| s.column_name == ast_column_name) {
+        } else if let Some(stat) = stats
+            .par_iter()
+            .find_any(|s| s.column_name == ast_column_name)
+        {
             column_types.insert(ast_column_name, stat.column_type);
         }
     }
@@ -240,7 +244,7 @@ pub fn get_columns_str<'a>(
 
     for (i, column) in columns.iter().enumerate() {
         let column_tokens = get_db_column_str(column, table, fks, true, true)?;
-        statement.extend(column_tokens);
+        statement.par_extend(column_tokens);
 
         if i < columns.len() - 1 {
             statement.push(", ");

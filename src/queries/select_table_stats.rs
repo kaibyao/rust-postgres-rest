@@ -10,6 +10,7 @@ use futures::{
     stream::Stream,
 };
 use lazy_static::lazy_static;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -237,8 +238,8 @@ pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>,
 
                 let column_type: String = row.get(1);
                 let column_type: &'static str = match COLUMN_TYPES
-                    .iter()
-                    .find(|static_column_type| *static_column_type == &column_type)
+                    .par_iter()
+                    .find_any(|static_column_type| *static_column_type == &column_type)
                 {
                     Some(found_column_type) => found_column_type,
                     None => {
@@ -256,7 +257,7 @@ pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>,
                 let foreign_key_column_type: Option<String> = row.get(9);
                 let foreign_key_column_type: Option<&'static str> =
                     if foreign_key_column_type.is_some() {
-                        match COLUMN_TYPES.iter().find(|static_column_type| {
+                        match COLUMN_TYPES.par_iter().find_any(|static_column_type| {
                             **static_column_type == foreign_key_column_type.as_ref().unwrap()
                         }) {
                             Some(found_column_type) => Some(found_column_type),

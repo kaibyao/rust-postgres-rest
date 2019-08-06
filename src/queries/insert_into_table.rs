@@ -2,12 +2,13 @@ use futures::{
     future::{err, loop_fn, Either, Future, Loop},
     stream::Stream,
 };
+use rayon::prelude::*;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use tokio_postgres::{types::ToSql, Client};
 
 use super::{
-    postgres_types::{row_to_row_values, TypedColumnValue, RowValues},
+    postgres_types::{row_to_row_values, RowValues, TypedColumnValue},
     query_types::{QueryParamsInsert, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{get_columns_str, validate_where_column},
@@ -88,7 +89,7 @@ pub fn insert_into_table(
                                                 total_num_rows_affected += num_rows_affected;
                                             }
                                             InsertResult::Rows(rows) => {
-                                                total_rows_returned.extend(rows);
+                                                total_rows_returned.par_extend(rows);
                                             }
                                         };
 
@@ -220,7 +221,7 @@ fn execute_insert<'a>(
             Ok(columns_tokens) => {
                 is_return_rows = true;
                 insert_statement_tokens.push(" RETURNING ");
-                insert_statement_tokens.extend(columns_tokens);
+                insert_statement_tokens.par_extend(columns_tokens);
             }
             Err(e) => return Either::A(err((e, conn))),
         }
@@ -248,7 +249,7 @@ fn execute_insert<'a>(
                     move |result| match result {
                         Ok(rows) => {
                             match rows
-                                .iter()
+                                .par_iter()
                                 .map(|row| row_to_row_values(&row))
                                 .collect::<Result<Vec<RowValues>, Error>>()
                             {
@@ -296,11 +297,11 @@ fn generate_conflict_str(params: &QueryParamsInsert, columns: &[&str]) -> Option
             [
                 "DO UPDATE SET ",
                 &columns
-                    .iter()
+                    .par_iter()
                     .filter_map(|col| {
                         match conflict_target_vec
-                            .iter()
-                            .position(|conflict_target| conflict_target == *col)
+                            .par_iter()
+                            .position_any(|conflict_target| conflict_target == *col)
                         {
                             Some(_) => None,
                             None => Some([*col, "=", "EXCLUDED.", *col].join("")),
@@ -334,7 +335,7 @@ fn get_all_columns_to_insert<'a>(rows: &'a [Map<String, Value>]) -> Vec<&'a str>
     let mut columns: Vec<&str> = vec![];
     for row in rows.iter() {
         for column in row.keys() {
-            if columns.iter().position(|&c| c == column).is_none() {
+            if columns.par_iter().position_any(|&c| c == column).is_none() {
                 columns.push(column);
             }
         }

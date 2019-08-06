@@ -1,4 +1,5 @@
 use futures::future::{err, Either, Future};
+use rayon::prelude::*;
 use sqlparser::ast::Expr;
 use std::sync::Arc;
 
@@ -36,7 +37,7 @@ pub fn delete_table_rows(
     let returning_column_strs;
     if let Some(columns) = &params.returning_columns {
         let returning_column_strs_result = columns
-            .iter()
+            .par_iter()
             .map(|col| {
                 if let Some((actual_column_ref, _alias)) = validate_alias_identifier(col)? {
                     Ok(actual_column_ref.to_string())
@@ -52,7 +53,7 @@ pub fn delete_table_rows(
         };
 
         is_return_rows = true;
-        column_expr_strings.extend(returning_column_strs);
+        column_expr_strings.par_extend(returning_column_strs);
     }
 
     let db_url_str = state.config.db_url.to_string();
@@ -154,7 +155,7 @@ fn build_delete_statement(
                 None,
             )?;
         where_string = where_string_with_prepared_positions;
-        prepared_statement_values.extend(prepared_values_vec);
+        prepared_statement_values.par_extend(prepared_values_vec);
 
         query_str_arr.push(&where_string);
 
@@ -171,7 +172,7 @@ fn build_delete_statement(
         query_str_arr.push("\nRETURNING\n  ");
 
         let returning_columns_str = get_columns_str(returned_column_names, &params.table, &fks)?;
-        query_str_arr.extend(returning_columns_str);
+        query_str_arr.par_extend(returning_columns_str);
     }
 
     query_str_arr.push(";");

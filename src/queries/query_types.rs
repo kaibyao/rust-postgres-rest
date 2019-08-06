@@ -1,6 +1,7 @@
 use super::{postgres_types::RowValues, utils::normalize_columns};
 use crate::Error;
 use actix_web::HttpRequest;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -200,7 +201,7 @@ impl QueryParamsInsert {
             }
 
             if conflict_target_vec
-                .iter()
+                .par_iter()
                 .any(|conflict_target_str| *conflict_target_str == "")
             {
                 return Err(Error::generate_error(
@@ -230,12 +231,12 @@ impl QueryParamsInsert {
         let rows: Vec<Map<String, Value>> = match body.as_array() {
             Some(body_rows_to_insert) => {
                 if !body_rows_to_insert
-                .iter().all(Value::is_object) {
+                .par_iter().all(Value::is_object) {
                     return Err(Error::generate_error("INCORRECT_REQUEST_BODY", "The body needs to be an array of objects where each object represents a row and whose key-values represent column names and their values.".to_string()));
                 }
 
                 body_rows_to_insert
-                .iter().map(|json_value| {
+                .par_iter().map(|json_value| {
                     if let Some(row_obj_map) = json_value.as_object() {
                         row_obj_map.clone()
                     } else {

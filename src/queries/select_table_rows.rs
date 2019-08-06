@@ -3,6 +3,7 @@ use futures::{
     stream::Stream,
 };
 use lazy_static::lazy_static;
+use rayon::prelude::*;
 use regex::Regex;
 use sqlparser::ast::Expr;
 use std::sync::Arc;
@@ -33,7 +34,7 @@ pub fn select_table_rows(
     // order_by). Used for finding all foreign key references
     let columns_result: Result<Vec<String>, Error> = params
         .columns
-        .iter()
+        .par_iter()
         .map(|col| {
             if let Some((actual_column_ref, _alias)) = validate_alias_identifier(col)? {
                 Ok(actual_column_ref.to_string())
@@ -53,16 +54,16 @@ pub fn select_table_rows(
         Ok(ast) => ast,
         Err(e) => return Either::A(err(e)),
     };
-    columns.extend(fk_columns_from_where_ast(&where_ast));
+    columns.par_extend(fk_columns_from_where_ast(&where_ast));
 
     if let Some(v) = &params.distinct {
-        columns.extend(v.clone());
+        columns.par_extend(v.clone());
     }
     if let Some(v) = &params.group_by {
-        columns.extend(v.clone());
+        columns.par_extend(v.clone());
     }
     if let Some(v) = &params.order_by {
-        columns.extend(v.clone());
+        columns.par_extend(v.clone());
     }
 
     // get table stats for building query (we need to know the column types)
@@ -117,7 +118,7 @@ pub fn select_table_rows(
             })
             .and_then(|rows| {
                 match rows
-                    .iter()
+                    .par_iter()
                     .map(row_to_row_values)
                     .collect::<Result<Vec<RowValues>, Error>>()
                 {
@@ -145,13 +146,13 @@ fn build_select_statement(
     if let Some(distinct_columns) = &params.distinct {
         statement.push("DISTINCT ON (");
 
-        statement.extend(get_columns_str(&distinct_columns, &params.table, &fks)?);
+        statement.par_extend(get_columns_str(&distinct_columns, &params.table, &fks)?);
 
         statement.push(") ");
     }
 
     // building column selection
-    statement.extend(get_columns_str(&params.columns, &params.table, &fks)?);
+    statement.par_extend(get_columns_str(&params.columns, &params.table, &fks)?);
 
     statement.push(" FROM ");
     statement.push(&params.table);
@@ -211,7 +212,7 @@ fn build_select_statement(
     // GROUP BY statement
     if let Some(group_by_columns) = &params.group_by {
         statement.push(" GROUP BY ");
-        statement.extend(get_columns_str(group_by_columns, &params.table, &fks)?);
+        statement.par_extend(get_columns_str(group_by_columns, &params.table, &fks)?);
     }
 
     // Append ORDER BY if the param exists

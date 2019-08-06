@@ -115,6 +115,11 @@ Changing the previous API endpoint to `/api/child?columns=id,name,parent_id.name
 ]
 ```
 
+## Requirements
+
+- Your tables & columns only contain letters, numbers, and underscore. We are converting query parameters/body parameters into an SQL abstract syntax tree (AST) before finally executing an SQL query in the background; there is no schema/model configuration (like in Diesel), so this restriction makes data that is passed in, easier to validate & secure.
+- You don’t need to query for `HStore`, `bit`, or `varbit` (technical limitations for now).
+
 ## Configuration
 
 The `AppConfig` struct contains the configuration options used by this library.
@@ -544,7 +549,6 @@ Result:
 
 ## To dos
 
-1. parallelize all iters (with Rayon + par_iter).
 1. Errors section in docs
 1. TOC in docs
 1. Make an option to enable /sql endpoint and make it disabled by default

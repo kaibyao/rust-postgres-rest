@@ -12,6 +12,7 @@ use super::{
 use crate::{db::connect, AppState, Error};
 use futures::future::{err, Either, Future};
 use lazy_static::lazy_static;
+use rayon::prelude::*;
 use regex::Regex;
 use serde_json::Value as JsonValue;
 use sqlparser::ast::Expr;
@@ -69,14 +70,14 @@ pub fn update_table_rows(
         Ok(ast) => ast,
         Err(e) => return Either::A(err(e)),
     };
-    column_expr_strings.extend(fk_columns_from_where_ast(&where_ast));
+    column_expr_strings.par_extend(fk_columns_from_where_ast(&where_ast));
 
     // RETURNING column foreign key references
     let mut is_return_rows = false;
     let returning_column_strs;
     if let Some(columns) = &params.returning_columns {
         let returning_column_strs_result = columns
-            .iter()
+            .par_iter()
             .map(|col| {
                 if let Some((actual_column_ref, _alias)) = validate_alias_identifier(col)? {
                     Ok(actual_column_ref.to_string())
@@ -92,7 +93,7 @@ pub fn update_table_rows(
         };
 
         is_return_rows = true;
-        column_expr_strings.extend(returning_column_strs);
+        column_expr_strings.par_extend(returning_column_strs);
     }
 
     let db_url_str = state.config.db_url.to_string();
@@ -209,7 +210,7 @@ fn build_update_statement(
         .zip(set_prepared_values.iter())
         .enumerate()
     {
-        query_str_arr.extend(column_name_tokens);
+        query_str_arr.par_extend(column_name_tokens);
         query_str_arr.push(" = ");
         query_str_arr.push(set_prepared_value);
 
@@ -265,7 +266,7 @@ fn build_update_statement(
                     Some(&mut prepared_value_pos),
                 )?;
             where_string = where_string_with_prepared_positions;
-            prepared_statement_values.extend(prepared_values_vec);
+            prepared_statement_values.par_extend(prepared_values_vec);
 
             query_str_arr.push(&where_string);
 
@@ -286,7 +287,7 @@ fn build_update_statement(
         query_str_arr.push("\nRETURNING\n  ");
 
         let returning_columns_str = get_columns_str(returned_column_names, &params.table, &fks)?;
-        query_str_arr.extend(returning_columns_str);
+        query_str_arr.par_extend(returning_columns_str);
     }
 
     query_str_arr.push(";");

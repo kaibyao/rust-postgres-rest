@@ -1,5 +1,6 @@
 use actix::Addr;
 use futures::future::{err, join_all, ok, Either, Future};
+use rayon::prelude::*;
 use sqlparser::ast::{Expr, Function};
 use std::{
     borrow::{Borrow, BorrowMut},
@@ -33,22 +34,22 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
             fks.push((non_nested_column_name.clone(), ast));
         }
         Expr::IsNull(null_ast_box) => {
-            fks.extend(fk_ast_nodes_from_where_ast(null_ast_box.borrow_mut()));
+            fks.par_extend(fk_ast_nodes_from_where_ast(null_ast_box.borrow_mut()));
         }
         Expr::IsNotNull(null_ast_box) => {
-            fks.extend(fk_ast_nodes_from_where_ast(null_ast_box.borrow_mut()));
+            fks.par_extend(fk_ast_nodes_from_where_ast(null_ast_box.borrow_mut()));
         }
         Expr::InList {
             expr: list_expr_ast_box_ref,
             list: list_ast_vec,
             ..
         } => {
-            fks.extend(fk_ast_nodes_from_where_ast(
+            fks.par_extend(fk_ast_nodes_from_where_ast(
                 list_expr_ast_box_ref.borrow_mut(),
             ));
 
             for list_ast in list_ast_vec {
-                fks.extend(fk_ast_nodes_from_where_ast(list_ast));
+                fks.par_extend(fk_ast_nodes_from_where_ast(list_ast));
             }
         }
         Expr::BinaryOp {
@@ -56,10 +57,10 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
             right: bin_right_ast_box_ref,
             ..
         } => {
-            fks.extend(fk_ast_nodes_from_where_ast(
+            fks.par_extend(fk_ast_nodes_from_where_ast(
                 bin_left_ast_box_ref.borrow_mut(),
             ));
-            fks.extend(fk_ast_nodes_from_where_ast(
+            fks.par_extend(fk_ast_nodes_from_where_ast(
                 bin_right_ast_box_ref.borrow_mut(),
             ));
         }
@@ -67,16 +68,16 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
             expr: cast_expr_box_ref,
             ..
         } => {
-            fks.extend(fk_ast_nodes_from_where_ast(cast_expr_box_ref.borrow_mut()));
+            fks.par_extend(fk_ast_nodes_from_where_ast(cast_expr_box_ref.borrow_mut()));
         }
         Expr::Nested(nested_ast_box_ref) => {
-            fks.extend(fk_ast_nodes_from_where_ast(nested_ast_box_ref.borrow_mut()));
+            fks.par_extend(fk_ast_nodes_from_where_ast(nested_ast_box_ref.borrow_mut()));
         }
         Expr::UnaryOp {
             expr: unary_expr_box_ref,
             ..
         } => {
-            fks.extend(fk_ast_nodes_from_where_ast(unary_expr_box_ref.borrow_mut()));
+            fks.par_extend(fk_ast_nodes_from_where_ast(unary_expr_box_ref.borrow_mut()));
         }
         Expr::Between {
             expr: between_expr_ast_box_ref,
@@ -84,13 +85,13 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
             high: between_high_ast_box_ref,
             ..
         } => {
-            fks.extend(fk_ast_nodes_from_where_ast(
+            fks.par_extend(fk_ast_nodes_from_where_ast(
                 between_expr_ast_box_ref.borrow_mut(),
             ));
-            fks.extend(fk_ast_nodes_from_where_ast(
+            fks.par_extend(fk_ast_nodes_from_where_ast(
                 between_low_ast_box_ref.borrow_mut(),
             ));
-            fks.extend(fk_ast_nodes_from_where_ast(
+            fks.par_extend(fk_ast_nodes_from_where_ast(
                 between_high_ast_box_ref.borrow_mut(),
             ));
         }
@@ -98,7 +99,7 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
             args: args_ast_vec, ..
         }) => {
             for ast_arg in args_ast_vec {
-                fks.extend(fk_ast_nodes_from_where_ast(ast_arg));
+                fks.par_extend(fk_ast_nodes_from_where_ast(ast_arg));
             }
         }
         Expr::Case {
@@ -108,21 +109,25 @@ pub fn fk_ast_nodes_from_where_ast(ast: &mut Expr) -> Vec<(String, &mut Expr)> {
             ..
         } => {
             for case_condition_ast in case_conditions_ast_vec {
-                fks.extend(fk_ast_nodes_from_where_ast(case_condition_ast));
+                fks.par_extend(fk_ast_nodes_from_where_ast(case_condition_ast));
             }
 
             for case_results_ast_vec in case_results_ast_vec {
-                fks.extend(fk_ast_nodes_from_where_ast(case_results_ast_vec));
+                fks.par_extend(fk_ast_nodes_from_where_ast(case_results_ast_vec));
             }
 
             if let Some(case_else_results_ast_box) = case_else_results_ast_box_opt {
-                fks.extend(fk_ast_nodes_from_where_ast(
+                fks.par_extend(fk_ast_nodes_from_where_ast(
                     case_else_results_ast_box.borrow_mut(),
                 ));
             }
         }
-        Expr::Collate { expr, .. } => fks.extend(fk_ast_nodes_from_where_ast(expr.borrow_mut())),
-        Expr::Extract { expr, .. } => fks.extend(fk_ast_nodes_from_where_ast(expr.borrow_mut())),
+        Expr::Collate { expr, .. } => {
+            fks.par_extend(fk_ast_nodes_from_where_ast(expr.borrow_mut()))
+        }
+        Expr::Extract { expr, .. } => {
+            fks.par_extend(fk_ast_nodes_from_where_ast(expr.borrow_mut()))
+        }
         // below is unsupported
         Expr::Exists(_query_box) => (), // EXISTS(subquery) not supported
         Expr::Wildcard => (),
@@ -147,20 +152,20 @@ pub fn fk_columns_from_where_ast(ast: &Expr) -> Vec<String> {
             fks.push(nested_fk_column_vec.join("."));
         }
         Expr::IsNull(null_ast_box) => {
-            fks.extend(fk_columns_from_where_ast(null_ast_box.as_ref()));
+            fks.par_extend(fk_columns_from_where_ast(null_ast_box.as_ref()));
         }
         Expr::IsNotNull(null_ast_box) => {
-            fks.extend(fk_columns_from_where_ast(null_ast_box.as_ref()));
+            fks.par_extend(fk_columns_from_where_ast(null_ast_box.as_ref()));
         }
         Expr::InList {
             expr: list_expr_ast_box_ref,
             list: list_ast_vec,
             ..
         } => {
-            fks.extend(fk_columns_from_where_ast(list_expr_ast_box_ref.as_ref()));
+            fks.par_extend(fk_columns_from_where_ast(list_expr_ast_box_ref.as_ref()));
 
             for list_ast in list_ast_vec {
-                fks.extend(fk_columns_from_where_ast(list_ast));
+                fks.par_extend(fk_columns_from_where_ast(list_ast));
             }
         }
         Expr::BinaryOp {
@@ -168,23 +173,23 @@ pub fn fk_columns_from_where_ast(ast: &Expr) -> Vec<String> {
             right: bin_right_ast_box_ref,
             ..
         } => {
-            fks.extend(fk_columns_from_where_ast(bin_left_ast_box_ref.as_ref()));
-            fks.extend(fk_columns_from_where_ast(bin_right_ast_box_ref.as_ref()));
+            fks.par_extend(fk_columns_from_where_ast(bin_left_ast_box_ref.as_ref()));
+            fks.par_extend(fk_columns_from_where_ast(bin_right_ast_box_ref.as_ref()));
         }
         Expr::Cast {
             expr: cast_expr_box_ref,
             ..
         } => {
-            fks.extend(fk_columns_from_where_ast(cast_expr_box_ref.as_ref()));
+            fks.par_extend(fk_columns_from_where_ast(cast_expr_box_ref.as_ref()));
         }
         Expr::Nested(nested_ast_box_ref) => {
-            fks.extend(fk_columns_from_where_ast(nested_ast_box_ref.as_ref()));
+            fks.par_extend(fk_columns_from_where_ast(nested_ast_box_ref.as_ref()));
         }
         Expr::UnaryOp {
             expr: unary_expr_box_ref,
             ..
         } => {
-            fks.extend(fk_columns_from_where_ast(unary_expr_box_ref.as_ref()));
+            fks.par_extend(fk_columns_from_where_ast(unary_expr_box_ref.as_ref()));
         }
         Expr::Between {
             expr: between_expr_ast_box_ref,
@@ -192,15 +197,15 @@ pub fn fk_columns_from_where_ast(ast: &Expr) -> Vec<String> {
             high: between_high_ast_box_ref,
             ..
         } => {
-            fks.extend(fk_columns_from_where_ast(between_expr_ast_box_ref.as_ref()));
-            fks.extend(fk_columns_from_where_ast(between_low_ast_box_ref.as_ref()));
-            fks.extend(fk_columns_from_where_ast(between_high_ast_box_ref.as_ref()));
+            fks.par_extend(fk_columns_from_where_ast(between_expr_ast_box_ref.as_ref()));
+            fks.par_extend(fk_columns_from_where_ast(between_low_ast_box_ref.as_ref()));
+            fks.par_extend(fk_columns_from_where_ast(between_high_ast_box_ref.as_ref()));
         }
         Expr::Function(Function {
             args: args_ast_vec, ..
         }) => {
             for ast_arg in args_ast_vec {
-                fks.extend(fk_columns_from_where_ast(ast_arg));
+                fks.par_extend(fk_columns_from_where_ast(ast_arg));
             }
         }
         Expr::Case {
@@ -210,21 +215,21 @@ pub fn fk_columns_from_where_ast(ast: &Expr) -> Vec<String> {
             ..
         } => {
             for case_condition_ast in case_conditions_ast_vec {
-                fks.extend(fk_columns_from_where_ast(case_condition_ast));
+                fks.par_extend(fk_columns_from_where_ast(case_condition_ast));
             }
 
             for case_results_ast_vec in case_results_ast_vec {
-                fks.extend(fk_columns_from_where_ast(case_results_ast_vec));
+                fks.par_extend(fk_columns_from_where_ast(case_results_ast_vec));
             }
 
             if let Some(case_else_results_ast_box) = case_else_results_ast_box_opt {
-                fks.extend(fk_columns_from_where_ast(
+                fks.par_extend(fk_columns_from_where_ast(
                     case_else_results_ast_box.as_ref(),
                 ));
             }
         }
-        Expr::Collate { expr, .. } => fks.extend(fk_columns_from_where_ast(expr.as_ref())),
-        Expr::Extract { expr, .. } => fks.extend(fk_columns_from_where_ast(expr.as_ref())),
+        Expr::Collate { expr, .. } => fks.par_extend(fk_columns_from_where_ast(expr.as_ref())),
+        Expr::Extract { expr, .. } => fks.par_extend(fk_columns_from_where_ast(expr.as_ref())),
         // below is unsupported
         Expr::Exists(_query_box) => (), // EXISTS(subquery) not supported
         Expr::Identifier(_non_nested_column_name) => (),
@@ -383,7 +388,7 @@ impl ForeignKeyReference {
         columns: Vec<String>,
     ) -> Box<dyn Future<Item = Vec<Self>, Error = Error> + Send> {
         let mut fk_columns: Vec<String> = columns
-            .iter()
+            .par_iter()
             .filter_map(|col| {
                 if col.contains('.') {
                     Some(col.to_string())
@@ -540,8 +545,8 @@ impl ForeignKeyReference {
                 }
 
                 match fk_columns_grouped
-                    .iter()
-                    .find(|(parent_col, _child_col_vec)| parent_col == &&stat.column_name)
+                    .par_iter()
+                    .find_any(|(parent_col, _child_col_vec)| parent_col == &&stat.column_name)
                 {
                     Some((
                         matched_parent_fk_column,
@@ -550,7 +555,7 @@ impl ForeignKeyReference {
                         matched_columns.push((
                             matched_parent_fk_column.to_string(),
                             matched_child_col_vec
-                                .iter()
+                                .par_iter()
                                 .map(|s| s.to_string())
                                 .collect(),
                             matched_orig_refs.clone(),
@@ -581,14 +586,14 @@ impl ForeignKeyReference {
             let (_parent_col_match, child_columns_match, original_refs_match) = &matched_columns[i];
 
             let original_refs = original_refs_match
-                .iter()
+                .par_iter()
                 .map(|col| col.to_string())
                 .collect();
             let foreign_key_table = stat.foreign_key_table.clone().unwrap();
 
             // filter child columns to just the foreign keys
             let child_fk_columns: Vec<String> = child_columns_match
-                .iter()
+                .par_iter()
                 .filter_map(|child_col| {
                     if !child_col.contains('.') {
                         return None;
@@ -697,7 +702,10 @@ impl ForeignKeyReference {
 
             // see if any of the `ForeignKeyReference`s have any original references that match the
             // given column name
-            let found_orig_ref = fkr.original_refs.iter().find(|ref_col| col == *ref_col);
+            let found_orig_ref = fkr
+                .original_refs
+                .par_iter()
+                .find_any(|ref_col| col == *ref_col);
 
             if found_orig_ref.is_some() {
                 if !fkr.nested_fks.is_empty() {
@@ -764,7 +772,7 @@ impl ForeignKeyReference {
                 &fk.foreign_key_column,
             ));
 
-            join_data.extend(Self::fk_join_expr_calc(&fk.nested_fks));
+            join_data.par_extend(Self::fk_join_expr_calc(&fk.nested_fks));
         }
 
         join_data

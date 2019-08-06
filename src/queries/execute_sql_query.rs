@@ -7,6 +7,7 @@ use futures::{
     future::{Either, Future},
     stream::Stream,
 };
+use rayon::prelude::*;
 use tokio_postgres::Client;
 
 pub fn execute_sql_query(
@@ -24,7 +25,7 @@ pub fn execute_sql_query(
                     .collect()
                     .and_then(|rows| {
                         let convert_row_result: Result<Vec<RowValues>, Error> =
-                            rows.iter().map(row_to_row_values).collect();
+                            rows.par_iter().map(row_to_row_values).collect();
 
                         convert_row_result
                     })

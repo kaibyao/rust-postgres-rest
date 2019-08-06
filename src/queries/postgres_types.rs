@@ -3,6 +3,7 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use eui48::MacAddress as Eui48MacAddress;
 use failure::Fail;
 use postgres_protocol::types::macaddr_to_sql;
+use rayon::prelude::*;
 use rust_decimal::Decimal;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -555,7 +556,7 @@ impl TypedColumnValue {
                         Ok(Some(nested_fk_column_vec.join(".")))
                     }
                     _ => {
-                        prepared_statement_values.extend(Self::generate_prepared_values(
+                        prepared_statement_values.par_extend(Self::generate_prepared_values(
                             possible_column_name_expr,
                             table,
                             column_types,
@@ -647,7 +648,7 @@ impl TypedColumnValue {
                 ..
             } => {
                 for case_condition_ast in case_conditions_ast_vec {
-                    prepared_statement_values.extend(Self::generate_prepared_values(
+                    prepared_statement_values.par_extend(Self::generate_prepared_values(
                         case_condition_ast,
                         table,
                         column_types,
@@ -656,7 +657,7 @@ impl TypedColumnValue {
                 }
 
                 for case_results_ast_vec in case_results_ast_vec {
-                    prepared_statement_values.extend(Self::generate_prepared_values(
+                    prepared_statement_values.par_extend(Self::generate_prepared_values(
                         case_results_ast_vec,
                         table,
                         column_types,
@@ -665,7 +666,7 @@ impl TypedColumnValue {
                 }
 
                 if let Some(case_else_results_ast_box) = case_else_results_ast_box_opt {
-                    prepared_statement_values.extend(Self::generate_prepared_values(
+                    prepared_statement_values.par_extend(Self::generate_prepared_values(
                         case_else_results_ast_box.borrow_mut(),
                         table,
                         column_types,
@@ -677,7 +678,7 @@ impl TypedColumnValue {
                 expr: cast_expr_box,
                 ..
             } => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
+                prepared_statement_values.par_extend(Self::generate_prepared_values(
                     cast_expr_box,
                     table,
                     column_types,
@@ -685,7 +686,7 @@ impl TypedColumnValue {
                 )?);
             }
             Expr::Collate { expr, .. } => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
+                prepared_statement_values.par_extend(Self::generate_prepared_values(
                     expr,
                     table,
                     column_types,
@@ -693,7 +694,7 @@ impl TypedColumnValue {
                 )?);
             }
             Expr::Extract { expr, .. } => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
+                prepared_statement_values.par_extend(Self::generate_prepared_values(
                     expr,
                     table,
                     column_types,
@@ -704,7 +705,7 @@ impl TypedColumnValue {
                 args: args_ast_vec, ..
             }) => {
                 for expr in args_ast_vec {
-                    prepared_statement_values.extend(Self::generate_prepared_values(
+                    prepared_statement_values.par_extend(Self::generate_prepared_values(
                         expr,
                         table,
                         column_types,
@@ -713,7 +714,7 @@ impl TypedColumnValue {
                 }
             }
             Expr::InSubquery { expr: expr_box, .. } => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
+                prepared_statement_values.par_extend(Self::generate_prepared_values(
                     expr_box.borrow_mut(),
                     table,
                     column_types,
@@ -721,7 +722,7 @@ impl TypedColumnValue {
                 )?);
             }
             Expr::IsNotNull(null_ast_box) => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
+                prepared_statement_values.par_extend(Self::generate_prepared_values(
                     null_ast_box.borrow_mut(),
                     table,
                     column_types,
@@ -729,7 +730,7 @@ impl TypedColumnValue {
                 )?);
             }
             Expr::IsNull(null_ast_box) => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
+                prepared_statement_values.par_extend(Self::generate_prepared_values(
                     null_ast_box.borrow_mut(),
                     table,
                     column_types,
@@ -737,7 +738,7 @@ impl TypedColumnValue {
                 )?);
             }
             Expr::Nested(nested_ast_box) => {
-                prepared_statement_values.extend(Self::generate_prepared_values(
+                prepared_statement_values.par_extend(Self::generate_prepared_values(
                     nested_ast_box.borrow_mut(),
                     table,
                     column_types,
@@ -788,7 +789,7 @@ impl TypedColumnValue {
             }
         }
 
-        prepared_statement_values.extend(Self::generate_prepared_values(
+        prepared_statement_values.par_extend(Self::generate_prepared_values(
             expr,
             table,
             column_types,
@@ -824,7 +825,7 @@ impl TypedColumnValue {
         match value.as_array() {
             Some(raw_bytea_json_vec) => {
                 let bytea_conversion: Result<Vec<u8>, Error> = raw_bytea_json_vec
-                    .iter()
+                    .par_iter()
                     .map(|json_val| match json_val.as_u64() {
                         Some(bytea_val) => Ok(bytea_val as u8),
                         None => Err(Error::generate_error(
