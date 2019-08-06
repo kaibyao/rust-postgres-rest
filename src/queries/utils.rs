@@ -1,6 +1,6 @@
 use super::{
     foreign_keys::{fk_ast_nodes_from_where_ast, ForeignKeyReference},
-    postgres_types::{row_to_row_values, TypedColumnValue, RowValues},
+    postgres_types::{row_to_row_values, RowValues, TypedColumnValue},
     query_types::QueryResult,
     select_table_stats::TableColumnStat,
 };
@@ -10,7 +10,7 @@ use futures::{
     stream::Stream,
 };
 use lazy_static::lazy_static;
-use regex::Regex;
+use regex::{Regex, RegexSet};
 use sqlparser::{
     ast::{Expr, SetExpr, Statement},
     dialect::PostgreSqlDialect,
@@ -18,6 +18,12 @@ use sqlparser::{
 };
 use std::{collections::HashMap, string::ToString};
 use tokio_postgres::types::ToSql;
+
+// Searching for " AS " alias
+static ALIAS_RE_STR: &str = r"(?i) AS ";
+// Taken from validate_where_column. Contains exactly a valid column names followed by a space,
+// followed by an string containing only alphanumeric characters or underscore.
+static SHORTENED_ALIAS_RE_STR: &str = r"^[A-Za-z_][A-Za-z0-9_\(\)\.\*]*[^\.\*\s]?\s+\w+$";
 
 /// Converts a WHERE clause string into an Expr.
 pub fn conditions_params_to_ast(clause_opt: &Option<String>) -> Result<Expr, Error> {
@@ -49,6 +55,16 @@ pub fn conditions_params_to_ast(clause_opt: &Option<String>) -> Result<Expr, Err
             Ok(Expr::Identifier("".to_string()))
         }
         None => Ok(Expr::Identifier("".to_string())),
+    }
+}
+
+/// Finds and returns the Expr that represents the WHERE clause of a SELECT statement
+fn extract_where_ast_from_setexpr(expr: SetExpr) -> Option<Expr> {
+    match expr {
+        SetExpr::Query(boxed_sql_query) => extract_where_ast_from_setexpr(boxed_sql_query.body),
+        SetExpr::Select(select_box) => select_box.to_owned().selection,
+        SetExpr::SetOperation { .. } => unimplemented!("Set operations not supported"),
+        SetExpr::Values(_) => unimplemented!("Values not supported"),
     }
 }
 
@@ -285,10 +301,9 @@ pub fn validate_where_column(name: &str) -> Result<(), Error> {
     lazy_static! {
         // Rules:
         // - Starts with a letter (or underscore).
-        // - Only contains letters, numbers, underscores, and parentheses.
+        // - Only contains letters, numbers, dots, underscores, and parentheses.
         // - Must not end in a dot (.) or asterisk (*).
-        static ref VALID_REGEX: Regex = Regex::new(r"^[A-Za-z_][A-Za-z0-9_\(\)\.\*]*[^\.\*]$").unwrap();
-
+        static ref VALID_REGEX: Regex = Regex::new(r"^[A-Za-z_][A-Za-z0-9_\(\)\.\*]*$").unwrap();
     }
 
     if name == "table" {
@@ -305,40 +320,61 @@ pub fn validate_where_column(name: &str) -> Result<(), Error> {
         ));
     }
 
+    // Have to test if the last character is valid (is not a '.', '*', or "space" character).
+    // This is because the regex doesn't catch that (and the Regex crate doesn't support negative
+    // look-aheads).
+    let name_bytes = name.as_bytes();
+    let last_char = name_bytes[name_bytes.len() - 1];
+    let dot_bytes = b".";
+    let asterisk_bytes = b"*";
+
+    if last_char == dot_bytes[0] || last_char == asterisk_bytes[0] {
+        return Err(Error::generate_error(
+            "INVALID_SQL_IDENTIFIER",
+            name.to_string(),
+        ));
+    }
+
     Ok(())
 }
 
-/// Check for " AS ", then validate both the original, non-aliased identifier, as well as the alias.
-/// If it is an alias, return a tuple containing: (actual column name, column alias).
+/// Check for column aliases ("column AS c" or "column c"), then validate both the original,
+/// non-aliased identifier, as well as the alias. If it is an alias, return a tuple containing:
+/// (actual column name, column alias).
 pub fn validate_alias_identifier(identifier: &str) -> Result<Option<(&str, &str)>, Error> {
     lazy_static! {
         // Searching for " AS " alias
-        static ref AS_REGEX: Regex = Regex::new(r"(?i) AS ").unwrap();
+        static ref ALIAS_RE: Regex = Regex::new(ALIAS_RE_STR).unwrap();
+        // Taken from validate_where_column. Contains exactly a valid column names followed by a space, followed by an string containing only alphanumeric characters or underscore.
+        static ref SHORTENED_ALIAS_RE: Regex = Regex::new(SHORTENED_ALIAS_RE_STR).unwrap();
+        // Search for either of the above first.
+        static ref ALIAS_REGEX_SET: RegexSet = RegexSet::new(&[ALIAS_RE_STR, SHORTENED_ALIAS_RE_STR]).unwrap();
     }
 
-    if !AS_REGEX.is_match(identifier) {
+    let matches = ALIAS_REGEX_SET.matches(identifier);
+
+    if !matches.matched_any() {
         validate_where_column(identifier)?;
         return Ok(None);
     }
 
-    let matched = AS_REGEX.find(identifier).unwrap();
+    let matched = if matches.matched(0) {
+        ALIAS_RE.find(identifier).unwrap()
+    } else {
+        lazy_static! {
+            // split into orig and alias (unknown number of whitespace characters in between)
+            static ref SPLIT_SHORTENED_ALIAS_RE: Regex = Regex::new(r"\s+").unwrap();
+        }
+
+        SPLIT_SHORTENED_ALIAS_RE.find(identifier).unwrap()
+    };
+
     let orig = &identifier[..matched.start()];
     let alias = &identifier[matched.end()..];
-
     validate_where_column(orig)?;
     validate_where_column(alias)?;
 
     Ok(Some((orig, alias)))
-}
-
-/// Finds and returns the Expr that represents the WHERE clause of a SELECT statement
-fn extract_where_ast_from_setexpr(expr: SetExpr) -> Option<Expr> {
-    match expr {
-        SetExpr::Query(boxed_sql_query) => extract_where_ast_from_setexpr(boxed_sql_query.body),
-        SetExpr::Select(select_box) => select_box.to_owned().selection,
-        SetExpr::SetOperation { .. } => unimplemented!("Set operations not supported"),
-        SetExpr::Values(_) => unimplemented!("Values not supported"),
-    }
 }
 
 #[cfg(test)]
@@ -707,6 +743,11 @@ mod validate_where_column_tests {
     use super::*;
 
     #[test]
+    fn single_letter() {
+        assert!(validate_where_column("a").is_ok());
+    }
+
+    #[test]
     fn count() {
         assert!(validate_where_column("COUNT(*)").is_ok());
         assert!(validate_where_column("COUNT(id)").is_ok());
@@ -717,6 +758,12 @@ mod validate_where_column_tests {
         assert!(validate_where_column("user_id.company_id.name").is_ok());
         assert!(validate_where_column("user_id.company_id.").is_err());
     }
+
+    #[test]
+    fn wildcard_ending() {
+        assert!(validate_where_column("user_id*").is_err());
+        assert!(validate_where_column("*").is_err());
+    }
 }
 
 #[cfg(test)]
@@ -726,7 +773,6 @@ mod validate_alias_identifier_tests {
 
     #[test]
     fn as_alias() {
-        // may change later
         assert_eq!(
             validate_alias_identifier("arya AS arry").unwrap(),
             Some(("arya", "arry"))
@@ -734,6 +780,27 @@ mod validate_alias_identifier_tests {
         assert!(validate_alias_identifier(" AS arry").is_err());
         assert!(validate_alias_identifier("arya AS arry AS cat").is_err());
         assert!(validate_alias_identifier("arya AS  AS arry").is_err());
+    }
+
+    #[test]
+    fn shortened_alias() {
+        assert_eq!(
+            validate_alias_identifier("arya arry").unwrap(),
+            Some(("arya", "arry"))
+        );
+        assert_eq!(
+            validate_alias_identifier("arya  arry").unwrap(),
+            Some(("arya", "arry"))
+        );
+        assert_eq!(
+            validate_alias_identifier("arya \n arry").unwrap(),
+            Some(("arya", "arry"))
+        );
+        assert_eq!(
+            validate_alias_identifier("arya \t arry").unwrap(),
+            Some(("arya", "arry"))
+        );
+        assert!(validate_alias_identifier("arya arry cat").is_err());
     }
 }
 

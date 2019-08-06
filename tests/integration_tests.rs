@@ -286,6 +286,41 @@ fn get_table_record_alias() {
 }
 
 #[test]
+fn get_table_record_alias_shortened() {
+    run_setup();
+
+    // test the non-cached path
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/test_fields?columns=COUNT(id) counted_ids&group_by=id&order_by=counted_ids",
+    ]
+    .join("");
+    let mut res = reqwest::get(&url).unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!([{"counted_ids": 1}]));
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // test the cached path
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &CACHE_PORT,
+        "/api/test_fields?columns=COUNT(id) counted_ids&group_by=id&order_by=counted_ids",
+    ]
+    .join("");
+    let mut res = reqwest::get(&url).unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!([{"counted_ids": 1}]));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
 fn get_table_records_wildcards() {
     run_setup();
 
@@ -458,6 +493,30 @@ fn get_table_records_foreign_keys_nested_aliases() {
         &SERVER_IP, ":",
         &CACHE_PORT,
         "/api/child?columns=id,name,parent_id.name as parent_name,parent_id.company_id.name as parent_company_name",
+    ]
+    .join("");
+    let mut res = reqwest::get(&url).unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, expected_response_body);
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn get_table_records_foreign_keys_nested_aliases_shortened() {
+    run_setup();
+    let expected_response_body = json!([{
+        "id": 1000,
+        "name": "Robb",
+        "parent_name": "Ned",
+        "parent_company_name": "Stark Corporation",
+    }]);
+
+    let url = [
+        "http://",
+        &SERVER_IP, ":",
+        &CACHE_PORT,
+        "/api/child?columns=id,name,parent_id.name parent_name,parent_id.company_id.name parent_company_name",
     ]
     .join("");
     let mut res = reqwest::get(&url).unwrap();
@@ -929,6 +988,32 @@ fn put_table_records_nested_fk_in_returning_column_aliases() {
 }
 
 #[test]
+fn put_table_records_nested_fk_in_returning_column_aliases_shortened() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/player?where=id%3D2&returning_columns=id, team_id.name team_name",
+    ]
+    .join("");
+    let mut res = Client::new()
+        .request(Method::PUT, &url)
+        .json(&json!({"name": "team_id.coach_id.name"}))
+        .send()
+        .unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(
+        response_body,
+        json!([{ "id": 2, "team_name": "Golden State Warriors" }])
+    );
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
 fn delete_table_records_no_confirm() {
     run_setup();
 
@@ -1012,6 +1097,25 @@ fn delete_table_records_return_fk_column_alias() {
         ":",
         &NO_CACHE_PORT,
         "/api/delete_a?confirm_delete&where=id%3D5&returning_columns=b_id.id as b_id",
+    ]
+    .join("");
+    let mut res = Client::new().request(Method::DELETE, &url).send().unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(response_body, json!([{ "b_id": 4 }]));
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn delete_table_records_return_fk_column_alias_shortened() {
+    run_setup();
+
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &NO_CACHE_PORT,
+        "/api/delete_a?confirm_delete&where=id%3D6&returning_columns=b_id.id b_id",
     ]
     .join("");
     let mut res = Client::new().request(Method::DELETE, &url).send().unwrap();

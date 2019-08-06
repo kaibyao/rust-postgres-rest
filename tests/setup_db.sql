@@ -253,6 +253,7 @@ INSERT INTO public.delete_a
   (2, 2),
   (3, 2),
   (4, 3),
-  (5, 4);
+  (5, 4),
+  (6, 4);
 
 INSERT INTO public.delete_simple (id) VALUES (1), (2), (3);

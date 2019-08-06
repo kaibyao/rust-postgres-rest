@@ -102,7 +102,7 @@ Will return the following JSON:
 
 #### Alias (`AS`) syntax is supported too
 
-Changing the previous API endpoint to `/api/child?columns=id,name,parent_id.name as parent_name,parent_id.company_id.name as parent_company_name` will return the aliased fields instead:
+Changing the previous API endpoint to `/api/child?columns=id,name,parent_id.name as parent_name,parent_id.company_id.name as parent_company_name` or `/api/child?columns=id,name,parent_id.name parent_name,parent_id.company_id.name parent_company_name` will return the aliased fields instead:
 
 ```json
 [
@@ -478,7 +478,7 @@ The second row (with id = 3) is deleted from the table `delete_a`.
 Note that this does not remove rows from the table referenced by the foreign key.
 
 ```plaintext
-DELETE /api/delete_a?confirm_delete&whereid%3D3&returning_columns=b_id.id as b_id
+DELETE /api/delete_a?confirm_delete&whereid%3D3&returning_columns=b_id.id b_id
 
 Result:
 { "b_id": 2 }
@@ -544,7 +544,6 @@ Result:
 
 ## To dos
 
-1. Shortened alias syntax ("some_table a" vs "some_table AS a")
 1. parallelize all iters (with Rayon + par_iter).
 1. Errors section in docs
 1. TOC in docs
