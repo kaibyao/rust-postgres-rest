@@ -157,6 +157,10 @@ Requires the `stats_cache` cargo feature to be enabled (which is enabled by defa
 
 Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to a positive integer `n`, automatically refresh the Table Stats cache every `n` seconds. When set to `0`, the cache is never automatically reset.
 
+### `is_custom_sql_execution_endpoint_enabled: bool (default: false)`
+
+When set to `true`, an additional API endpoint is made available at `{scope_name}/sql`, which allows for custom SQL queries to be executed.
+
 ### `scope_name: &'static str (default: "/api")`
 
 The API endpoint that contains all of the other API operations available in this library.
@@ -510,7 +514,7 @@ The second row (with id = 3) is deleted from the table `delete_a`.
 
 ### `POST /sql`
 
-Runs any passed-in SQL query (which is dangerous). This is here in case the above endpoints aren’t sufficient for complex operations you might need. Be careful if/how you expose this endpoint (honestly it should never be exposed and if used, only used internally with hardcoded or extremely sanitized values).
+Runs any passed-in SQL query (which is dangerous). This is here in case the above endpoints aren’t sufficient for complex operations you might need. Be careful if/how you expose this endpoint (honestly it should never be exposed and if used, only used internally with hardcoded or extremely sanitized values). By default, this endpoint is disabled and must be enabled by setting `is_custom_sql_execution_endpoint_enabled = true` in the configuration object.
 
 #### Body schema for `POST /sql`
 
@@ -570,7 +574,6 @@ See [source](src/error.rs).
 
 ## To dos
 
-1. Make an option to enable /sql endpoint and make it disabled by default
 1. break into workspaces
 1. benchmark
 1. GraphQL API

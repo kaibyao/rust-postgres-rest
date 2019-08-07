@@ -44,6 +44,9 @@ pub struct AppConfig {
     /// set to a positive integer `n`, automatically refresh the Table Stats cache every `n`
     /// seconds. Default: `0` (cache is never automatically reset).
     pub cache_reset_interval_seconds: u32,
+    /// When set to `true`, an additional API endpoint is made available at `{scope_name}/sql`,
+    /// which allows for custom SQL queries to be executed. Default: `false`.
+    pub is_custom_sql_execution_endpoint_enabled: bool,
     /// The API endpoint that contains all of the other API operations available in this library.
     pub scope_name: &'static str,
 }
@@ -55,6 +58,7 @@ impl Default for AppConfig {
             is_cache_table_stats: false,
             is_cache_reset_endpoint_enabled: false,
             cache_reset_interval_seconds: 0,
+            is_custom_sql_execution_endpoint_enabled: false,
             scope_name: "/api",
         }
     }
@@ -98,12 +102,15 @@ pub fn generate_rest_api_scope(config: AppConfig) -> Scope {
         );
     }
 
+    if state.config.is_custom_sql_execution_endpoint_enabled {
+        scope = scope.route("/sql", web::post().to_async(execute_sql));
+    }
+
     scope
         .data(state)
         .route("", web::get().to(index))
         .route("/", web::get().to(index))
         .route("/table", web::get().to_async(get_all_table_names))
-        .route("/sql", web::post().to_async(execute_sql))
         .service(
             web::resource("/{table}")
                 .route(web::delete().to_async(delete_table))

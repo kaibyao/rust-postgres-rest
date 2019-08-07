@@ -30,6 +30,7 @@ pub fn start_web_server(db_url: &'static str, address: &'static str) {
         HttpServer::new(move || {
             let mut config = AppConfig::new();
             config.db_url = db_url;
+            config.is_custom_sql_execution_endpoint_enabled = true;
 
             App::new().service(generate_rest_api_scope(config))
         })
