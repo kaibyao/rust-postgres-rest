@@ -33,6 +33,23 @@ fn main() {
 
 `generate_rest_api_scope()` creates the `/api/table` and `/api/{table}` endpoints, which allow for CRUD operations on table rows in your database.
 
+## Table of contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Configuration](#configuration)
+- [Endpoints](#endpoints)
+  - [`GET /` — “Table of contents”](#-get---)
+  - [`GET /{table}` — Get table rows (SELECT)](#-get---table--)
+  - [`POST /{table}` — Insert table rows (INSERT)](#-post---table--)
+  - [`PUT /{table}` — Update table rows (UPDATE)](#-put---table--)
+  - [`DELETE /{table}` — Delete table rows (DELETE)](#-delete---table--)
+  - [`POST /sql` — Execute custom SQL](#-post--sql-)
+- [Error messages](#error-messages)
+- [Not supported](#not-supported)
+- [To dos](#to-dos)
+- [To run tests](#to-run-tests)
+
 ## Features
 
 ### It’s fast
@@ -540,6 +557,10 @@ Result:
 { "id": 1, "name": "Stark Corporation" }
 ```
 
+## Error messages
+
+See [source](src/error.rs).
+
 ## Not supported
 
 - HStore (`rust-sqlparser` doesn't support it). Use JSON/JSONB instead.
@@ -549,9 +570,9 @@ Result:
 
 ## To dos
 
-1. Errors section in docs
-1. TOC in docs
 1. Make an option to enable /sql endpoint and make it disabled by default
+1. break into workspaces
+1. benchmark
 1. GraphQL API
 1. Optimization: Convert Strings to &str / statics.
 1. CSV, XML for REST API (nix for now?)
