@@ -9,7 +9,7 @@ use tokio_postgres::{types::ToSql, Client};
 
 use super::{
     postgres_types::{row_to_row_values, RowValues, TypedColumnValue},
-    query_types::{QueryParamsInsert, QueryResult},
+    query_types::{InsertParams, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{get_columns_str, validate_where_column},
 };
@@ -26,7 +26,7 @@ pub enum InsertResult {
 /// Runs an INSERT INTO <table> query
 pub fn insert_into_table(
     mut conn: Client,
-    params: QueryParamsInsert,
+    params: InsertParams,
 ) -> impl Future<Item = QueryResult, Error = Error> {
     // serde_json::Values can't automatically convert to non-JSON/JSONB columns.
     // Therefore, get column types of table so we know what types into which the json values are
@@ -165,13 +165,13 @@ pub fn insert_into_table(
 /// Runs the actual setting up + execution of the INSERT query
 fn execute_insert<'a>(
     mut conn: Client,
-    params: QueryParamsInsert,
+    params: InsertParams,
     column_types: HashMap<String, &'static str>,
     rows: &'a [Map<String, Value>],
 ) -> impl Future<
     Item = (
         Client,
-        QueryParamsInsert,
+        InsertParams,
         HashMap<String, &'static str>,
         InsertResult,
     ),
@@ -287,7 +287,7 @@ fn execute_insert<'a>(
 /// Generates the ON CONFLICT clause. If conflict action is "nothing", then "DO NOTHING" is
 /// returned. If conflict action is "update", then sets all columns that aren't conflict target
 /// columns to the excluded row's column value.
-fn generate_conflict_str(params: &QueryParamsInsert, columns: &[&str]) -> Option<String> {
+fn generate_conflict_str(params: &InsertParams, columns: &[&str]) -> Option<String> {
     if let (Some(conflict_action_str), Some(conflict_target_vec)) =
         (&params.conflict_action, &params.conflict_target)
     {

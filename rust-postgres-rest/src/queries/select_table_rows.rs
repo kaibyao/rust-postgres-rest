@@ -12,19 +12,19 @@ use tokio_postgres::types::ToSql;
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
     postgres_types::{row_to_row_values, RowValues, TypedColumnValue},
-    query_types::QueryParamsSelect,
+    query_types::SelectParams,
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
         conditions_params_to_ast, get_columns_str, get_where_string, validate_alias_identifier,
         validate_table_name, validate_where_column,
     },
 };
-use crate::{db::connect, AppState, Error};
+use crate::{db::connect, Config, Error};
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query.
 pub fn select_table_rows(
-    state: &AppState,
-    params: QueryParamsSelect,
+    config: &Config,
+    params: SelectParams,
 ) -> impl Future<Item = Vec<RowValues>, Error = Error> {
     if let Err(e) = validate_table_name(&params.table) {
         return Either::A(err(e));
@@ -68,27 +68,26 @@ pub fn select_table_rows(
 
     // get table stats for building query (we need to know the column types)
     let table_clone = params.table.clone();
-    let stats_future =
-        connect(state.config.db_url)
-            .map_err(Error::from)
-            .and_then(move |mut conn| {
-                select_column_stats_statement(&mut conn, &table_clone)
-                    .map_err(Error::from)
-                    .and_then(move |statement| {
-                        let q = conn.query(&statement, &[]);
-                        select_column_stats(q).map_err(Error::from)
-                    })
-            });
+    let stats_future = connect(config.db_url)
+        .map_err(Error::from)
+        .and_then(move |mut conn| {
+            select_column_stats_statement(&mut conn, &table_clone)
+                .map_err(Error::from)
+                .and_then(move |statement| {
+                    let q = conn.query(&statement, &[]);
+                    select_column_stats(q).map_err(Error::from)
+                })
+        });
 
     // parse columns for foreign key usage
-    let db_url_str = state.config.db_url.to_string();
-    let addr_clone = if let Some(addr) = &state.stats_cache_addr {
+    let db_url_str = config.db_url.to_string();
+    let addr_clone = if let Some(addr) = &config.stats_cache_addr {
         Some(addr.clone())
     } else {
         None
     };
     let fk_future = ForeignKeyReference::from_query_columns(
-        state.config.db_url,
+        config.db_url,
         Arc::new(addr_clone),
         params.table.clone(),
         columns,
@@ -134,7 +133,7 @@ pub fn select_table_rows(
 }
 
 fn build_select_statement(
-    params: QueryParamsSelect,
+    params: SelectParams,
     stats: Vec<TableColumnStat>,
     fks: Vec<ForeignKeyReference>,
     mut where_ast: Expr,
@@ -290,13 +289,13 @@ fn build_select_statement(
 #[cfg(test)]
 mod build_select_statement_tests {
     use super::*;
-    use crate::queries::{postgres_types::IsNullColumnValue, query_types::QueryParamsSelect};
+    use crate::queries::{postgres_types::IsNullColumnValue, query_types::SelectParams};
     use pretty_assertions::assert_eq;
 
     #[test]
     fn basic_query() {
         match build_select_statement(
-            QueryParamsSelect {
+            SelectParams {
                 columns: vec!["id".to_string()],
                 conditions: None,
                 distinct: None,
@@ -322,7 +321,7 @@ mod build_select_statement_tests {
     #[test]
     fn multiple_columns() {
         match build_select_statement(
-            QueryParamsSelect {
+            SelectParams {
                 columns: vec!["id".to_string(), "name".to_string()],
                 conditions: None,
                 distinct: None,
@@ -348,7 +347,7 @@ mod build_select_statement_tests {
     #[test]
     fn distinct() {
         match build_select_statement(
-            QueryParamsSelect {
+            SelectParams {
                 columns: vec!["id".to_string()],
                 conditions: None,
                 distinct: Some(vec!["name".to_string(), "blah".to_string()]),
@@ -377,7 +376,7 @@ mod build_select_statement_tests {
     #[test]
     fn offset() {
         match build_select_statement(
-            QueryParamsSelect {
+            SelectParams {
                 columns: vec!["id".to_string()],
                 conditions: None,
                 distinct: None,
@@ -403,7 +402,7 @@ mod build_select_statement_tests {
     #[test]
     fn order_by() {
         match build_select_statement(
-            QueryParamsSelect {
+            SelectParams {
                 columns: vec!["id".to_string()],
                 conditions: None,
                 distinct: None,
@@ -432,7 +431,7 @@ mod build_select_statement_tests {
     #[test]
     fn group_by_alias() {
         match build_select_statement(
-            QueryParamsSelect {
+            SelectParams {
                 columns: vec!["COUNT(id) AS id_count".to_string(), "name".to_string()],
                 conditions: None,
                 distinct: None,
@@ -464,7 +463,7 @@ mod build_select_statement_tests {
         let where_ast = conditions_params_to_ast(&Some(conditions.to_string())).unwrap();
 
         match build_select_statement(
-            QueryParamsSelect {
+            SelectParams {
                 columns: vec!["id".to_string()],
                 conditions: Some(conditions.to_string()),
                 distinct: None,
@@ -529,7 +528,7 @@ mod build_select_statement_tests {
         let where_ast = conditions_params_to_ast(&Some(conditions.to_string())).unwrap();
 
         match build_select_statement(
-            QueryParamsSelect {
+            SelectParams {
                 columns: vec![
                     "id".to_string(),
                     "test_bigint".to_string(),

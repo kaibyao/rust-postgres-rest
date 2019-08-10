@@ -1,11 +1,11 @@
-# experiment00
+# rust-postgres-rest
 
 Use `actix-web` to serve a REST API for your PostgreSQL database.
 
 ```rust
 use actix::System;
 use actix_web::{App, HttpServer};
-use experiment00::{generate_rest_api_scope, AppConfig};
+use rust_postgres_rest::{generate_rest_api_scope, Config};
 
 fn main() {
     let sys = System::new("my_app_runtime"); // create Actix runtime
@@ -14,7 +14,7 @@ fn main() {
 
     // start 1 server on each cpu thread
     HttpServer::new(move || {
-        let mut config = AppConfig::new();
+        let mut config = Config::new();
         config.db_url = "postgresql://postgres@0.0.0.0:5432/postgres";
 
         App::new().service(
@@ -139,7 +139,7 @@ Changing the previous API endpoint to `/api/child?columns=id,name,parent_id.name
 
 ## Configuration
 
-The `AppConfig` struct contains the configuration options used by this library.
+The `Config` struct contains the configuration options used by this library.
 
 ### `db_url: &'static str (default: "")`
 

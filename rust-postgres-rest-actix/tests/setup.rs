@@ -1,7 +1,7 @@
 use actix::{spawn as actix_spawn, System};
 use actix_web::{test::block_fn, App, HttpServer};
-use experiment00::{generate_rest_api_scope, AppConfig};
 use futures::{stream::Stream, Future};
+use rust_postgres_rest_actix::Config;
 use std::{fs::read_to_string, thread::spawn};
 use tokio_postgres::{connect, NoTls};
 
@@ -22,27 +22,28 @@ pub fn start_web_server(db_url: &'static str, address: &'static str) {
     let cache_port = "8001";
 
     spawn(move || {
-        let sys = System::new("experiment00"); // create Actix runtime
+        let sys = System::new("integration_test_server"); // create Actix runtime
 
         let address_no_cache = [address, no_cache_port].join(":");
         let address_cache = [address, cache_port].join(":");
 
         HttpServer::new(move || {
-            let mut config = AppConfig::new();
-            config.db_url = db_url;
-            config.is_custom_sql_execution_endpoint_enabled = true;
-
-            App::new().service(generate_rest_api_scope(config))
+            App::new().service(
+                Config::new(db_url)
+                    .enable_custom_sql_url()
+                    .generate_scope("/api"),
+            )
         })
         .bind(&address_no_cache)
         .expect("Can not bind to port.")
         .start();
 
         HttpServer::new(move || {
-            let mut config = AppConfig::new();
-            config.db_url = db_url;
-
-            App::new().service(generate_rest_api_scope(config))
+            App::new().service(
+                Config::new(db_url)
+                    .enable_custom_sql_url()
+                    .generate_scope("/api"),
+            )
         })
         .bind(&address_cache)
         .expect("Can not bind to port.")

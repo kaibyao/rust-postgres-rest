@@ -6,19 +6,19 @@ use std::sync::Arc;
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
     postgres_types::TypedColumnValue,
-    query_types::{QueryParamsDelete, QueryResult},
+    query_types::{DeleteParams, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
         conditions_params_to_ast, generate_query_result_from_db, get_columns_str, get_where_string,
         validate_alias_identifier, validate_table_name,
     },
 };
-use crate::{db::connect, AppState, Error};
+use crate::{db::connect, Config, Error};
 
 /// Returns the results of a `DELETE FROM {table} WHERE [conditions] [RETURNING [columns]]` query.
 pub fn delete_table_rows(
-    state: &AppState,
-    params: QueryParamsDelete,
+    config: &Config,
+    params: DeleteParams,
 ) -> impl Future<Item = QueryResult, Error = Error> {
     if let Err(e) = validate_table_name(&params.table) {
         return Either::A(err(e));
@@ -56,7 +56,7 @@ pub fn delete_table_rows(
         column_expr_strings.par_extend(returning_column_strs);
     }
 
-    let db_url_str = state.config.db_url.to_string();
+    let db_url_str = config.db_url.to_string();
 
     // get table stats for building query (we need to know the column types)
     let table_clone = params.table.clone();
@@ -72,7 +72,7 @@ pub fn delete_table_rows(
         });
 
     // parse column_expr_strings for foreign key usage
-    let addr_clone = if let Some(addr) = &state.stats_cache_addr {
+    let addr_clone = if let Some(addr) = &config.stats_cache_addr {
         Some(addr.clone())
     } else {
         None
@@ -80,7 +80,7 @@ pub fn delete_table_rows(
 
     let fk_future = stats_future
         .join(ForeignKeyReference::from_query_columns(
-            state.config.db_url,
+            config.db_url,
             Arc::new(addr_clone),
             params.table.clone(),
             column_expr_strings,
@@ -106,7 +106,7 @@ pub fn delete_table_rows(
 }
 
 fn build_delete_statement(
-    params: QueryParamsDelete,
+    params: DeleteParams,
     stats: Vec<TableColumnStat>,
     fks: Vec<ForeignKeyReference>,
     mut where_ast: Expr,
@@ -183,12 +183,12 @@ fn build_delete_statement(
 #[cfg(test)]
 mod build_delete_statement_tests {
     use super::*;
-    use crate::queries::{postgres_types::IsNullColumnValue, query_types::QueryParamsDelete};
+    use crate::queries::{postgres_types::IsNullColumnValue, query_types::DeleteParams};
     use pretty_assertions::assert_eq;
 
     #[test]
     fn simple() {
-        let params = QueryParamsDelete {
+        let params = DeleteParams {
             confirm_delete: Some("true".to_string()),
             conditions: None,
             returning_columns: None,
@@ -217,7 +217,7 @@ mod build_delete_statement_tests {
 
     #[test]
     fn fks_no_conditions() {
-        let params = QueryParamsDelete {
+        let params = DeleteParams {
             confirm_delete: Some("true".to_string()),
             conditions: None,
             returning_columns: None,
@@ -260,7 +260,7 @@ mod build_delete_statement_tests {
 
     #[test]
     fn return_fk_columns() {
-        let params = QueryParamsDelete {
+        let params = DeleteParams {
             confirm_delete: Some("true".to_string()),
             conditions: None,
             returning_columns: Some(vec!["b_id.id".to_string()]),
@@ -343,7 +343,7 @@ mod build_delete_statement_tests {
     fn fks_conditions() {
         let conditions = "id = 1";
         let where_ast = conditions_params_to_ast(&Some(conditions.to_string())).unwrap();
-        let params = QueryParamsDelete {
+        let params = DeleteParams {
             confirm_delete: Some("true".to_string()),
             conditions: Some(conditions.to_string()),
             returning_columns: None,
@@ -441,7 +441,7 @@ mod build_delete_statement_tests {
     fn fks_conditions_with_fk() {
         let conditions = "b_id.id = 1";
         let where_ast = conditions_params_to_ast(&Some(conditions.to_string())).unwrap();
-        let params = QueryParamsDelete {
+        let params = DeleteParams {
             confirm_delete: Some("true".to_string()),
             conditions: Some(conditions.to_string()),
             returning_columns: None,

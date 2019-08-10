@@ -1,7 +1,7 @@
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
     postgres_types::TypedColumnValue,
-    query_types::{QueryParamsUpdate, QueryResult},
+    query_types::{QueryResult, UpdateParams},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
         conditions_params_to_ast, generate_query_result_from_db, get_columns_str,
@@ -9,7 +9,7 @@ use super::{
         validate_where_column,
     },
 };
-use crate::{db::connect, AppState, Error};
+use crate::{db::connect, Config, Error};
 use futures::future::{err, Either, Future};
 use lazy_static::lazy_static;
 use rayon::prelude::*;
@@ -25,8 +25,8 @@ lazy_static! {
 
 /// Runs an UPDATE query on the selected table rows.
 pub fn update_table_rows(
-    state: &AppState,
-    params: QueryParamsUpdate,
+    config: &Config,
+    params: UpdateParams,
 ) -> impl Future<Item = QueryResult, Error = Error> {
     if let Err(e) = validate_table_name(&params.table) {
         return Either::A(err(e));
@@ -96,7 +96,7 @@ pub fn update_table_rows(
         column_expr_strings.par_extend(returning_column_strs);
     }
 
-    let db_url_str = state.config.db_url.to_string();
+    let db_url_str = config.db_url.to_string();
 
     // get table stats for building query (we need to know the column types)
     let table_clone = params.table.clone();
@@ -112,7 +112,7 @@ pub fn update_table_rows(
         });
 
     // parse column_expr_strings for foreign key usage
-    let addr_clone = if let Some(addr) = &state.stats_cache_addr {
+    let addr_clone = if let Some(addr) = &config.stats_cache_addr {
         Some(addr.clone())
     } else {
         None
@@ -120,7 +120,7 @@ pub fn update_table_rows(
 
     let fk_future = stats_future
         .join(ForeignKeyReference::from_query_columns(
-            state.config.db_url,
+            config.db_url,
             Arc::new(addr_clone),
             params.table.clone(),
             column_expr_strings,
@@ -147,7 +147,7 @@ pub fn update_table_rows(
 
 /// Returns the UPDATE query statement string and a vector of prepared values.
 fn build_update_statement(
-    params: QueryParamsUpdate,
+    params: UpdateParams,
     stats: Vec<TableColumnStat>,
     fks: Vec<ForeignKeyReference>,
     mut where_ast: Expr,
@@ -298,13 +298,13 @@ fn build_update_statement(
 #[cfg(test)]
 mod build_update_statement_tests {
     use super::*;
-    use crate::queries::{postgres_types::IsNullColumnValue, query_types::QueryParamsUpdate};
+    use crate::queries::{postgres_types::IsNullColumnValue, query_types::UpdateParams};
     use pretty_assertions::assert_eq;
     use serde_json::json;
 
     #[test]
     fn simple() {
-        let params = QueryParamsUpdate {
+        let params = UpdateParams {
             column_values: json!({"name": "'test'"}).as_object().unwrap().clone(),
             conditions: None,
             returning_columns: None,
@@ -340,7 +340,7 @@ mod build_update_statement_tests {
     fn fk_returning_columns() {
         let conditions = "id = 2";
         let where_ast = conditions_params_to_ast(&Some(conditions.to_string())).unwrap();
-        let params = QueryParamsUpdate {
+        let params = UpdateParams {
             column_values: json!({"nemesis_name": "nemesis_id.name"})
                 .as_object()
                 .unwrap()
@@ -438,7 +438,7 @@ mod build_update_statement_tests {
 
     #[test]
     fn fk_returning_columns_no_conditions() {
-        let params = QueryParamsUpdate {
+        let params = UpdateParams {
             column_values: json!({"nemesis_name": "nemesis_id.name"})
                 .as_object()
                 .unwrap()
@@ -535,7 +535,7 @@ mod build_update_statement_tests {
     fn nested_fk_returning_columns() {
         let conditions = "id = 1";
         let where_ast = conditions_params_to_ast(&Some(conditions.to_string())).unwrap();
-        let params = QueryParamsUpdate {
+        let params = UpdateParams {
             column_values: json!({"name": "team_id.coach_id.name"})
                 .as_object()
                 .unwrap()

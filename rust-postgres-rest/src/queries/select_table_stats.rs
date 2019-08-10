@@ -2,7 +2,7 @@ use super::utils::validate_table_name;
 use crate::{
     db::connect,
     stats_cache::{StatsCache, StatsCacheMessage, StatsCacheResponse},
-    AppState, Error,
+    Config, Error,
 };
 use actix::Addr;
 use futures::{
@@ -139,7 +139,7 @@ pub struct TableStats {
 /// Returns the requested table’s stats: number of rows, the foreign keys referring to the table,
 /// and column names + types
 pub fn select_table_stats(
-    state: &AppState,
+    config: &Config,
     table: String,
 ) -> impl Future<Item = TableStats, Error = Error> {
     if let Err(e) = validate_table_name(&table) {
@@ -147,17 +147,14 @@ pub fn select_table_stats(
     }
 
     // get stats from cache if it exists, otherwise make a DB call.
-    if let Some(cache_addr) = &state.stats_cache_addr {
+    if let Some(cache_addr) = &config.stats_cache_addr {
         Either::B(Either::A(select_table_stats_from_cache(
             cache_addr,
-            state.config.db_url,
+            config.db_url,
             table,
         )))
     } else {
-        Either::B(Either::B(select_table_stats_from_db(
-            state.config.db_url,
-            table,
-        )))
+        Either::B(Either::B(select_table_stats_from_db(config.db_url, table)))
     }
 }
 

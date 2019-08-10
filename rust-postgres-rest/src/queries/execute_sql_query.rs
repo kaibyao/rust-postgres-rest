@@ -1,6 +1,6 @@
 use super::{
     postgres_types::{row_to_row_values, RowValues},
-    query_types::{QueryParamsExecute, QueryResult},
+    query_types::{ExecuteParams, QueryResult},
 };
 use crate::Error;
 use futures::{
@@ -12,7 +12,7 @@ use tokio_postgres::Client;
 
 pub fn execute_sql_query(
     mut client: Client,
-    params: QueryParamsExecute,
+    params: ExecuteParams,
 ) -> impl Future<Item = QueryResult, Error = Error> {
     client
         .prepare(&params.statement)
