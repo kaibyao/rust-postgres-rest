@@ -151,22 +151,6 @@ impl Error {
                 offender,
             },
 
-            "INVALID_CONTENT_TYPE" => Error::UserError {
-                code: err_id,
-                details: "The `Content-Type` header value is not valid for this request".to_string(),
-                http_status: 400,
-                message: "The `Content-Type` must be `text/plain`.",
-                offender,
-            },
-
-            "INVALID_DB_CONFIG" => Error::UserError {
-                code: err_id,
-                details: "Either `db_url` or `db_pool` config property needs to be set.".to_string(),
-                http_status: 400,
-                message: "Both `db_url` and `db_pool` were found empty.",
-                offender,
-            },
-
             "INVALID_JSON_TYPE_CONVERSION" => Error::UserError {
                 code: err_id,
                 details: "The type of the JSON data does not match the type of the database column.".to_string(),

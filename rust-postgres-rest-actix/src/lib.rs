@@ -5,14 +5,43 @@
 // to serialize large json (like the index)
 #![recursion_limit = "128"]
 
+//! Use `actix-web` to serve a REST API for your PostgreSQL database.
+//!
+//! ```
+//! use actix_web::{App, HttpServer};
+//! use rust_postgres_rest_actix::{Config};
+//! # use std::thread;
+//!
+//! fn main() {
+//!     let ip_address = "127.0.0.1:3000";
+//!
+//!     // start 1 server on each cpu thread
+//!     # thread::spawn(move || {
+//!     HttpServer::new(move || {
+//!         App::new().service(
+//!             // appends an actix-web Scope under the "/api" endpoint to app.
+//!             Config::new("postgresql://postgres@0.0.0.0:5432/postgres")
+//!                 .generate_scope("/api"),
+//!         )
+//!     })
+//!     .bind(ip_address)
+//!     .expect("Can not bind to port 3000")
+//!     .run()
+//!     .unwrap();
+//!     # });
+//!
+//!     println!("Running server on {}", ip_address);
+//! }
+//! ```
+
 /// Individual endpoints that can be applied to actix routes using `.to_async()`.
 pub mod endpoints;
 
 mod error;
 
-use endpoints::index;
-pub use endpoints::{
-    delete_table, execute_sql, get_all_table_names, get_table, post_table, put_table, reset_caches,
+use endpoints::{
+    delete_table, execute_sql, get_all_table_names, get_table, index, post_table, put_table,
+    reset_caches,
 };
 
 pub use error::Error;
@@ -21,7 +50,13 @@ use rust_postgres_rest::Config as InnerConfig;
 // use actix::Addr;
 use actix_web::{web, Scope};
 
-/// API Configuration
+/// Configures and creates the REST API `Scope`.
+/// ```
+/// use rust_postgres_rest_actix::Config;
+///
+/// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+/// let scope = config.generate_scope("/api");
+/// ```
 #[derive(Clone)]
 pub struct Config {
     inner: InnerConfig,
@@ -29,14 +64,19 @@ pub struct Config {
     /// `{scope_name}/reset_table_stats_cache`, which allows for manual resetting of the Table
     /// Stats cache. This is useful if you want a persistent cache that only needs to be reset on
     /// upgrades, for example. Default: `false`.
-    pub is_cache_reset_endpoint_enabled: bool,
+    is_cache_reset_endpoint_enabled: bool,
     /// When set to `true`, an additional API endpoint is made available at `{scope_name}/sql`,
     /// which allows for custom SQL queries to be executed. Default: `false`.
-    pub is_custom_sql_endpoint_enabled: bool,
+    is_custom_sql_endpoint_enabled: bool,
 }
 
 impl Config {
-    /// Creates a Config object with default values.
+    /// Creates a Config object with default values. `db_url` must be [Postgres-formatted](https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6).
+    /// ```
+    /// use rust_postgres_rest_actix::Config;
+    ///
+    /// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+    /// ```
     pub fn new(db_url: &'static str) -> Self {
         Config {
             inner: InnerConfig::new(db_url),
@@ -67,7 +107,13 @@ impl Config {
     }
 
     /// Creates the Actix scope url at `scope_name`, which contains all of the other API endpoints.
-    pub fn generate_scope(&mut self, scope_name: &str) -> Scope {
+    /// ```
+    /// use rust_postgres_rest_actix::Config;
+    ///
+    /// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+    /// let scope = config.generate_scope("/api");
+    /// ```
+    pub fn generate_scope(&self, scope_name: &str) -> Scope {
         let mut scope = web::scope(scope_name);
 
         if self.inner.is_cache_table_stats {
@@ -95,8 +141,14 @@ impl Config {
             )
     }
 
-    // Set the interval timer to automatically reset the table stats cache. If this is not set, the
-    // cache is never reset.
+    /// Set the timer to automatically reset the table stats cache on a recurring interval. If this
+    /// is not set, the cache is never reset after server start.
+    /// ```
+    /// use rust_postgres_rest_actix::Config;
+    ///
+    /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+    /// config.set_cache_reset_timer(300); // Cache will refresh every 5 minutes.
+    /// ```
     pub fn set_cache_reset_timer(&mut self, seconds: u32) -> &mut Self {
         self.inner.set_cache_reset_timer(seconds);
         self

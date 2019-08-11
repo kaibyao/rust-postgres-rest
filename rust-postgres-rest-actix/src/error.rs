@@ -137,14 +137,6 @@ impl Error {
                 offender,
             },
 
-            "TABLE_STATS_CACHE_NOT_INITIALIZED" => Error::UserError {
-                code: err_id,
-                details: "The Table Stats Cache has not yet started/finished fetching table stats.".to_string(),
-                http_status: 503,
-                message: "",
-                offender,
-            },
-
             // If this happens, that means we forgot to implement an error handler
             _ => Error::UserError {
                 code: err_id,

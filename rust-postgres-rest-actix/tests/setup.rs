@@ -1,4 +1,4 @@
-use actix::{spawn as actix_spawn, System};
+use actix::spawn as actix_spawn;
 use actix_web::{test::block_fn, App, HttpServer};
 use futures::{stream::Stream, Future};
 use rust_postgres_rest_actix::Config;
@@ -22,10 +22,7 @@ pub fn start_web_server(db_url: &'static str, address: &'static str) {
     let cache_port = "8001";
 
     spawn(move || {
-        let sys = System::new("integration_test_server"); // create Actix runtime
-
         let address_no_cache = [address, no_cache_port].join(":");
-        let address_cache = [address, cache_port].join(":");
 
         HttpServer::new(move || {
             App::new().service(
@@ -36,7 +33,14 @@ pub fn start_web_server(db_url: &'static str, address: &'static str) {
         })
         .bind(&address_no_cache)
         .expect("Can not bind to port.")
-        .start();
+        .run()
+        .unwrap();
+
+        println!("Running server on {}", &address_no_cache);
+    });
+
+    spawn(move || {
+        let address_cache = [address, cache_port].join(":");
 
         HttpServer::new(move || {
             App::new().service(
@@ -47,10 +51,9 @@ pub fn start_web_server(db_url: &'static str, address: &'static str) {
         })
         .bind(&address_cache)
         .expect("Can not bind to port.")
-        .start();
+        .run()
+        .unwrap();
 
-        println!("Running server on {}", &address_no_cache);
         println!("Running server on {}", &address_cache);
-        sys.run().unwrap();
     });
 }
