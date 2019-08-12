@@ -6,14 +6,23 @@ use std::sync::Arc;
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
     postgres_types::TypedColumnValue,
-    query_types::{DeleteParams, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
         conditions_params_to_ast, generate_query_result_from_db, get_columns_str, get_where_string,
         validate_alias_identifier, validate_table_name,
     },
+    QueryResult,
 };
 use crate::{db::connect, Config, Error};
+
+#[derive(Debug)]
+/// Options used to execute a DELETE query.
+pub struct DeleteParams {
+    pub table: String,
+    pub conditions: Option<String>,
+    pub confirm_delete: Option<String>,
+    pub returning_columns: Option<Vec<String>>,
+}
 
 /// Returns the results of a `DELETE FROM {table} WHERE [conditions] [RETURNING [columns]]` query.
 pub fn delete_table_rows(
@@ -183,7 +192,7 @@ fn build_delete_statement(
 #[cfg(test)]
 mod build_delete_statement_tests {
     use super::*;
-    use crate::queries::{postgres_types::IsNullColumnValue, query_types::DeleteParams};
+    use crate::queries::postgres_types::IsNullColumnValue;
     use pretty_assertions::assert_eq;
 
     #[test]

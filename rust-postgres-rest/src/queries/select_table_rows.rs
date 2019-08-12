@@ -12,7 +12,6 @@ use tokio_postgres::types::ToSql;
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
     postgres_types::{row_to_row_values, RowValues, TypedColumnValue},
-    query_types::SelectParams,
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
         conditions_params_to_ast, get_columns_str, get_where_string, validate_alias_identifier,
@@ -20,6 +19,19 @@ use super::{
     },
 };
 use crate::{db::connect, Config, Error};
+
+#[derive(Debug)]
+/// Options used to execute a SELECT query.
+pub struct SelectParams {
+    pub distinct: Option<Vec<String>>,
+    pub columns: Vec<String>,
+    pub table: String,
+    pub conditions: Option<String>,
+    pub group_by: Option<Vec<String>>,
+    pub order_by: Option<Vec<String>>,
+    pub limit: usize,
+    pub offset: usize,
+}
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query.
 pub fn select_table_rows(
@@ -289,7 +301,7 @@ fn build_select_statement(
 #[cfg(test)]
 mod build_select_statement_tests {
     use super::*;
-    use crate::queries::{postgres_types::IsNullColumnValue, query_types::SelectParams};
+    use crate::queries::postgres_types::IsNullColumnValue;
     use pretty_assertions::assert_eq;
 
     #[test]

@@ -226,7 +226,9 @@ fn select_table_stats_from_db(
 
 /// Returns a given table’s column stats: column names, column types, length, default values, and
 /// foreign keys information.
-pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>, Error = Error> {
+pub(crate) fn select_column_stats(
+    q: Query,
+) -> impl Future<Item = Vec<TableColumnStat>, Error = Error> {
     q.map_err(Error::from).collect().and_then(|rows| {
         rows.into_iter()
             .map(|row| {
@@ -294,7 +296,7 @@ pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>,
     })
 }
 
-pub fn select_column_stats_statement(conn: &mut Client, table: &str) -> Prepare {
+pub(crate) fn select_column_stats_statement(conn: &mut Client, table: &str) -> Prepare {
     let statement_str = &format!("
 WITH foreign_keys as (
     SELECT

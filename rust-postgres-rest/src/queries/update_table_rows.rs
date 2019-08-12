@@ -1,26 +1,39 @@
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
     postgres_types::TypedColumnValue,
-    query_types::{QueryResult, UpdateParams},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
         conditions_params_to_ast, generate_query_result_from_db, get_columns_str,
         get_db_column_str, get_where_string, validate_alias_identifier, validate_table_name,
         validate_where_column,
     },
+    QueryResult,
 };
 use crate::{db::connect, Config, Error};
 use futures::future::{err, Either, Future};
 use lazy_static::lazy_static;
 use rayon::prelude::*;
 use regex::Regex;
-use serde_json::Value as JsonValue;
+use serde_json::{Map, Value as JsonValue};
 use sqlparser::ast::Expr;
 use std::{collections::HashMap, sync::Arc};
 
 lazy_static! {
     // check for strings
     static ref STRING_RE: Regex = Regex::new(r#"^['"](.+)['"]$"#).unwrap();
+}
+
+#[derive(Debug)]
+/// Options used to execute an `UPDATE` SQL statement.
+pub struct UpdateParams {
+    /// A JSON object whose key-values represent column names and the values to set.
+    pub column_values: Map<String, JsonValue>,
+    /// WHERE expression.
+    pub conditions: Option<String>,
+    /// List of (foreign key) columns whose values are returned.
+    pub returning_columns: Option<Vec<String>>,
+    // Name of table to update.
+    pub table: String,
 }
 
 /// Runs an UPDATE query on the selected table rows.
@@ -298,7 +311,7 @@ fn build_update_statement(
 #[cfg(test)]
 mod build_update_statement_tests {
     use super::*;
-    use crate::queries::{postgres_types::IsNullColumnValue, query_types::UpdateParams};
+    use crate::queries::postgres_types::IsNullColumnValue;
     use pretty_assertions::assert_eq;
     use serde_json::json;
 

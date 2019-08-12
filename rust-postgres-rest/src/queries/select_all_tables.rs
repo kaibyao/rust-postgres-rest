@@ -3,7 +3,7 @@ use future::Future;
 use futures::{future, stream::Stream};
 use tokio_postgres::Client;
 
-/// Retrieves all user-created table names
+/// Retrieves all user-created table names.
 pub fn select_all_tables(
     mut client: Client,
 ) -> impl Future<Item = (Vec<String>, Client), Error = Error> {

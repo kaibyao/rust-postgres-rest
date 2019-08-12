@@ -16,14 +16,7 @@ use super::query_params_from_request::{
     RequestQueryStringParams,
 };
 use crate::{Config, Error};
-use rust_postgres_rest::{
-    connect,
-    queries::{
-        delete_table_rows, execute_sql_query, insert_into_table,
-        query_types::{ExecuteParams, SelectParams},
-        select_all_tables, select_table_rows, select_table_stats, update_table_rows,
-    },
-};
+use rust_postgres_rest::{connect, queries};
 
 /// Deletes table rows and optionally returns the column data in the deleted rows.
 pub fn delete_table(
@@ -44,7 +37,7 @@ pub fn delete_table(
         )));
     }
 
-    let delete_table_future = delete_table_rows(&state.get_ref().inner, params)
+    let delete_table_future = queries::delete_table_rows(&state.get_ref().inner, params)
         .map_err(Error::from)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)));
 
@@ -66,14 +59,14 @@ pub fn execute_sql(
         )));
     }
 
-    let params = ExecuteParams {
+    let params = queries::ExecuteParams {
         statement: body,
         is_return_rows: query_string_params.is_return_rows.is_some(),
     };
 
     let execute_sql_future = connect(state.inner.db_url)
         .map_err(Error::from)
-        .and_then(|client| execute_sql_query(client, params).map_err(Error::from))
+        .and_then(|client| queries::execute_sql_query(client, params).map_err(Error::from))
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)));
 
     Either::B(execute_sql_future)
@@ -85,7 +78,7 @@ pub fn get_all_table_names(
 ) -> impl Future<Item = HttpResponse, Error = Error> {
     connect(state.inner.db_url)
         .map_err(Error::from)
-        .and_then(|client| select_all_tables(client).map_err(Error::from))
+        .and_then(|client| queries::select_all_tables(client).map_err(Error::from))
         .and_then(|(rows, _client)| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }
 
@@ -110,9 +103,9 @@ pub fn get_table(
 
 fn get_table_rows(
     state: web::Data<Config>,
-    params: SelectParams,
+    params: queries::SelectParams,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
-    select_table_rows(&state.get_ref().inner, params)
+    queries::select_table_rows(&state.get_ref().inner, params)
         .map_err(Error::from)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }
@@ -121,7 +114,7 @@ fn get_table_stats(
     state: web::Data<Config>,
     table: String,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
-    select_table_stats(&state.get_ref().inner, table)
+    queries::select_table_stats(&state.get_ref().inner, table)
         .map_err(Error::from)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }
@@ -150,7 +143,7 @@ pub fn post_table(
 
     let insert_response = connect(state.inner.db_url)
         .map_err(Error::from)
-        .and_then(|client| insert_into_table(client, params).map_err(Error::from))
+        .and_then(|client| queries::insert_into_table(client, params).map_err(Error::from))
         .and_then(|num_rows_affected| {
             Ok(HttpResponseBuilder::new(StatusCode::OK).json(num_rows_affected))
         });
@@ -185,7 +178,7 @@ pub fn put_table(
         }
     };
 
-    let response = update_table_rows(&state.get_ref().inner, params)
+    let response = queries::update_table_rows(&state.get_ref().inner, params)
         .map_err(Error::from)
         .and_then(|num_rows_affected| {
             Ok(HttpResponseBuilder::new(StatusCode::OK).json(num_rows_affected))

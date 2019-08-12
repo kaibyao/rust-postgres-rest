@@ -9,21 +9,31 @@ use tokio_postgres::{types::ToSql, Client};
 
 use super::{
     postgres_types::{row_to_row_values, RowValues, TypedColumnValue},
-    query_types::{InsertParams, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{get_columns_str, validate_where_column},
+    QueryResult,
 };
 use crate::Error;
 
 static INSERT_ROWS_BATCH_COUNT: usize = 100;
 
+#[derive(Debug)]
+/// Options used to execute an INSERT query.
+pub struct InsertParams {
+    pub conflict_action: Option<String>,
+    pub conflict_target: Option<Vec<String>>,
+    pub returning_columns: Option<Vec<String>>,
+    pub rows: Vec<Map<String, Value>>,
+    pub table: String,
+}
+
 /// Used for returning either number of rows or actual row values in INSERT/UPDATE statements.
-pub enum InsertResult {
+enum InsertResult {
     Rows(Vec<RowValues>),
     NumRowsAffected(u64),
 }
 
-/// Runs an INSERT INTO <table> query
+/// Runs an `INSERT INTO <table>` query.
 pub fn insert_into_table(
     mut conn: Client,
     params: InsertParams,

@@ -7,6 +7,8 @@
 
 mod db;
 mod error;
+
+/// Contains the functions used to query the database.
 pub mod queries;
 
 mod stats_cache;
@@ -18,14 +20,13 @@ pub use error::Error;
 use actix::Addr;
 use futures::future::{err, ok, Either, Future};
 
-/// API Configuration
+/// Configures the DB connection and API.
 #[derive(Clone)]
 pub struct Config {
     /// The database URL. URL must be [Postgres-formatted](https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6).
     pub db_url: &'static str,
-    /// Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When
-    /// set to `true`, caching of table stats is enabled, significantly speeding up API endpoings
-    /// that use `SELECT` and `INSERT` statements. Default: `false`.
+    /// When set to `true`, caching of table stats is enabled, significantly speeding up API
+    /// endpoings that use `SELECT` and `INSERT` statements. Default: `false`.
     pub is_cache_table_stats: bool,
     /// When set to a positive integer `n`, automatically refresh the Table Stats cache every `n`
     /// seconds. Default: `0` (cache is never automatically reset).
@@ -48,6 +49,11 @@ impl Default for Config {
 // (complexity is low)
 impl Config {
     /// Creates a new Config.
+    /// ```
+    /// use rust_postgres_rest::Config;
+    ///
+    /// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+    /// ```
     pub fn new(db_url: &'static str) -> Self {
         let mut cfg = Self::default();
         cfg.db_url = db_url;
@@ -90,8 +96,14 @@ impl Config {
         }
     }
 
-    // Set the interval timer to automatically reset the table stats cache. If this is not set, the
-    // cache is never reset.
+    /// Set the interval timer to automatically reset the table stats cache. If this is not set, the
+    /// cache is never reset.
+    /// ```
+    /// use rust_postgres_rest::Config;
+    ///
+    /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+    /// config.set_cache_reset_timer(300); // Cache will refresh every 5 minutes.
+    /// ```
     pub fn set_cache_reset_timer(&mut self, seconds: u32) -> &mut Self {
         self.cache_reset_interval_seconds = seconds;
         self

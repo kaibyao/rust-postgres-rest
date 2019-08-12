@@ -1,8 +1,8 @@
 use super::{
     foreign_keys::{fk_ast_nodes_from_where_ast, ForeignKeyReference},
     postgres_types::{row_to_row_values, RowValues, TypedColumnValue},
-    query_types::QueryResult,
     select_table_stats::TableColumnStat,
+    QueryResult,
 };
 use crate::{db::connect, Error};
 use futures::{
@@ -118,7 +118,7 @@ pub fn generate_query_result_from_db(
 
 /// Generates the WHERE clause and a HashMap of column name : column type after taking foreign keys
 /// into account. Mutates the original AST.
-pub fn get_where_string<'a>(
+pub(crate) fn get_where_string<'a>(
     where_ast: &mut Expr,
     table: &str,
     stats: &[TableColumnStat],
@@ -172,7 +172,7 @@ pub fn get_where_string<'a>(
 
 /// Extracts the "real" column name (taking foreign keys and aliases into account).
 /// Returns a Vec of &str tokens that can later be used in `.extend()` or `.join("")`.
-pub fn get_db_column_str<'a>(
+pub(crate) fn get_db_column_str<'a>(
     column: &'a str,
     table: &'a str,
     fks: &'a [ForeignKeyReference],
@@ -235,7 +235,7 @@ pub fn get_db_column_str<'a>(
 
 /// Generates a string of column names delimited by commas. Foreign keys are correctly accounted
 /// for.
-pub fn get_columns_str<'a>(
+pub(crate) fn get_columns_str<'a>(
     columns: &'a [String],
     table: &'a str,
     fks: &'a [ForeignKeyReference],

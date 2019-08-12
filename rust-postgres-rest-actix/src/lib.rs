@@ -7,6 +7,8 @@
 
 //! Use `actix-web` to serve a REST API for your PostgreSQL database.
 //!
+//! # Example
+//!
 //! ```
 //! use actix_web::{App, HttpServer};
 //! use rust_postgres_rest_actix::{Config};
@@ -35,6 +37,44 @@
 //! ```
 
 /// Individual endpoints that can be applied to actix routes using `.to_async()`.
+///
+/// The `Config` object must be saved to the resource using `.data()`, and the route must have a
+/// `"table"` query parameter.
+///
+/// # Example
+///
+/// ```
+/// use actix_web::{App, HttpServer, web};
+/// use rust_postgres_rest_actix::{Config, endpoints};
+///
+/// fn main() {
+///     let ip_address = "127.0.0.1:3000";
+///
+///     // start 1 server on each cpu thread
+///     # std::thread::spawn(move || {
+///     HttpServer::new(move || {
+///         let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+///
+///         App::new().service(
+///             web::scope("/custom_api_endpoint")
+///                 .data(config)
+///                 .route("/table", web::get().to_async(endpoints::get_all_table_names))
+///                 .service(
+///                     web::resource("/{table}")
+///                         .route(web::get().to_async(endpoints::get_table))
+///                         .route(web::post().to_async(endpoints::post_table))
+///                 )
+///         )
+///     })
+///     .bind(ip_address)
+///     .expect("Can not bind to port 3000")
+///     .run()
+///     .unwrap();
+///     # });
+///
+///     println!("Running server on {}", ip_address);
+/// }
+/// ```
 pub mod endpoints;
 
 mod error;
