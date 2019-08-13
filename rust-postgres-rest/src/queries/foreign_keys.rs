@@ -12,9 +12,8 @@ use super::select_table_stats::{
     select_column_stats, select_column_stats_statement, TableColumnStat,
 };
 use crate::{
-    db::connect,
     stats_cache::{StatsCache, StatsCacheMessage, StatsCacheResponse},
-    Error,
+    Config, Error,
 };
 
 /// Extracts the "a_table".* (wildcard), identifiers, and foreign key Exprs from a WHERE Expr. The
@@ -279,110 +278,8 @@ pub(crate) struct ForeignKeyReference {
 impl ForeignKeyReference {
     /// Given a table name and list of table column names, return a list of foreign key references.
     /// If none of the provided columns are foreign keys, returns `Ok(None)`.
-    ///
-    /// # Examples
-    ///
-    /// ## Simple query (1 level deep)
-    ///
-    /// ```ignore
-    /// // a_table.a_foreign_key references b_table.id
-    /// // a_table.another_foreign_key references c_table.id
-    ///
-    /// assert_eq!(
-    ///     ForeignKeyReference::from_query_columns(
-    ///         client,
-    ///         "a_table",
-    ///         &[
-    ///             "a_foreign_key.some_text",
-    ///             "another_foreign_key.some_str",
-    ///             "b"
-    ///         ]
-    ///     ),
-    ///     Ok(Some(vec![
-    ///         ForeignKeyReference {
-    ///             original_refs: vec!["a_foreign_key.some_text".to_string()],
-    ///             referring_table: "a_table".to_string(),
-    ///             referring_column: "a_foreign_key".to_string(),
-    ///             foreign_key_table: "b_table".to_string(),
-    ///             foreign_key_column: "id".to_string(),
-    ///             foreign_key_column_type: "id".to_string(),
-    ///             nested_fks: vec![],
-    ///         },
-    ///         ForeignKeyReference {
-    ///             original_refs: vec!["another_foreign_key.some_str".to_string()],
-    ///             referring_table: "a_table".to_string(),
-    ///             referring_column: "another_foreign_key".to_string(),
-    ///             foreign_key_table: "c_table".to_string(),
-    ///             foreign_key_column: "id".to_string(),
-    ///             foreign_key_column_type: "id".to_string(),
-    ///             nested_fks: vec![],
-    ///         }
-    ///     ]))
-    /// );
-    /// ```
-    ///
-    /// ## Nested foreign keys
-    ///
-    /// ```ignore
-    /// // a_foreign_key references b_table.id
-    /// // another_foreign_key references c_table.id
-    /// // another_foreign_key.nested_fk references d_table.id
-    /// // another_foreign_key.different_nested_fk references e_table.id
-    ///
-    /// assert_eq!(
-    ///     ForeignKeyReference::from_query_columns(
-    ///         client,
-    ///         "a_table",
-    ///         &[
-    ///             "a_foreign_key.some_text",
-    ///             "another_foreign_key.nested_fk.some_str",
-    ///             "another_foreign_key.different_nested_fk.some_int",
-    ///             "b"
-    ///         ]
-    ///     ),
-    ///     Ok(Some(vec![
-    ///         ForeignKeyReference {
-    ///             original_refs: vec!["a_foreign_key.some_text".to_string()],
-    ///             referring_table: "a_table".to_string(),
-    ///             referring_column: "a_foreign_key".to_string(),
-    ///             foreign_key_table: "b_table".to_string(),
-    ///             foreign_key_column: "id".to_string(),
-    ///             foreign_key_column_type: "id".to_string(),
-    ///             nested_fks: vec![]
-    ///         },
-    ///         ForeignKeyReference {
-    ///             original_refs: vec!["another_foreign_key.nested_fk.some_str".to_string(), "another_foreign_key.different_nested_fk.some_int".to_string()],
-    ///             referring_table: "a_table".to_string(),
-    ///             referring_column: "another_foreign_key".to_string(),
-    ///             foreign_key_table: "b_table".to_string(),
-    ///             foreign_key_column: "id".to_string(),
-    ///             foreign_key_column_type: "id".to_string(),
-    ///             nested_fks: vec![
-    ///                 ForeignKeyReference {
-    ///                     original_refs: vec!["nested_fk.some_str".to_string()],
-    ///                     referring_table: "c_table".to_string(),
-    ///                     referring_column: "nested_fk".to_string(),
-    ///                     foreign_key_table: "d_table".to_string(),
-    ///                     foreign_key_column: "id".to_string(),
-    ///                     foreign_key_column_type: "id".to_string(),
-    ///                     nested_fks: vec![]
-    ///                 },
-    ///                 ForeignKeyReference {
-    ///                     original_refs: vec!["different_nested_fk.some_int".to_string()],
-    ///                     referring_table: "c_table".to_string(),
-    ///                     referring_column: "different_nested_fk".to_string(),
-    ///                     foreign_key_table: "e_table".to_string(),
-    ///                     foreign_key_column: "id".to_string(),
-    ///                     foreign_key_column_type: "id".to_string(),
-    ///                     nested_fks: vec![]
-    ///                 }
-    ///             ]
-    ///         }
-    ///     ]))
-    /// );
-    /// ```
     pub(crate) fn from_query_columns(
-        db_url: &str,
+        config: &Config,
         stats_cache_addr: Arc<Option<Addr<StatsCache>>>,
         table: String,
         columns: Vec<String>,
@@ -431,7 +328,7 @@ impl ForeignKeyReference {
 
         // get column stats for table
         let process_column_stats_future = ForeignKeyReference::process_column_stats(
-            db_url,
+            config,
             stats_cache_addr,
             table,
             fk_columns_grouped,
@@ -441,11 +338,12 @@ impl ForeignKeyReference {
     }
 
     fn get_table_column_stats(
-        db_url_str: &str,
+        config: &Config,
         table: &str,
     ) -> impl Future<Item = Vec<TableColumnStat>, Error = Error> {
         let table_clone = table.to_string();
-        connect(db_url_str)
+        config
+            .connect()
             .map_err(Error::from)
             .and_then(move |mut conn| {
                 select_column_stats_statement(&mut conn, &table_clone)
@@ -458,16 +356,16 @@ impl ForeignKeyReference {
     }
 
     fn process_column_stats(
-        db_url: &str,
+        config: &Config,
         stats_cache_addr: Arc<Option<Addr<StatsCache>>>,
         table: String,
         fk_columns_grouped: HashMap<String, (Vec<String>, Vec<String>)>,
     ) -> impl Future<Item = Vec<Self>, Error = Error> + Send {
         // used later in futures
+        let config_clone = config.clone();
+        let config_clone_2 = config.clone();
         let table_clone = table.clone();
         let table_clone_2 = table.clone();
-        let db_url_str = db_url.to_string();
-        let db_url_str_2 = db_url_str.clone();
 
         let column_stats_future = if let Some(cache_addr) = stats_cache_addr.borrow() {
             // similar to select_table_stats::select_table_stats_from_cache, except we just need a
@@ -485,7 +383,7 @@ impl ForeignKeyReference {
                                 Either::A(ok(calculated_columns_and_stats))
                             }
                             None => Either::B(
-                                Self::get_table_column_stats(&db_url_str, &table_clone).map(
+                                Self::get_table_column_stats(&config_clone, &table_clone).map(
                                     move |stats| {
                                         Self::match_fk_column_stats(stats, fk_columns_grouped)
                                     },
@@ -501,7 +399,7 @@ impl ForeignKeyReference {
             Either::A(cache_future)
         } else {
             Either::B(
-                Self::get_table_column_stats(&db_url_str, &table_clone)
+                Self::get_table_column_stats(config, &table_clone)
                     .map(move |stats| Self::match_fk_column_stats(stats, fk_columns_grouped)),
             )
         };
@@ -510,7 +408,7 @@ impl ForeignKeyReference {
             // stats and matched_columns should have the same length and their indexes should match
             .and_then(move |(filtered_stats, matched_columns)| {
                 ForeignKeyReference::stats_to_fkr_futures(
-                    &db_url_str_2,
+                    &config_clone_2,
                     stats_cache_addr,
                     table_clone_2,
                     filtered_stats,
@@ -573,7 +471,7 @@ impl ForeignKeyReference {
     /// Maps a Vec of `TableColumnStat`s to a Future resolving to a Vec of `ForeignKeyReference`s.
     /// Used by from_query_columns.
     fn stats_to_fkr_futures(
-        db_url: &str,
+        config: &Config,
         stats_cache_addr: Arc<Option<Addr<StatsCache>>>,
         table: String,
         stats: Vec<TableColumnStat>,
@@ -611,8 +509,8 @@ impl ForeignKeyReference {
 
             let fk_column_stats_future = if let Some(cache_addr) = stats_cache_addr.borrow() {
                 // used for moving into futures
-                let db_url_clone = db_url.to_string();
                 let fk_table_clone = foreign_key_table.clone();
+                let config_clone = config.clone();
 
                 // similar to select_table_stats::select_table_stats_from_cache, except we just
                 // need a subset of stats (cheaper/more lightweight to
@@ -627,7 +525,7 @@ impl ForeignKeyReference {
                             StatsCacheResponse::TableStat(stats_opt) => match stats_opt {
                                 Some(stats) => Either::A(ok(stats.columns)),
                                 None => Either::B(Self::get_table_column_stats(
-                                    &db_url_clone,
+                                    &config_clone.clone(),
                                     &fk_table_clone.clone(),
                                 )),
                             },
@@ -640,7 +538,7 @@ impl ForeignKeyReference {
                 Either::A(cache_future)
             } else {
                 Either::B(Self::get_table_column_stats(
-                    &db_url,
+                    config,
                     &foreign_key_table.clone(),
                 ))
             };
@@ -666,7 +564,7 @@ impl ForeignKeyReference {
 
             // child columns are all FKs, so we need to recursively call this function
             let child_columns_future = Self::from_query_columns(
-                db_url,
+                config,
                 Arc::clone(&stats_cache_addr),
                 foreign_key_table.clone(),
                 child_fk_columns,

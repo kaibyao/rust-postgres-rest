@@ -4,7 +4,7 @@ use super::{
     select_table_stats::TableColumnStat,
     QueryResult,
 };
-use crate::{db::connect, Error};
+use crate::{Config, Error};
 use futures::{
     future::{Either, Future},
     stream::Stream,
@@ -71,12 +71,13 @@ fn extract_where_ast_from_setexpr(expr: SetExpr) -> Option<Expr> {
 
 /// Returns a Future resolving to a QueryResult.
 pub fn generate_query_result_from_db(
-    db_url: &str,
+    config: &Config,
     statement_str: String,
     prepared_values: Vec<TypedColumnValue>,
     is_return_rows: bool,
 ) -> impl Future<Item = QueryResult, Error = Error> {
-    connect(&db_url)
+    config
+        .connect()
         .map_err(Error::from)
         .and_then(move |mut conn| {
             conn.prepare(&statement_str)

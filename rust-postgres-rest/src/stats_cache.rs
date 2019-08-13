@@ -1,5 +1,4 @@
 use crate::{
-    db::connect,
     queries::{select_all_table_stats, select_all_tables, TableStats},
     Config, Error,
 };
@@ -42,7 +41,7 @@ impl Message for StatsCacheMessage {
 /// Contains the Table Stats cache.
 pub(crate) struct StatsCache {
     /// Postgres-formatted URL.
-    db_url: &'static str,
+    config: Config,
     /// Multi-threaded access to the table stats cache.
     cache: Arc<RwLock<Option<HashMap<String, TableStats>>>>,
     /// Whether the cache is currently being fetched/reset.
@@ -94,7 +93,7 @@ impl StatsCache {
     /// Creates a new instance of `StatsCache`.
     pub fn new(config: Config) -> Self {
         StatsCache {
-            db_url: config.db_url,
+            config: config.clone(),
             cache: Arc::new(RwLock::new(None)),
             is_fetching: Arc::new(AtomicBool::new(false)),
         }
@@ -122,7 +121,9 @@ impl StatsCache {
             let is_fetching_clone = self.is_fetching.clone();
             let cache_clone = self.cache.clone();
 
-            let f = connect(self.db_url)
+            let f = self
+                .config
+                .connect()
                 .and_then(|client| select_all_tables(client).map_err(Error::from))
                 .and_then(|(tables, client)| {
                     select_all_table_stats(client, tables).boxed().compat()

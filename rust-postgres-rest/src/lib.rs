@@ -5,7 +5,6 @@
 // to serialize large json (like the index)
 #![recursion_limit = "128"]
 
-mod db;
 mod error;
 
 /// Contains the functions used to query the database.
@@ -14,14 +13,15 @@ pub mod queries;
 mod stats_cache;
 use stats_cache::StatsCacheMessage;
 
-pub use db::connect;
 pub use error::Error;
 
-use actix::Addr;
+use actix::{spawn as actix_spawn, Addr, System};
 use futures::future::{err, ok, Either, Future};
+use tokio::spawn as tokio_spawn;
+use tokio_postgres::{connect as pg_connect, Client, NoTls};
 
 /// Configures the DB connection and API.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Config {
     /// The database URL. URL must be [Postgres-formatted](https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6).
     pub db_url: &'static str,
@@ -67,6 +67,45 @@ impl Config {
         self.is_cache_table_stats = true;
         stats_cache::initialize_stats_cache(self);
         self
+    }
+
+    /// A convenience wrapper around `tokio_postgres::connect`. Returns a future that evaluates to
+    /// the database client connection.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use futures::future::{Future, ok};
+    /// use futures::stream::Stream;
+    /// use rust_postgres_rest::{Config};
+    ///
+    /// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+    ///
+    /// let fut = config.connect()
+    ///     .map_err(|e| panic!(e))
+    ///     .and_then(|mut _client| {
+    ///         // do something with the db client
+    ///         ok(())
+    ///     });
+    ///
+    /// tokio::run(fut);
+    /// ```
+    pub fn connect(&self) -> impl Future<Item = Client, Error = Error> {
+        pg_connect(self.db_url, NoTls)
+            .map_err(Error::from)
+            .and_then(|(client, connection)| {
+                let is_actix_result = std::panic::catch_unwind(|| {
+                    System::current();
+                });
+
+                if is_actix_result.is_ok() {
+                    actix_spawn(connection.map_err(|e| panic!("{}", e)));
+                } else {
+                    tokio_spawn(connection.map_err(|e| panic!("{}", e)));
+                }
+
+                Ok(client)
+            })
     }
 
     /// Forces the Table Stats cache to reset/refresh new data.

@@ -18,7 +18,7 @@ use super::{
         validate_table_name, validate_where_column,
     },
 };
-use crate::{db::connect, Config, Error};
+use crate::{Config, Error};
 
 #[derive(Debug)]
 /// Options used to execute a SELECT query.
@@ -80,7 +80,8 @@ pub fn select_table_rows(
 
     // get table stats for building query (we need to know the column types)
     let table_clone = params.table.clone();
-    let stats_future = connect(config.db_url)
+    let stats_future = config
+        .connect()
         .map_err(Error::from)
         .and_then(move |mut conn| {
             select_column_stats_statement(&mut conn, &table_clone)
@@ -92,14 +93,14 @@ pub fn select_table_rows(
         });
 
     // parse columns for foreign key usage
-    let db_url_str = config.db_url.to_string();
+    let config_clone = config.clone();
     let addr_clone = if let Some(addr) = &config.stats_cache_addr {
         Some(addr.clone())
     } else {
         None
     };
     let fk_future = ForeignKeyReference::from_query_columns(
-        config.db_url,
+        config,
         Arc::new(addr_clone),
         params.table.clone(),
         columns,
@@ -113,7 +114,8 @@ pub fn select_table_rows(
             };
 
         // sending prepared statement to postgres
-        let select_rows_future = connect(&db_url_str)
+        let select_rows_future = config_clone
+            .connect()
             .map_err(Error::from)
             .and_then(move |mut conn| {
                 conn.prepare(&statement_str)

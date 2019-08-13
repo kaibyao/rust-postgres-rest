@@ -13,7 +13,7 @@ use super::{
     },
     QueryResult,
 };
-use crate::{db::connect, Config, Error};
+use crate::{Config, Error};
 
 #[derive(Debug)]
 /// Options used to execute a DELETE query.
@@ -65,11 +65,10 @@ pub fn delete_table_rows(
         column_expr_strings.par_extend(returning_column_strs);
     }
 
-    let db_url_str = config.db_url.to_string();
-
     // get table stats for building query (we need to know the column types)
     let table_clone = params.table.clone();
-    let stats_future = connect(&db_url_str)
+    let stats_future = config
+        .connect()
         .map_err(Error::from)
         .and_then(move |mut conn| {
             select_column_stats_statement(&mut conn, &table_clone)
@@ -86,10 +85,11 @@ pub fn delete_table_rows(
     } else {
         None
     };
+    let config_clone = config.clone();
 
     let fk_future = stats_future
         .join(ForeignKeyReference::from_query_columns(
-            config.db_url,
+            config,
             Arc::new(addr_clone),
             params.table.clone(),
             column_expr_strings,
@@ -102,7 +102,7 @@ pub fn delete_table_rows(
                 };
 
             let delete_rows_future = generate_query_result_from_db(
-                &db_url_str,
+                &config_clone,
                 statement_str,
                 prepared_values,
                 is_return_rows,

@@ -87,8 +87,9 @@ use endpoints::{
 pub use error::Error;
 use rust_postgres_rest::Config as InnerConfig;
 
-// use actix::Addr;
 use actix_web::{web, Scope};
+use futures::future::Future;
+use tokio_postgres::Client;
 
 /// Configures and creates the REST API `Scope`.
 /// ```
@@ -130,6 +131,27 @@ impl Config {
     pub fn cache_table_stats(&mut self) -> &mut Self {
         self.inner.cache_table_stats();
         self
+    }
+
+    /// A convenience wrapper around `tokio_postgres::connect`. Returns a future that evaluates to
+    /// the database client connection.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use futures::future::{Future, ok};
+    /// use futures::stream::Stream;
+    /// use rust_postgres_rest_actix::{Config};
+    ///
+    /// actix::run(|| Config::new("postgresql://postgres@0.0.0.0:5432/postgres").connect()
+    ///     .map_err(|e| panic!(e))
+    ///     .and_then(|mut _client| {
+    ///         // do something with the db client
+    ///         ok(())
+    ///     }));
+    /// ```
+    pub fn connect(&self) -> impl Future<Item = Client, Error = Error> {
+        self.inner.connect().map_err(Error::from)
     }
 
     /// Enables an additional API endpoint at `{scope_name}/reset_table_stats_cache`, which allows

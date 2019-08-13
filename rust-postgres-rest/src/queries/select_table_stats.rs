@@ -1,6 +1,5 @@
 use super::utils::validate_table_name;
 use crate::{
-    db::connect,
     stats_cache::{StatsCache, StatsCacheMessage, StatsCacheResponse},
     Config, Error,
 };
@@ -149,21 +148,19 @@ pub fn select_table_stats(
     // get stats from cache if it exists, otherwise make a DB call.
     if let Some(cache_addr) = &config.stats_cache_addr {
         Either::B(Either::A(select_table_stats_from_cache(
-            cache_addr,
-            config.db_url,
-            table,
+            cache_addr, config, table,
         )))
     } else {
-        Either::B(Either::B(select_table_stats_from_db(config.db_url, table)))
+        Either::B(Either::B(select_table_stats_from_db(config, table)))
     }
 }
 
 fn select_table_stats_from_cache(
     cache_addr: &Addr<StatsCache>,
-    db_url: &str,
+    config: &Config,
     table: String,
 ) -> impl Future<Item = TableStats, Error = Error> {
-    let db_url = db_url.to_string();
+    let config_clone = config.clone();
     let table_clone = table.clone();
 
     cache_addr
@@ -173,7 +170,7 @@ fn select_table_stats_from_cache(
             Ok(response) => match response {
                 StatsCacheResponse::TableStat(stats_opt) => match stats_opt {
                     Some(stats) => Either::A(ok::<TableStats, Error>(stats)),
-                    None => Either::B(select_table_stats_from_db(&db_url, table_clone)),
+                    None => Either::B(select_table_stats_from_db(&config_clone, table_clone)),
                 },
                 StatsCacheResponse::OK => {
                     unreachable!("Message of type `FetchStatsForTable` should never return an OK.")
@@ -184,10 +181,11 @@ fn select_table_stats_from_cache(
 }
 
 fn select_table_stats_from_db(
-    db_url: &str,
+    config: &Config,
     table: String,
 ) -> impl Future<Item = TableStats, Error = Error> {
-    connect(db_url)
+    config
+        .connect()
         .map_err(Error::from)
         .and_then(move |mut conn| {
             // run all sub-operations in "parallel"
