@@ -1,37 +1,30 @@
-# experiment00
+# rust-postgres-rest-actix
 
 Use `actix-web` to serve a REST API for your PostgreSQL database.
 
 ```rust
-use actix::System;
 use actix_web::{App, HttpServer};
-use experiment00::{generate_rest_api_scope, AppConfig};
+use rust_postgres_rest_actix::{Config};
 
 fn main() {
-    let sys = System::new("my_app_runtime"); // create Actix runtime
-
     let ip_address = "127.0.0.1:3000";
 
     // start 1 server on each cpu thread
     HttpServer::new(move || {
-        let mut config = AppConfig::new();
-        config.db_url = "postgresql://postgres@0.0.0.0:5432/postgres";
-
         App::new().service(
             // appends an actix-web Scope under the "/api" endpoint to app.
-            generate_rest_api_scope(config),
+            Config::new("postgresql://postgres@0.0.0.0:5432/postgres")
+                .generate_scope("/api"),
         )
     })
     .bind(ip_address)
     .expect("Can not bind to port 3000")
-    .start();
+    .run()
+    .unwrap();
 
     println!("Running server on {}", ip_address);
-    sys.run().unwrap();
 }
 ```
-
-`generate_rest_api_scope()` creates the `/api/table` and `/api/{table}` endpoints, which allow for CRUD operations on table rows in your database.
 
 ## Table of contents
 
@@ -39,12 +32,12 @@ fn main() {
 - [Requirements](#requirements)
 - [Configuration](#configuration)
 - [Endpoints](#endpoints)
-  - [`GET /` — “Table of contents”](#-get---)
-  - [`GET /{table}` — Get table rows (SELECT)](#-get---table--)
-  - [`POST /{table}` — Insert table rows (INSERT)](#-post---table--)
-  - [`PUT /{table}` — Update table rows (UPDATE)](#-put---table--)
-  - [`DELETE /{table}` — Delete table rows (DELETE)](#-delete---table--)
-  - [`POST /sql` — Execute custom SQL](#-post--sql-)
+  - [`GET /` — “Table of contents”](#get-)
+  - [`GET /{table}` — Get table rows (SELECT)](#get-table)
+  - [`POST /{table}` — Insert table rows (INSERT)](#post-table)
+  - [`PUT /{table}` — Update table rows (UPDATE)](#put-table)
+  - [`DELETE /{table}` — Delete table rows (DELETE)](#delete-table)
+  - [`POST /sql` — Execute custom SQL](#post-sql)
 - [Error messages](#error-messages)
 - [Not supported](#not-supported)
 - [To dos](#to-dos)
@@ -96,7 +89,7 @@ INSERT INTO public.adult (id, company_id, name) VALUES (1, 100, 'Ned');
 INSERT INTO public.child (id, name, parent_id, school_id) VALUES (1000, 'Robb', 1, 10);
 ```
 
-Runing the `GET` operation:
+Running the `GET` operation:
 
 ```bash
 GET "/api/child?columns=id,name,parent_id.name,parent_id.company_id.name"
@@ -134,36 +127,21 @@ Changing the previous API endpoint to `/api/child?columns=id,name,parent_id.name
 
 ## Requirements
 
-- Your tables & columns only contain letters, numbers, and underscore. We are converting query parameters/body parameters into an SQL abstract syntax tree (AST) before finally executing an SQL query in the background; there is no schema/model configuration (like in Diesel), so this restriction makes data that is passed in, easier to validate & secure.
+- Your tables & columns only contain letters, numbers, and underscore. We are converting query parameters/body parameters into an SQL abstract syntax tree (AST) before finally executing an SQL query in the background; there is no schema/model configuration (like in Diesel), so this restriction makes data easier to validate & secure.
 - You don’t need to query for `HStore`, `bit`, or `varbit` (technical limitations for now).
+- `actix-web >= 1.0.0`.
+- Rust >= 1.38 (that means nightly, for now).
 
 ## Configuration
 
-The `AppConfig` struct contains the configuration options used by this library.
+The `Config` struct contains the configuration options used by this library.
 
-### `db_url: &'static str (default: "")`
+```rust
+let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+let scope = config.generate_scope("/api");
+```
 
-The database URL. URL must be [Postgres-formatted](https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6).
-
-### `is_cache_table_stats: bool (default: false)`
-
-Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to `true`, caching of table stats is enabled, significantly speeding up API endpoings that use `SELECT` and `INSERT` statements.
-
-### `is_cache_reset_endpoint_enabled: bool (default: false)`
-
-Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to `true`, an additional API endpoint is made available at `{scope_name}/reset_table_stats_cache`, which allows for manual resetting of the Table Stats cache. This is useful if you want a persistent cache that only needs to be reset on upgrades, for example.
-
-### `cache_reset_interval_seconds: u32 (default: 0)`
-
-Requires the `stats_cache` cargo feature to be enabled (which is enabled by default). When set to a positive integer `n`, automatically refresh the Table Stats cache every `n` seconds. When set to `0`, the cache is never automatically reset.
-
-### `is_custom_sql_execution_endpoint_enabled: bool (default: false)`
-
-When set to `true`, an additional API endpoint is made available at `{scope_name}/sql`, which allows for custom SQL queries to be executed.
-
-### `scope_name: &'static str (default: "/api")`
-
-The API endpoint that contains all of the other API operations available in this library.
+To see all options, visit the API docs.
 
 ## Endpoints
 
@@ -514,7 +492,7 @@ The second row (with id = 3) is deleted from the table `delete_a`.
 
 ### `POST /sql`
 
-Runs any passed-in SQL query (which is dangerous). This is here in case the above endpoints aren’t sufficient for complex operations you might need. Be careful if/how you expose this endpoint (honestly it should never be exposed and if used, only used internally with hardcoded or extremely sanitized values). By default, this endpoint is disabled and must be enabled by setting `is_custom_sql_execution_endpoint_enabled = true` in the configuration object.
+Runs any passed-in SQL query (which is dangerous). This is here in case the above endpoints aren’t sufficient for complex operations you might need. Be careful if/how you expose this endpoint (honestly it should never be publicly exposed and if used, only used internally with hardcoded or extremely sanitized values). By default, this endpoint is disabled and must be enabled by setting `.enable_custom_sql_url()` in `Config`.
 
 #### Body schema for `POST /sql`
 
@@ -572,18 +550,19 @@ See [source](src/error.rs).
 - Exclusion and Trigger constraints
 - `BETWEEN` (see [Postgres wiki article](https://wiki.postgresql.org/wiki/Don%27t_Do_This#Don.27t_use_BETWEEN_.28especially_with_timestamps.29))
 
-## To dos
-
-1. break into workspaces
-1. benchmark
-1. GraphQL API
-1. Optimization: Convert Strings to &str / statics.
-1. CSV, XML for REST API (nix for now?)
-1. Eventually support dot syntax in INSERT: [See this forum post](https://dba.stackexchange.com/questions/160674/insert-rows-in-two-tables-preserving-connection-to-a-third-table)
-1. Maybe use Diesel's parser instead of SQLParser in order to support HStore, bit/varbit, and RETURNING (would eliminate need for `is_returning_rows`)?
-
 ## To run tests
 
 You will need `docker-compose` to run tests. In one terminal, run `docker-compose up` to start the postgres docker image.
 
 In another terminal, run `cargo test`.
+
+## To dos
+
+1. TLS
+1. benchmark
+1. flatbuffers
+1. GraphQL API
+1. Optimization: Convert Strings to &str / statics.
+1. CSV, XML for REST API (nix for now?)
+1. Eventually support dot syntax in INSERT: [See this forum post](https://dba.stackexchange.com/questions/160674/insert-rows-in-two-tables-preserving-connection-to-a-third-table)
+1. Maybe use Diesel's parser instead of SQLParser in order to support HStore, bit/varbit, and RETURNING (would eliminate need for `is_returning_rows`)?

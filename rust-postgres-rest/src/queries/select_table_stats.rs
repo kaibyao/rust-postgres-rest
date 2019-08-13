@@ -1,8 +1,7 @@
 use super::utils::validate_table_name;
 use crate::{
-    db::connect,
     stats_cache::{StatsCache, StatsCacheMessage, StatsCacheResponse},
-    AppState, Error,
+    Config, Error,
 };
 use actix::Addr;
 use futures::{
@@ -139,7 +138,7 @@ pub struct TableStats {
 /// Returns the requested table’s stats: number of rows, the foreign keys referring to the table,
 /// and column names + types
 pub fn select_table_stats(
-    state: &AppState,
+    config: &Config,
     table: String,
 ) -> impl Future<Item = TableStats, Error = Error> {
     if let Err(e) = validate_table_name(&table) {
@@ -147,26 +146,21 @@ pub fn select_table_stats(
     }
 
     // get stats from cache if it exists, otherwise make a DB call.
-    if let Some(cache_addr) = &state.stats_cache_addr {
+    if let Some(cache_addr) = &config.stats_cache_addr {
         Either::B(Either::A(select_table_stats_from_cache(
-            cache_addr,
-            state.config.db_url,
-            table,
+            cache_addr, config, table,
         )))
     } else {
-        Either::B(Either::B(select_table_stats_from_db(
-            state.config.db_url,
-            table,
-        )))
+        Either::B(Either::B(select_table_stats_from_db(config, table)))
     }
 }
 
 fn select_table_stats_from_cache(
     cache_addr: &Addr<StatsCache>,
-    db_url: &str,
+    config: &Config,
     table: String,
 ) -> impl Future<Item = TableStats, Error = Error> {
-    let db_url = db_url.to_string();
+    let config_clone = config.clone();
     let table_clone = table.clone();
 
     cache_addr
@@ -176,7 +170,7 @@ fn select_table_stats_from_cache(
             Ok(response) => match response {
                 StatsCacheResponse::TableStat(stats_opt) => match stats_opt {
                     Some(stats) => Either::A(ok::<TableStats, Error>(stats)),
-                    None => Either::B(select_table_stats_from_db(&db_url, table_clone)),
+                    None => Either::B(select_table_stats_from_db(&config_clone, table_clone)),
                 },
                 StatsCacheResponse::OK => {
                     unreachable!("Message of type `FetchStatsForTable` should never return an OK.")
@@ -187,10 +181,11 @@ fn select_table_stats_from_cache(
 }
 
 fn select_table_stats_from_db(
-    db_url: &str,
+    config: &Config,
     table: String,
 ) -> impl Future<Item = TableStats, Error = Error> {
-    connect(db_url)
+    config
+        .connect()
         .map_err(Error::from)
         .and_then(move |mut conn| {
             // run all sub-operations in "parallel"
@@ -229,7 +224,9 @@ fn select_table_stats_from_db(
 
 /// Returns a given table’s column stats: column names, column types, length, default values, and
 /// foreign keys information.
-pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>, Error = Error> {
+pub(crate) fn select_column_stats(
+    q: Query,
+) -> impl Future<Item = Vec<TableColumnStat>, Error = Error> {
     q.map_err(Error::from).collect().and_then(|rows| {
         rows.into_iter()
             .map(|row| {
@@ -297,7 +294,7 @@ pub fn select_column_stats(q: Query) -> impl Future<Item = Vec<TableColumnStat>,
     })
 }
 
-pub fn select_column_stats_statement(conn: &mut Client, table: &str) -> Prepare {
+pub(crate) fn select_column_stats_statement(conn: &mut Client, table: &str) -> Prepare {
     let statement_str = &format!("
 WITH foreign_keys as (
     SELECT

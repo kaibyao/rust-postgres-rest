@@ -15,7 +15,7 @@ use tokio_postgres::{impls::Prepare, row::Row, Client};
 
 /// Returns the requested tables’ stats: number of rows, the foreign keys referring to the table,
 /// and column names + types
-pub async fn select_all_table_stats(
+pub(crate) async fn select_all_table_stats(
     mut conn: Client,
     tables: Vec<String>,
 ) -> Result<HashMap<String, TableStats>, Error> {

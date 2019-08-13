@@ -1,6 +1,6 @@
 use super::{
     postgres_types::{row_to_row_values, RowValues},
-    query_types::{QueryParamsExecute, QueryResult},
+    QueryResult,
 };
 use crate::Error;
 use futures::{
@@ -10,9 +10,17 @@ use futures::{
 use rayon::prelude::*;
 use tokio_postgres::Client;
 
+#[derive(Debug)]
+/// Options used to execute a custom SQL query.
+pub struct ExecuteParams {
+    pub statement: String,
+    pub is_return_rows: bool,
+}
+
+/// Executes an SQL query statement.
 pub fn execute_sql_query(
     mut client: Client,
-    params: QueryParamsExecute,
+    params: ExecuteParams,
 ) -> impl Future<Item = QueryResult, Error = Error> {
     client
         .prepare(&params.statement)

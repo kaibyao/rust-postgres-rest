@@ -1,20 +1,20 @@
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
     postgres_types::TypedColumnValue,
-    query_types::{QueryParamsUpdate, QueryResult},
     select_table_stats::{select_column_stats, select_column_stats_statement, TableColumnStat},
     utils::{
         conditions_params_to_ast, generate_query_result_from_db, get_columns_str,
         get_db_column_str, get_where_string, validate_alias_identifier, validate_table_name,
         validate_where_column,
     },
+    QueryResult,
 };
-use crate::{db::connect, AppState, Error};
+use crate::{Config, Error};
 use futures::future::{err, Either, Future};
 use lazy_static::lazy_static;
 use rayon::prelude::*;
 use regex::Regex;
-use serde_json::Value as JsonValue;
+use serde_json::{Map, Value as JsonValue};
 use sqlparser::ast::Expr;
 use std::{collections::HashMap, sync::Arc};
 
@@ -23,10 +23,23 @@ lazy_static! {
     static ref STRING_RE: Regex = Regex::new(r#"^['"](.+)['"]$"#).unwrap();
 }
 
+#[derive(Debug)]
+/// Options used to execute an `UPDATE` SQL statement.
+pub struct UpdateParams {
+    /// A JSON object whose key-values represent column names and the values to set.
+    pub column_values: Map<String, JsonValue>,
+    /// WHERE expression.
+    pub conditions: Option<String>,
+    /// List of (foreign key) columns whose values are returned.
+    pub returning_columns: Option<Vec<String>>,
+    // Name of table to update.
+    pub table: String,
+}
+
 /// Runs an UPDATE query on the selected table rows.
 pub fn update_table_rows(
-    state: &AppState,
-    params: QueryParamsUpdate,
+    config: &Config,
+    params: UpdateParams,
 ) -> impl Future<Item = QueryResult, Error = Error> {
     if let Err(e) = validate_table_name(&params.table) {
         return Either::A(err(e));
@@ -96,11 +109,10 @@ pub fn update_table_rows(
         column_expr_strings.par_extend(returning_column_strs);
     }
 
-    let db_url_str = state.config.db_url.to_string();
-
     // get table stats for building query (we need to know the column types)
     let table_clone = params.table.clone();
-    let stats_future = connect(&db_url_str)
+    let stats_future = config
+        .connect()
         .map_err(Error::from)
         .and_then(move |mut conn| {
             select_column_stats_statement(&mut conn, &table_clone)
@@ -112,15 +124,16 @@ pub fn update_table_rows(
         });
 
     // parse column_expr_strings for foreign key usage
-    let addr_clone = if let Some(addr) = &state.stats_cache_addr {
+    let addr_clone = if let Some(addr) = &config.stats_cache_addr {
         Some(addr.clone())
     } else {
         None
     };
+    let config_clone = config.clone();
 
     let fk_future = stats_future
         .join(ForeignKeyReference::from_query_columns(
-            state.config.db_url,
+            config,
             Arc::new(addr_clone),
             params.table.clone(),
             column_expr_strings,
@@ -133,7 +146,7 @@ pub fn update_table_rows(
                 };
 
             let update_rows_future = generate_query_result_from_db(
-                &db_url_str,
+                &config_clone,
                 statement_str,
                 prepared_values,
                 is_return_rows,
@@ -147,7 +160,7 @@ pub fn update_table_rows(
 
 /// Returns the UPDATE query statement string and a vector of prepared values.
 fn build_update_statement(
-    params: QueryParamsUpdate,
+    params: UpdateParams,
     stats: Vec<TableColumnStat>,
     fks: Vec<ForeignKeyReference>,
     mut where_ast: Expr,
@@ -298,13 +311,13 @@ fn build_update_statement(
 #[cfg(test)]
 mod build_update_statement_tests {
     use super::*;
-    use crate::queries::{postgres_types::IsNullColumnValue, query_types::QueryParamsUpdate};
+    use crate::queries::postgres_types::IsNullColumnValue;
     use pretty_assertions::assert_eq;
     use serde_json::json;
 
     #[test]
     fn simple() {
-        let params = QueryParamsUpdate {
+        let params = UpdateParams {
             column_values: json!({"name": "'test'"}).as_object().unwrap().clone(),
             conditions: None,
             returning_columns: None,
@@ -340,7 +353,7 @@ mod build_update_statement_tests {
     fn fk_returning_columns() {
         let conditions = "id = 2";
         let where_ast = conditions_params_to_ast(&Some(conditions.to_string())).unwrap();
-        let params = QueryParamsUpdate {
+        let params = UpdateParams {
             column_values: json!({"nemesis_name": "nemesis_id.name"})
                 .as_object()
                 .unwrap()
@@ -438,7 +451,7 @@ mod build_update_statement_tests {
 
     #[test]
     fn fk_returning_columns_no_conditions() {
-        let params = QueryParamsUpdate {
+        let params = UpdateParams {
             column_values: json!({"nemesis_name": "nemesis_id.name"})
                 .as_object()
                 .unwrap()
@@ -535,7 +548,7 @@ mod build_update_statement_tests {
     fn nested_fk_returning_columns() {
         let conditions = "id = 1";
         let where_ast = conditions_params_to_ast(&Some(conditions.to_string())).unwrap();
-        let params = QueryParamsUpdate {
+        let params = UpdateParams {
             column_values: json!({"name": "team_id.coach_id.name"})
                 .as_object()
                 .unwrap()

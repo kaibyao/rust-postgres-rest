@@ -1,10 +1,10 @@
 use super::{
     foreign_keys::{fk_ast_nodes_from_where_ast, ForeignKeyReference},
     postgres_types::{row_to_row_values, RowValues, TypedColumnValue},
-    query_types::QueryResult,
     select_table_stats::TableColumnStat,
+    QueryResult,
 };
-use crate::{db::connect, Error};
+use crate::{Config, Error};
 use futures::{
     future::{Either, Future},
     stream::Stream,
@@ -71,12 +71,13 @@ fn extract_where_ast_from_setexpr(expr: SetExpr) -> Option<Expr> {
 
 /// Returns a Future resolving to a QueryResult.
 pub fn generate_query_result_from_db(
-    db_url: &str,
+    config: &Config,
     statement_str: String,
     prepared_values: Vec<TypedColumnValue>,
     is_return_rows: bool,
 ) -> impl Future<Item = QueryResult, Error = Error> {
-    connect(&db_url)
+    config
+        .connect()
         .map_err(Error::from)
         .and_then(move |mut conn| {
             conn.prepare(&statement_str)
@@ -118,7 +119,7 @@ pub fn generate_query_result_from_db(
 
 /// Generates the WHERE clause and a HashMap of column name : column type after taking foreign keys
 /// into account. Mutates the original AST.
-pub fn get_where_string<'a>(
+pub(crate) fn get_where_string<'a>(
     where_ast: &mut Expr,
     table: &str,
     stats: &[TableColumnStat],
@@ -172,7 +173,7 @@ pub fn get_where_string<'a>(
 
 /// Extracts the "real" column name (taking foreign keys and aliases into account).
 /// Returns a Vec of &str tokens that can later be used in `.extend()` or `.join("")`.
-pub fn get_db_column_str<'a>(
+pub(crate) fn get_db_column_str<'a>(
     column: &'a str,
     table: &'a str,
     fks: &'a [ForeignKeyReference],
@@ -235,7 +236,7 @@ pub fn get_db_column_str<'a>(
 
 /// Generates a string of column names delimited by commas. Foreign keys are correctly accounted
 /// for.
-pub fn get_columns_str<'a>(
+pub(crate) fn get_columns_str<'a>(
     columns: &'a [String],
     table: &'a str,
     fks: &'a [ForeignKeyReference],
@@ -252,23 +253,6 @@ pub fn get_columns_str<'a>(
     }
 
     Ok(statement)
-}
-
-/// Given a string of column names separated by commas, convert and return a vector of lowercase
-/// strings.
-pub fn normalize_columns(columns_str: &str) -> Result<Vec<String>, Error> {
-    columns_str
-        .split(',')
-        .map(|s| {
-            if s == "" {
-                return Err(Error::generate_error(
-                    "INCORRECT_REQUEST_BODY",
-                    ["`", s, "`", " is not a valid column name. Column names must be a comma-separated list and include at least one column name."].join(""),
-                ));
-            }
-            Ok(s.trim().to_lowercase())
-        })
-        .collect()
 }
 
 /// Checks a table name and returns true if it is valid (false otherwise).
