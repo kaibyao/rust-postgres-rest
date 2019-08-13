@@ -45,8 +45,7 @@ impl Default for Config {
         }
     }
 }
-// opted to not use a Builder pattern, as the number of config options makes it unwarranted
-// (complexity is low)
+
 impl Config {
     /// Creates a new Config.
     /// ```
