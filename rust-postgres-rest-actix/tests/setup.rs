@@ -26,7 +26,7 @@ pub fn start_web_server(db_url: &'static str, address: &'static str) {
 
         HttpServer::new(move || {
             App::new().service(
-                Config::new(db_url, || NoTls)
+                Config::new(db_url)
                     .enable_custom_sql_url()
                     .generate_scope("/api"),
             )
@@ -44,7 +44,7 @@ pub fn start_web_server(db_url: &'static str, address: &'static str) {
 
         HttpServer::new(move || {
             App::new().service(
-                Config::new(db_url, || NoTls)
+                Config::new(db_url)
                     .enable_custom_sql_url()
                     .generate_scope("/api"),
             )
