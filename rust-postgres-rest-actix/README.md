@@ -558,7 +558,6 @@ In another terminal, run `cargo test`.
 
 ## To dos
 
-1. TLS
 1. benchmark
 1. flatbuffers
 1. GraphQL API

@@ -2,6 +2,10 @@ use futures::future::{err, Either, Future};
 use rayon::prelude::*;
 use sqlparser::ast::Expr;
 use std::sync::Arc;
+use tokio_postgres::{
+    tls::{MakeTlsConnect, TlsConnect},
+    Socket,
+};
 
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
@@ -13,7 +17,7 @@ use super::{
     },
     QueryResult,
 };
-use crate::{Config, Error};
+use crate::{stats_cache::get_stats_cache_addr, Config, Error};
 
 #[derive(Debug)]
 /// Options used to execute a DELETE query.
@@ -25,10 +29,16 @@ pub struct DeleteParams {
 }
 
 /// Returns the results of a `DELETE FROM {table} WHERE [conditions] [RETURNING [columns]]` query.
-pub fn delete_table_rows(
-    config: &Config,
+pub fn delete_table_rows<T>(
+    config: Config<T>,
     params: DeleteParams,
-) -> impl Future<Item = QueryResult, Error = Error> {
+) -> impl Future<Item = QueryResult, Error = Error>
+where
+    <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    <T as MakeTlsConnect<Socket>>::Stream: Send,
+    <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     if let Err(e) = validate_table_name(&params.table) {
         return Either::A(err(e));
     }
@@ -80,17 +90,12 @@ pub fn delete_table_rows(
         });
 
     // parse column_expr_strings for foreign key usage
-    let addr_clone = if let Some(addr) = &config.stats_cache_addr {
-        Some(addr.clone())
-    } else {
-        None
-    };
     let config_clone = config.clone();
 
     let fk_future = stats_future
         .join(ForeignKeyReference::from_query_columns(
             config,
-            Arc::new(addr_clone),
+            Arc::new(get_stats_cache_addr()),
             params.table.clone(),
             column_expr_strings,
         ))
@@ -102,7 +107,7 @@ pub fn delete_table_rows(
                 };
 
             let delete_rows_future = generate_query_result_from_db(
-                &config_clone,
+                config_clone,
                 statement_str,
                 prepared_values,
                 is_return_rows,

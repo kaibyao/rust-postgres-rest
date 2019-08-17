@@ -12,6 +12,7 @@
 //! ```
 //! use actix_web::{App, HttpServer};
 //! use rust_postgres_rest_actix::{Config};
+//! use tokio_postgres::tls::NoTls;
 //! # use std::thread;
 //!
 //! fn main() {
@@ -22,7 +23,7 @@
 //!     HttpServer::new(move || {
 //!         App::new().service(
 //!             // appends an actix-web Scope under the "/api" endpoint to app.
-//!             Config::new("postgresql://postgres@0.0.0.0:5432/postgres")
+//!             Config::new("postgresql://postgres@0.0.0.0:5432/postgres", || NoTls)
 //!                 .generate_scope("/api"),
 //!         )
 //!     })
@@ -46,6 +47,7 @@
 /// ```
 /// use actix_web::{App, HttpServer, web};
 /// use rust_postgres_rest_actix::{Config, endpoints};
+/// use tokio_postgres::tls::NoTls;
 ///
 /// fn main() {
 ///     let ip_address = "127.0.0.1:3000";
@@ -53,16 +55,16 @@
 ///     // start 1 server on each cpu thread
 ///     # std::thread::spawn(move || {
 ///     HttpServer::new(move || {
-///         let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+///         let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", || NoTls);
 ///
 ///         App::new().service(
 ///             web::scope("/custom_api_endpoint")
 ///                 .data(config)
-///                 .route("/table", web::get().to_async(endpoints::get_all_table_names))
+///                 .route("/table", web::get().to_async(endpoints::get_all_table_names::<NoTls>))
 ///                 .service(
 ///                     web::resource("/{table}")
-///                         .route(web::get().to_async(endpoints::get_table))
-///                         .route(web::post().to_async(endpoints::post_table))
+///                         .route(web::get().to_async(endpoints::get_table::<NoTls>))
+///                         .route(web::post().to_async(endpoints::post_table::<NoTls>))
 ///                 )
 ///         )
 ///     })
@@ -89,18 +91,25 @@ use rust_postgres_rest::Config as InnerConfig;
 
 use actix_web::{web, Scope};
 use futures::future::Future;
-use tokio_postgres::Client;
+use tokio_postgres::{
+    tls::{MakeTlsConnect, TlsConnect},
+    Client, Socket,
+};
 
 /// Configures and creates the REST API `Scope`.
 /// ```
 /// use rust_postgres_rest_actix::Config;
+/// use tokio_postgres::tls::NoTls;
 ///
-/// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+/// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", || NoTls);
 /// let scope = config.generate_scope("/api");
 /// ```
 #[derive(Clone)]
-pub struct Config {
-    inner: InnerConfig,
+pub struct Config<T>
+where
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
+    inner: InnerConfig<T>,
     /// When set to `true`, an additional API endpoint is made available at
     /// `{scope_name}/reset_table_stats_cache`, which allows for manual resetting of the Table
     /// Stats cache. This is useful if you want a persistent cache that only needs to be reset on
@@ -111,16 +120,23 @@ pub struct Config {
     is_custom_sql_endpoint_enabled: bool,
 }
 
-impl Config {
+impl<T> Config<T>
+where
+    <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    <T as MakeTlsConnect<Socket>>::Stream: Send,
+    <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     /// Creates a Config object with default values. `db_url` must be [Postgres-formatted](https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6).
     /// ```
     /// use rust_postgres_rest_actix::Config;
+    /// use tokio_postgres::tls::NoTls;
     ///
-    /// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+    /// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", || NoTls);
     /// ```
-    pub fn new(db_url: &'static str) -> Self {
+    pub fn new(db_url: &'static str, tls: fn() -> T) -> Self {
         Config {
-            inner: InnerConfig::new(db_url),
+            inner: InnerConfig::new(db_url, tls),
             is_cache_reset_endpoint_enabled: false,
             is_custom_sql_endpoint_enabled: false,
         }
@@ -142,8 +158,9 @@ impl Config {
     /// use futures::future::{Future, ok};
     /// use futures::stream::Stream;
     /// use rust_postgres_rest_actix::{Config};
+    /// use tokio_postgres::tls::NoTls;
     ///
-    /// actix::run(|| Config::new("postgresql://postgres@0.0.0.0:5432/postgres").connect()
+    /// actix::run(|| Config::new("postgresql://postgres@0.0.0.0:5432/postgres", || NoTls).connect()
     ///     .map_err(|e| panic!(e))
     ///     .and_then(|mut _client| {
     ///         // do something with the db client
@@ -171,8 +188,9 @@ impl Config {
     /// Creates the Actix scope url at `scope_name`, which contains all of the other API endpoints.
     /// ```
     /// use rust_postgres_rest_actix::Config;
+    /// use tokio_postgres::tls::NoTls;
     ///
-    /// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+    /// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", || NoTls);
     /// let scope = config.generate_scope("/api");
     /// ```
     pub fn generate_scope(&self, scope_name: &str) -> Scope {
@@ -181,25 +199,26 @@ impl Config {
         if self.inner.is_cache_table_stats {
             scope = scope.route(
                 "/reset_table_stats_cache",
-                web::get().to_async(reset_caches),
+                // web::get().to_async(typed_reset_caches),
+                web::get().to_async(reset_caches::<T>),
             );
         }
 
         if self.is_custom_sql_endpoint_enabled {
-            scope = scope.route("/sql", web::post().to_async(execute_sql));
+            scope = scope.route("/sql", web::post().to_async(execute_sql::<T>));
         }
 
         scope
             .data(self.clone())
             .route("", web::get().to(index))
             .route("/", web::get().to(index))
-            .route("/table", web::get().to_async(get_all_table_names))
+            .route("/table", web::get().to_async(get_all_table_names::<T>))
             .service(
                 web::resource("/{table}")
-                    .route(web::delete().to_async(delete_table))
-                    .route(web::get().to_async(get_table))
-                    .route(web::post().to_async(post_table))
-                    .route(web::put().to_async(put_table)),
+                    .route(web::delete().to_async(delete_table::<T>))
+                    .route(web::get().to_async(get_table::<T>))
+                    .route(web::post().to_async(post_table::<T>))
+                    .route(web::put().to_async(put_table::<T>)),
             )
     }
 
@@ -207,8 +226,9 @@ impl Config {
     /// is not set, the cache is never reset after server start.
     /// ```
     /// use rust_postgres_rest_actix::Config;
+    /// use tokio_postgres::tls::NoTls;
     ///
-    /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+    /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", || NoTls);
     /// config.set_cache_reset_timer(300); // Cache will refresh every 5 minutes.
     /// ```
     pub fn set_cache_reset_timer(&mut self, seconds: u32) -> &mut Self {

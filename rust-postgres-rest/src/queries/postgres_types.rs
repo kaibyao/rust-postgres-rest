@@ -29,7 +29,10 @@ pub struct MacAddress(Eui48MacAddress);
 
 // mostly copied from the postgres-protocol and postgres-shared libraries
 impl<'a> FromSql<'a> for MacAddress {
-    fn from_sql(typ: &Type, raw: &[u8]) -> Result<MacAddress, Box<dyn StdError + Sync + Send>> {
+    fn from_sql(
+        typ: &Type,
+        raw: &[u8],
+    ) -> Result<MacAddress, Box<dyn StdError + Send + Sync + Send>> {
         let mac = <Eui48MacAddress as FromSql>::from_sql(typ, raw)?;
         Ok(MacAddress(mac))
     }
@@ -38,7 +41,11 @@ impl<'a> FromSql<'a> for MacAddress {
 }
 
 impl ToSql for MacAddress {
-    fn to_sql(&self, _: &Type, w: &mut Vec<u8>) -> Result<IsNull, Box<dyn StdError + Sync + Send>> {
+    fn to_sql(
+        &self,
+        _: &Type,
+        w: &mut Vec<u8>,
+    ) -> Result<IsNull, Box<dyn StdError + Send + Sync + Send>> {
         let mut bytes = [0; 6];
         bytes.copy_from_slice(self.0.as_bytes());
         macaddr_to_sql(bytes, w);
@@ -69,18 +76,18 @@ where
     fn from_sql(
         ty: &Type,
         raw: &'a [u8],
-    ) -> Result<Self, Box<dyn StdError + 'static + Send + Sync>> {
+    ) -> Result<Self, Box<dyn StdError + 'static + Send + Send + Sync>> {
         <T as FromSql>::from_sql(ty, raw).map(IsNullColumnValue::NotNullable)
     }
 
-    fn from_sql_null(_: &Type) -> Result<Self, Box<dyn StdError + Sync + Send>> {
+    fn from_sql_null(_: &Type) -> Result<Self, Box<dyn StdError + Send + Sync + Send>> {
         Ok(IsNullColumnValue::Nullable(None))
     }
 
     fn from_sql_nullable(
         ty: &Type,
         raw: Option<&'a [u8]>,
-    ) -> Result<Self, Box<dyn StdError + 'static + Send + Sync>> {
+    ) -> Result<Self, Box<dyn StdError + 'static + Send + Send + Sync>> {
         match raw {
             Some(raw_inner) => Self::from_sql(ty, raw_inner),
             None => Self::from_sql_null(ty),
@@ -96,7 +103,7 @@ where
         &self,
         ty: &Type,
         out: &mut Vec<u8>,
-    ) -> Result<IsNull, Box<dyn StdError + 'static + Send + Sync>> {
+    ) -> Result<IsNull, Box<dyn StdError + 'static + Send + Send + Sync>> {
         match self {
             IsNullColumnValue::Nullable(val_opt) => val_opt.to_sql(ty, out),
             IsNullColumnValue::NotNullable(val) => val.to_sql(ty, out),
@@ -171,7 +178,7 @@ impl<'a> FromSql<'a> for TypedColumnValue {
     fn from_sql(
         ty: &Type,
         raw: &'a [u8],
-    ) -> Result<Self, Box<dyn StdError + 'static + Send + Sync>> {
+    ) -> Result<Self, Box<dyn StdError + 'static + Send + Send + Sync>> {
         match ty.name() {
             "int8" => Ok(Self::BigInt(<IsNullColumnValue<i64> as FromSql>::from_sql(
                 ty, raw,
@@ -246,14 +253,14 @@ impl<'a> FromSql<'a> for TypedColumnValue {
         }
     }
 
-    fn from_sql_null(_: &Type) -> Result<Self, Box<dyn StdError + Sync + Send>> {
+    fn from_sql_null(_: &Type) -> Result<Self, Box<dyn StdError + Send + Sync + Send>> {
         Ok(Self::BigInt(IsNullColumnValue::Nullable(None)))
     }
 
     fn from_sql_nullable(
         ty: &Type,
         raw: Option<&'a [u8]>,
-    ) -> Result<Self, Box<dyn StdError + 'static + Send + Sync>> {
+    ) -> Result<Self, Box<dyn StdError + 'static + Send + Send + Sync>> {
         match raw {
             Some(raw_inner) => Self::from_sql(ty, raw_inner),
             None => Self::from_sql_null(ty),
@@ -266,7 +273,7 @@ impl ToSql for TypedColumnValue {
         &self,
         ty: &Type,
         out: &mut Vec<u8>,
-    ) -> Result<IsNull, Box<dyn StdError + 'static + Send + Sync>> {
+    ) -> Result<IsNull, Box<dyn StdError + 'static + Send + Send + Sync>> {
         match self {
             Self::BigInt(col_val) => col_val.to_sql(ty, out),
             Self::Bool(col_val) => col_val.to_sql(ty, out),

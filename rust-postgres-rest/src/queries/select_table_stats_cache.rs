@@ -18,7 +18,7 @@ use tokio_postgres::{impls::Prepare, row::Row, Client};
 pub(crate) async fn select_all_table_stats(
     mut conn: Client,
     tables: Vec<String>,
-) -> Result<HashMap<String, TableStats>, Error> {
+) -> Result<(HashMap<String, TableStats>, Client), Error> {
     let tables_str: String = match tables
         .par_iter()
         .map(|table| -> Result<String, Error> {
@@ -57,7 +57,10 @@ pub(crate) async fn select_all_table_stats(
         Err(e) => return Err(Error::from(e)),
     };
 
-    compile_table_stats(tables, constraints, indexes, column_stats)
+    match compile_table_stats(tables, constraints, indexes, column_stats) {
+        Ok(stats) => Ok((stats, conn)),
+        Err(e) => Err(e),
+    }
 }
 
 /// Takes the results of individual queries and generates the final table stats object
