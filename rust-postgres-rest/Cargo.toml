@@ -38,4 +38,6 @@ git = "https://github.com/kaibyao/rust-decimal.git"
 features = ["postgres", "serde"]
 
 [dev-dependencies]
+native-tls = "0.2.3"
+postgres-native-tls = "0.2.0-rc.1"
 pretty_assertions = "0.6.1"

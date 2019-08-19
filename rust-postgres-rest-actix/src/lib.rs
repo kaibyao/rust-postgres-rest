@@ -12,6 +12,7 @@
 //! ```
 //! use actix_web::{App, HttpServer};
 //! use rust_postgres_rest_actix::{Config};
+//! use tokio_postgres::tls::NoTls;
 //! # use std::thread;
 //!
 //! fn main() {
@@ -46,6 +47,7 @@
 /// ```
 /// use actix_web::{App, HttpServer, web};
 /// use rust_postgres_rest_actix::{Config, endpoints};
+/// use tokio_postgres::tls::NoTls;
 ///
 /// fn main() {
 ///     let ip_address = "127.0.0.1:3000";
@@ -58,11 +60,11 @@
 ///         App::new().service(
 ///             web::scope("/custom_api_endpoint")
 ///                 .data(config)
-///                 .route("/table", web::get().to_async(endpoints::get_all_table_names))
+///                 .route("/table", web::get().to_async(endpoints::get_all_table_names::<NoTls>))
 ///                 .service(
 ///                     web::resource("/{table}")
-///                         .route(web::get().to_async(endpoints::get_table))
-///                         .route(web::post().to_async(endpoints::post_table))
+///                         .route(web::get().to_async(endpoints::get_table::<NoTls>))
+///                         .route(web::post().to_async(endpoints::post_table::<NoTls>))
 ///                 )
 ///         )
 ///     })
@@ -89,7 +91,10 @@ use rust_postgres_rest::Config as InnerConfig;
 
 use actix_web::{web, Scope};
 use futures::future::Future;
-use tokio_postgres::Client;
+use tokio_postgres::{
+    tls::{MakeTlsConnect, NoTls, TlsConnect},
+    Client, Socket,
+};
 
 /// Configures and creates the REST API `Scope`.
 /// ```
@@ -99,8 +104,11 @@ use tokio_postgres::Client;
 /// let scope = config.generate_scope("/api");
 /// ```
 #[derive(Clone)]
-pub struct Config {
-    inner: InnerConfig,
+pub struct Config<T>
+where
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
+    inner: InnerConfig<T>,
     /// When set to `true`, an additional API endpoint is made available at
     /// `{scope_name}/reset_table_stats_cache`, which allows for manual resetting of the Table
     /// Stats cache. This is useful if you want a persistent cache that only needs to be reset on
@@ -111,7 +119,7 @@ pub struct Config {
     is_custom_sql_endpoint_enabled: bool,
 }
 
-impl Config {
+impl Config<NoTls> {
     /// Creates a Config object with default values. `db_url` must be [Postgres-formatted](https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6).
     /// ```
     /// use rust_postgres_rest_actix::Config;
@@ -125,7 +133,15 @@ impl Config {
             is_custom_sql_endpoint_enabled: false,
         }
     }
+}
 
+impl<T> Config<T>
+where
+    <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    <T as MakeTlsConnect<Socket>>::Stream: Send,
+    <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     /// Turns on the flag for caching table stats. Substantially increases performance. Use this in
     /// production or in systems where the DB schema is not changing.
     pub fn cache_table_stats(&mut self) -> &mut Self {
@@ -141,7 +157,7 @@ impl Config {
     /// ```no_run
     /// use futures::future::{Future, ok};
     /// use futures::stream::Stream;
-    /// use rust_postgres_rest_actix::{Config};
+    /// use rust_postgres_rest_actix::Config;
     ///
     /// actix::run(|| Config::new("postgresql://postgres@0.0.0.0:5432/postgres").connect()
     ///     .map_err(|e| panic!(e))
@@ -181,25 +197,26 @@ impl Config {
         if self.inner.is_cache_table_stats {
             scope = scope.route(
                 "/reset_table_stats_cache",
-                web::get().to_async(reset_caches),
+                // web::get().to_async(typed_reset_caches),
+                web::get().to_async(reset_caches::<T>),
             );
         }
 
         if self.is_custom_sql_endpoint_enabled {
-            scope = scope.route("/sql", web::post().to_async(execute_sql));
+            scope = scope.route("/sql", web::post().to_async(execute_sql::<T>));
         }
 
         scope
             .data(self.clone())
             .route("", web::get().to(index))
             .route("/", web::get().to(index))
-            .route("/table", web::get().to_async(get_all_table_names))
+            .route("/table", web::get().to_async(get_all_table_names::<T>))
             .service(
                 web::resource("/{table}")
-                    .route(web::delete().to_async(delete_table))
-                    .route(web::get().to_async(get_table))
-                    .route(web::post().to_async(post_table))
-                    .route(web::put().to_async(put_table)),
+                    .route(web::delete().to_async(delete_table::<T>))
+                    .route(web::get().to_async(get_table::<T>))
+                    .route(web::post().to_async(post_table::<T>))
+                    .route(web::put().to_async(put_table::<T>)),
             )
     }
 
@@ -213,6 +230,12 @@ impl Config {
     /// ```
     pub fn set_cache_reset_timer(&mut self, seconds: u32) -> &mut Self {
         self.inner.set_cache_reset_timer(seconds);
+        self
+    }
+
+    /// Sets a TLS connection to use when creating a database connection.
+    pub fn set_tls(&mut self, tls: T) -> &mut Self {
+        self.inner.set_tls(tls);
         self
     }
 }

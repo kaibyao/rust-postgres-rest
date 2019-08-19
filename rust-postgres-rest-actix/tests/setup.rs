@@ -2,7 +2,7 @@ use actix::spawn as actix_spawn;
 use actix_web::{test::block_fn, App, HttpServer};
 use futures::{stream::Stream, Future};
 use rust_postgres_rest_actix::Config;
-use std::{fs::read_to_string, thread::spawn};
+use std::{fs::read_to_string, thread::spawn as thread_spawn};
 use tokio_postgres::{connect, NoTls};
 
 pub fn setup_db(db_url: &'static str) {
@@ -21,7 +21,7 @@ pub fn start_web_server(db_url: &'static str, address: &'static str) {
     let no_cache_port = "8000";
     let cache_port = "8001";
 
-    spawn(move || {
+    thread_spawn(move || {
         let address_no_cache = [address, no_cache_port].join(":");
 
         HttpServer::new(move || {
@@ -39,7 +39,7 @@ pub fn start_web_server(db_url: &'static str, address: &'static str) {
         println!("Running server on {}", &address_no_cache);
     });
 
-    spawn(move || {
+    thread_spawn(move || {
         let address_cache = [address, cache_port].join(":");
 
         HttpServer::new(move || {

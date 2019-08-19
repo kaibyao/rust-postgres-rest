@@ -9,6 +9,10 @@ use futures::{
     Future,
 };
 use serde_json::{json, Value};
+use tokio_postgres::{
+    tls::{MakeTlsConnect, TlsConnect},
+    Socket,
+};
 
 use super::query_params_from_request::{
     generate_delete_params_from_http_request, generate_insert_params_from_http_request,
@@ -19,11 +23,17 @@ use crate::{Config, Error};
 use rust_postgres_rest::queries;
 
 /// Deletes table rows and optionally returns the column data in the deleted rows.
-pub fn delete_table(
+pub fn delete_table<T>(
     req: HttpRequest,
-    config: web::Data<Config>,
+    config: web::Data<Config<T>>,
     query_string_params: web::Query<RequestQueryStringParams>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> impl Future<Item = HttpResponse, Error = Error>
+where
+    <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    <T as MakeTlsConnect<Socket>>::Stream: Send,
+    <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     let params =
         match generate_delete_params_from_http_request(&req, query_string_params.into_inner()) {
             Ok(params) => params,
@@ -37,7 +47,7 @@ pub fn delete_table(
         )));
     }
 
-    let delete_table_future = queries::delete_table_rows(&config.get_ref().inner, params)
+    let delete_table_future = queries::delete_table_rows(config.get_ref().inner.clone(), params)
         .map_err(Error::from)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)));
 
@@ -45,12 +55,18 @@ pub fn delete_table(
 }
 
 /// Executes the given SQL statement
-pub fn execute_sql(
+pub fn execute_sql<T>(
     req: HttpRequest,
     body: String,
-    config: web::Data<Config>,
+    config: web::Data<Config<T>>,
     query_string_params: web::Query<RequestQueryStringParams>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> impl Future<Item = HttpResponse, Error = Error>
+where
+    <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    <T as MakeTlsConnect<Socket>>::Stream: Send,
+    <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     let content_type = req.content_type().to_lowercase();
     if &content_type != "text/plain" {
         return Either::A(err(Error::generate_error(
@@ -74,9 +90,15 @@ pub fn execute_sql(
 }
 
 /// Retrieves a list of table names that exist in the DB.
-pub fn get_all_table_names(
-    config: web::Data<Config>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+pub fn get_all_table_names<T>(
+    config: web::Data<Config<T>>,
+) -> impl Future<Item = HttpResponse, Error = Error>
+where
+    <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    <T as MakeTlsConnect<Socket>>::Stream: Send,
+    <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     config
         .connect()
         .map_err(Error::from)
@@ -85,11 +107,17 @@ pub fn get_all_table_names(
 }
 
 /// Queries a table using SELECT.
-pub fn get_table(
+pub fn get_table<T>(
     req: HttpRequest,
-    config: web::Data<Config>,
+    config: web::Data<Config<T>>,
     query_string_params: web::Query<RequestQueryStringParams>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> impl Future<Item = HttpResponse, Error = Error>
+where
+    <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    <T as MakeTlsConnect<Socket>>::Stream: Send,
+    <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     let params =
         match generate_select_params_from_http_request(&req, query_string_params.into_inner()) {
             Ok(params) => params,
@@ -103,31 +131,49 @@ pub fn get_table(
     }
 }
 
-fn get_table_rows(
-    config: web::Data<Config>,
+fn get_table_rows<T>(
+    config: web::Data<Config<T>>,
     params: queries::SelectParams,
-) -> impl Future<Item = HttpResponse, Error = Error> {
-    queries::select_table_rows(&config.get_ref().inner, params)
+) -> impl Future<Item = HttpResponse, Error = Error>
+where
+    <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    <T as MakeTlsConnect<Socket>>::Stream: Send,
+    <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
+    queries::select_table_rows(config.get_ref().inner.clone(), params)
         .map_err(Error::from)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }
 
-fn get_table_stats(
-    config: web::Data<Config>,
+fn get_table_stats<T>(
+    config: web::Data<Config<T>>,
     table: String,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> impl Future<Item = HttpResponse, Error = Error>
+where
+    // <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    // <T as MakeTlsConnect<Socket>>::Stream: Send,
+    // <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     queries::select_table_stats(&config.get_ref().inner, table)
         .map_err(Error::from)
         .and_then(|rows| Ok(HttpResponseBuilder::new(StatusCode::OK).json(rows)))
 }
 
 /// Inserts new rows into a table. Returns the number of rows affected.
-pub fn post_table(
+pub fn post_table<T>(
     req: HttpRequest,
-    config: web::Data<Config>,
+    config: web::Data<Config<T>>,
     body: Option<Json<Value>>,
     query_string_params: web::Query<RequestQueryStringParams>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> impl Future<Item = HttpResponse, Error = Error>
+where
+    <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    <T as MakeTlsConnect<Socket>>::Stream: Send,
+    <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     let actual_body = match body {
         Some(body) => body.into_inner(),
         None => return Either::A(err(Error::generate_error("INCORRECT_REQUEST_BODY", "Request body is required. Body must be a JSON array of objects where each object represents a row and whose key-values represent column names and their values.".to_string())))
@@ -155,12 +201,18 @@ pub fn post_table(
 }
 
 /// Runs an UPDATE query and returns either rows affected or row columns if specified.
-pub fn put_table(
+pub fn put_table<T>(
     req: HttpRequest,
-    config: web::Data<Config>,
+    config: web::Data<Config<T>>,
     body: Option<Json<Value>>,
     query_string_params: web::Query<RequestQueryStringParams>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> impl Future<Item = HttpResponse, Error = Error>
+where
+    <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    <T as MakeTlsConnect<Socket>>::Stream: Send,
+    <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     let actual_body = match body {
         Some(body) => body.into_inner(),
         None => return Either::A(err(Error::generate_error("INCORRECT_REQUEST_BODY", "Request body is required. Body must be a JSON object whose key-values represent column names and the values to set. String values must contain quotes or else they will be evaluated as expressions and not strings.".to_string())))
@@ -191,7 +243,15 @@ pub fn put_table(
 }
 
 /// Resets all caches (currently only Table Stats)
-pub fn reset_caches(config: web::Data<Config>) -> impl Future<Item = HttpResponse, Error = Error> {
+pub fn reset_caches<T>(
+    config: web::Data<Config<T>>,
+) -> impl Future<Item = HttpResponse, Error = Error>
+where
+    // <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    // <T as MakeTlsConnect<Socket>>::Stream: Send,
+    // <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     config
         .get_ref()
         .inner

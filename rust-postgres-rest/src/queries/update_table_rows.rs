@@ -9,7 +9,7 @@ use super::{
     },
     QueryResult,
 };
-use crate::{Config, Error};
+use crate::{get_stats_cache_addr, Config, Error};
 use futures::future::{err, Either, Future};
 use lazy_static::lazy_static;
 use rayon::prelude::*;
@@ -17,6 +17,10 @@ use regex::Regex;
 use serde_json::{Map, Value as JsonValue};
 use sqlparser::ast::Expr;
 use std::{collections::HashMap, sync::Arc};
+use tokio_postgres::{
+    tls::{MakeTlsConnect, TlsConnect},
+    Socket,
+};
 
 lazy_static! {
     // check for strings
@@ -37,10 +41,16 @@ pub struct UpdateParams {
 }
 
 /// Runs an UPDATE query on the selected table rows.
-pub fn update_table_rows(
-    config: &Config,
+pub fn update_table_rows<T>(
+    config: &Config<T>,
     params: UpdateParams,
-) -> impl Future<Item = QueryResult, Error = Error> {
+) -> impl Future<Item = QueryResult, Error = Error>
+where
+    <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    <T as MakeTlsConnect<Socket>>::Stream: Send,
+    <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     if let Err(e) = validate_table_name(&params.table) {
         return Either::A(err(e));
     }
@@ -124,17 +134,13 @@ pub fn update_table_rows(
         });
 
     // parse column_expr_strings for foreign key usage
-    let addr_clone = if let Some(addr) = &config.stats_cache_addr {
-        Some(addr.clone())
-    } else {
-        None
-    };
     let config_clone = config.clone();
+    let config_clone_2 = config.clone();
 
     let fk_future = stats_future
         .join(ForeignKeyReference::from_query_columns(
-            config,
-            Arc::new(addr_clone),
+            config_clone,
+            Arc::new(get_stats_cache_addr()),
             params.table.clone(),
             column_expr_strings,
         ))
@@ -146,7 +152,7 @@ pub fn update_table_rows(
                 };
 
             let update_rows_future = generate_query_result_from_db(
-                &config_clone,
+                config_clone_2,
                 statement_str,
                 prepared_values,
                 is_return_rows,

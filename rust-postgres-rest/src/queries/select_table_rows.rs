@@ -7,7 +7,11 @@ use rayon::prelude::*;
 use regex::Regex;
 use sqlparser::ast::Expr;
 use std::sync::Arc;
-use tokio_postgres::types::ToSql;
+use tokio_postgres::{
+    tls::{MakeTlsConnect, TlsConnect},
+    types::ToSql,
+    Socket,
+};
 
 use super::{
     foreign_keys::{fk_columns_from_where_ast, ForeignKeyReference},
@@ -18,7 +22,7 @@ use super::{
         validate_table_name, validate_where_column,
     },
 };
-use crate::{Config, Error};
+use crate::{stats_cache::get_stats_cache_addr, Config, Error};
 
 #[derive(Debug)]
 /// Options used to execute a SELECT query.
@@ -34,10 +38,16 @@ pub struct SelectParams {
 }
 
 /// Returns the results of a `SELECT /*..*/ FROM {TABLE}` query.
-pub fn select_table_rows(
-    config: &Config,
+pub fn select_table_rows<T>(
+    config: Config<T>,
     params: SelectParams,
-) -> impl Future<Item = Vec<RowValues>, Error = Error> {
+) -> impl Future<Item = Vec<RowValues>, Error = Error>
+where
+    <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+    <T as MakeTlsConnect<Socket>>::Stream: Send,
+    <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+{
     if let Err(e) = validate_table_name(&params.table) {
         return Either::A(err(e));
     }
@@ -94,14 +104,9 @@ pub fn select_table_rows(
 
     // parse columns for foreign key usage
     let config_clone = config.clone();
-    let addr_clone = if let Some(addr) = &config.stats_cache_addr {
-        Some(addr.clone())
-    } else {
-        None
-    };
     let fk_future = ForeignKeyReference::from_query_columns(
         config,
-        Arc::new(addr_clone),
+        Arc::new(get_stats_cache_addr()),
         params.table.clone(),
         columns,
     )

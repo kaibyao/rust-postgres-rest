@@ -1,6 +1,6 @@
 use super::utils::validate_table_name;
 use crate::{
-    stats_cache::{StatsCache, StatsCacheMessage, StatsCacheResponse},
+    stats_cache::{get_stats_cache_addr, StatsCache, StatsCacheMessage, StatsCacheResponse},
     Config, Error,
 };
 use actix::Addr;
@@ -12,6 +12,7 @@ use lazy_static::lazy_static;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tokio_postgres::{tls::MakeTlsConnect, Socket};
 
 use tokio_postgres::{
     impls::{Prepare, Query},
@@ -137,8 +138,8 @@ pub struct TableStats {
 
 /// Returns the requested table’s stats: number of rows, the foreign keys referring to the table,
 /// and column names + types
-pub fn select_table_stats(
-    config: &Config,
+pub fn select_table_stats<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static>(
+    config: &Config<T>,
     table: String,
 ) -> impl Future<Item = TableStats, Error = Error> {
     if let Err(e) = validate_table_name(&table) {
@@ -146,18 +147,20 @@ pub fn select_table_stats(
     }
 
     // get stats from cache if it exists, otherwise make a DB call.
-    if let Some(cache_addr) = &config.stats_cache_addr {
+    if let Some(cache_addr) = get_stats_cache_addr() {
         Either::B(Either::A(select_table_stats_from_cache(
-            cache_addr, config, table,
+            &cache_addr,
+            config,
+            table,
         )))
     } else {
         Either::B(Either::B(select_table_stats_from_db(config, table)))
     }
 }
 
-fn select_table_stats_from_cache(
+fn select_table_stats_from_cache<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static>(
     cache_addr: &Addr<StatsCache>,
-    config: &Config,
+    config: &Config<T>,
     table: String,
 ) -> impl Future<Item = TableStats, Error = Error> {
     let config_clone = config.clone();
@@ -180,8 +183,8 @@ fn select_table_stats_from_cache(
         })
 }
 
-fn select_table_stats_from_db(
-    config: &Config,
+fn select_table_stats_from_db<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static>(
+    config: &Config<T>,
     table: String,
 ) -> impl Future<Item = TableStats, Error = Error> {
     config

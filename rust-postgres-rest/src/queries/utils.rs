@@ -18,7 +18,7 @@ use sqlparser::{
     parser::Parser,
 };
 use std::{collections::HashMap, string::ToString};
-use tokio_postgres::types::ToSql;
+use tokio_postgres::{tls::MakeTlsConnect, types::ToSql, Socket};
 
 // Searching for " AS " alias
 static ALIAS_RE_STR: &str = r"(?i) AS ";
@@ -70,8 +70,8 @@ fn extract_where_ast_from_setexpr(expr: SetExpr) -> Option<Expr> {
 }
 
 /// Returns a Future resolving to a QueryResult.
-pub fn generate_query_result_from_db(
-    config: &Config,
+pub fn generate_query_result_from_db<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static>(
+    config: Config<T>,
     statement_str: String,
     prepared_values: Vec<TypedColumnValue>,
     is_return_rows: bool,

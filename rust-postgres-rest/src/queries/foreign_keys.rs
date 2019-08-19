@@ -7,6 +7,10 @@ use std::{
     collections::HashMap,
     sync::Arc,
 };
+use tokio_postgres::{
+    tls::{MakeTlsConnect, TlsConnect},
+    Socket,
+};
 
 use super::select_table_stats::{
     select_column_stats, select_column_stats_statement, TableColumnStat,
@@ -278,12 +282,18 @@ pub(crate) struct ForeignKeyReference {
 impl ForeignKeyReference {
     /// Given a table name and list of table column names, return a list of foreign key references.
     /// If none of the provided columns are foreign keys, returns `Ok(None)`.
-    pub(crate) fn from_query_columns(
-        config: &Config,
+    pub(crate) fn from_query_columns<T>(
+        config: Config<T>,
         stats_cache_addr: Arc<Option<Addr<StatsCache>>>,
         table: String,
         columns: Vec<String>,
-    ) -> Box<dyn Future<Item = Vec<Self>, Error = Error> + Send> {
+    ) -> Box<dyn Future<Item = Vec<Self>, Error = Error> + Send>
+    where
+        <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+        <T as MakeTlsConnect<Socket>>::Stream: Send,
+        <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+        T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+    {
         let mut fk_columns: Vec<String> = columns
             .par_iter()
             .filter_map(|col| {
@@ -337,8 +347,8 @@ impl ForeignKeyReference {
         Box::new(process_column_stats_future)
     }
 
-    fn get_table_column_stats(
-        config: &Config,
+    fn get_table_column_stats<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static>(
+        config: &Config<T>,
         table: &str,
     ) -> impl Future<Item = Vec<TableColumnStat>, Error = Error> {
         let table_clone = table.to_string();
@@ -355,12 +365,18 @@ impl ForeignKeyReference {
             })
     }
 
-    fn process_column_stats(
-        config: &Config,
+    fn process_column_stats<T>(
+        config: Config<T>,
         stats_cache_addr: Arc<Option<Addr<StatsCache>>>,
         table: String,
         fk_columns_grouped: HashMap<String, (Vec<String>, Vec<String>)>,
-    ) -> impl Future<Item = Vec<Self>, Error = Error> + Send {
+    ) -> impl Future<Item = Vec<Self>, Error = Error> + Send
+    where
+        <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+        <T as MakeTlsConnect<Socket>>::Stream: Send,
+        <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+        T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+    {
         // used later in futures
         let config_clone = config.clone();
         let config_clone_2 = config.clone();
@@ -399,7 +415,7 @@ impl ForeignKeyReference {
             Either::A(cache_future)
         } else {
             Either::B(
-                Self::get_table_column_stats(config, &table_clone)
+                Self::get_table_column_stats(&config, &table_clone)
                     .map(move |stats| Self::match_fk_column_stats(stats, fk_columns_grouped)),
             )
         };
@@ -408,7 +424,7 @@ impl ForeignKeyReference {
             // stats and matched_columns should have the same length and their indexes should match
             .and_then(move |(filtered_stats, matched_columns)| {
                 ForeignKeyReference::stats_to_fkr_futures(
-                    &config_clone_2,
+                    config_clone_2,
                     stats_cache_addr,
                     table_clone_2,
                     filtered_stats,
@@ -470,13 +486,19 @@ impl ForeignKeyReference {
 
     /// Maps a Vec of `TableColumnStat`s to a Future resolving to a Vec of `ForeignKeyReference`s.
     /// Used by from_query_columns.
-    fn stats_to_fkr_futures(
-        config: &Config,
+    fn stats_to_fkr_futures<T>(
+        config: Config<T>,
         stats_cache_addr: Arc<Option<Addr<StatsCache>>>,
         table: String,
         stats: Vec<TableColumnStat>,
         matched_columns: Vec<(String, Vec<String>, Vec<String>)>,
-    ) -> impl Future<Item = Vec<Self>, Error = Error> {
+    ) -> impl Future<Item = Vec<Self>, Error = Error>
+    where
+        <T as MakeTlsConnect<Socket>>::TlsConnect: Send,
+        <T as MakeTlsConnect<Socket>>::Stream: Send,
+        <<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
+        T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
+    {
         let mut fkr_futures = vec![];
 
         for (i, stat) in stats.into_iter().enumerate() {
@@ -506,11 +528,12 @@ impl ForeignKeyReference {
             let stat_column_name_clone = stat.column_name.clone();
             let stat_fk_column = stat.foreign_key_column.clone().unwrap_or_else(String::new);
             let stat_fk_column_type = stat.foreign_key_column_type.unwrap_or_else(|| "");
+            let config_clone = config.clone();
+            let config_clone_2 = config.clone();
 
             let fk_column_stats_future = if let Some(cache_addr) = stats_cache_addr.borrow() {
                 // used for moving into futures
                 let fk_table_clone = foreign_key_table.clone();
-                let config_clone = config.clone();
 
                 // similar to select_table_stats::select_table_stats_from_cache, except we just
                 // need a subset of stats (cheaper/more lightweight to
@@ -525,7 +548,7 @@ impl ForeignKeyReference {
                             StatsCacheResponse::TableStat(stats_opt) => match stats_opt {
                                 Some(stats) => Either::A(ok(stats.columns)),
                                 None => Either::B(Self::get_table_column_stats(
-                                    &config_clone.clone(),
+                                    &config_clone,
                                     &fk_table_clone.clone(),
                                 )),
                             },
@@ -538,7 +561,7 @@ impl ForeignKeyReference {
                 Either::A(cache_future)
             } else {
                 Either::B(Self::get_table_column_stats(
-                    config,
+                    &config_clone,
                     &foreign_key_table.clone(),
                 ))
             };
@@ -564,7 +587,7 @@ impl ForeignKeyReference {
 
             // child columns are all FKs, so we need to recursively call this function
             let child_columns_future = Self::from_query_columns(
-                config,
+                config_clone_2,
                 Arc::clone(&stats_cache_addr),
                 foreign_key_table.clone(),
                 child_fk_columns,
