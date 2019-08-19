@@ -157,7 +157,7 @@ where
     /// ```no_run
     /// use futures::future::{Future, ok};
     /// use futures::stream::Stream;
-    /// use rust_postgres_rest_actix::{Config};
+    /// use rust_postgres_rest_actix::Config;
     ///
     /// actix::run(|| Config::new("postgresql://postgres@0.0.0.0:5432/postgres").connect()
     ///     .map_err(|e| panic!(e))

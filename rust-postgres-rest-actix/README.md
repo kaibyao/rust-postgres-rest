@@ -560,6 +560,7 @@ In another terminal, run `cargo test`.
 
 1. benchmark
 1. flatbuffers
+1. brotli|gzip-compress table stats cache (so it doesn't hog memory for large db's)
 1. GraphQL API
 1. Optimization: Convert Strings to &str / statics.
 1. CSV, XML for REST API (nix for now?)
