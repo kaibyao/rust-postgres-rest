@@ -1,11 +1,11 @@
 [package]
-name = "rust-postgres-rest"
+name = "postgres-rest"
 version = "0.1.0"
 authors = ["Kai Yao <kai.b.yao@gmail.com>"]
 edition = "2018"
 
 [lib]
-name = "rust_postgres_rest"
+name = "postgres_rest"
 path = "src/lib.rs"
 
 [dependencies]

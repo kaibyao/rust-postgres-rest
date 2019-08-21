@@ -1,5 +1,5 @@
 [workspace]
 members = [
-    "rust-postgres-rest",
-    "rust-postgres-rest-actix",
+    "postgres-rest",
+    "postgres-rest-actix",
 ]

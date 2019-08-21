@@ -1,4 +1,4 @@
-# rust-postgres-rest-actix
+# `postgres-rest-actix`
 
 Use `actix-web` to serve a REST API for your PostgreSQL database.
 
