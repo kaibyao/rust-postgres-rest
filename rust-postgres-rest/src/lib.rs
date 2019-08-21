@@ -18,11 +18,7 @@ pub use error::Error;
 use actix::{spawn as actix_spawn, System};
 use futures::future::{err, ok, Either, Future};
 use tokio::runtime::current_thread::TaskExecutor;
-use tokio_postgres::{
-    connect as pg_connect,
-    tls::{MakeTlsConnect, NoTls},
-    Client, Socket,
-};
+use tokio_postgres::{connect as pg_connect, tls::MakeTlsConnect, Client, Socket};
 
 /// Configures the DB connection and API.
 #[derive(Clone)]
@@ -39,7 +35,7 @@ where
     /// seconds. Default: `0` (cache is never automatically reset).
     pub cache_reset_interval_seconds: u32,
     /// A Tls connection that can be passed into `tokio_postgres::connect`.
-    tls: Option<T>,
+    tls: T,
 }
 
 impl<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static> Config<T> {
@@ -48,15 +44,14 @@ impl<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static> Config<T> {
     /// use rust_postgres_rest::Config;
     /// use tokio_postgres::tls::NoTls;
     ///
-    /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
-    /// config.set_tls(NoTls);
+    /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls);
     /// ```
-    pub fn new(db_url: &'static str) -> Self {
+    pub fn new(db_url: &'static str, tls: T) -> Self {
         Config {
             db_url,
             is_cache_table_stats: false,
             cache_reset_interval_seconds: 0,
-            tls: None,
+            tls,
         }
     }
 
@@ -79,8 +74,7 @@ impl<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static> Config<T> {
     /// use rust_postgres_rest::{Config};
     /// use tokio_postgres::tls::NoTls;
     ///
-    /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
-    /// config.set_tls(NoTls);
+    /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls);
     ///
     /// let fut = config.connect()
     ///     .map_err(|e| panic!(e))
@@ -92,46 +86,22 @@ impl<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static> Config<T> {
     /// tokio::run(fut);
     /// ```
     pub fn connect(&self) -> impl Future<Item = Client, Error = Error> {
-        match &self.tls {
-            Some(tls) => {
-                let tls_fut = pg_connect(self.db_url, tls.clone())
-                    .map_err(Error::from)
-                    .and_then(|(client, connection)| {
-                        let is_actix_result = std::panic::catch_unwind(|| {
-                            System::current();
-                        });
+        pg_connect(self.db_url, self.tls.clone())
+            .map_err(Error::from)
+            .and_then(|(client, connection)| {
+                let is_actix_result = std::panic::catch_unwind(|| {
+                    System::current();
+                });
 
-                        if is_actix_result.is_ok() {
-                            actix_spawn(connection.map_err(|e| panic!("{}", e)));
-                        } else {
-                            let _spawn_result = TaskExecutor::current()
-                                .spawn_local(Box::new(connection.map_err(|e| panic!("{}", e))));
-                        }
+                if is_actix_result.is_ok() {
+                    actix_spawn(connection.map_err(|e| panic!("{}", e)));
+                } else {
+                    let _spawn_result = TaskExecutor::current()
+                        .spawn_local(Box::new(connection.map_err(|e| panic!("{}", e))));
+                }
 
-                        Ok(client)
-                    });
-                Either::A(tls_fut)
-            }
-            None => {
-                let no_tls_fut = pg_connect(self.db_url, NoTls)
-                    .map_err(Error::from)
-                    .and_then(|(client, connection)| {
-                        let is_actix_result = std::panic::catch_unwind(|| {
-                            System::current();
-                        });
-
-                        if is_actix_result.is_ok() {
-                            actix_spawn(connection.map_err(|e| panic!("{}", e)));
-                        } else {
-                            let _spawn_result = TaskExecutor::current()
-                                .spawn_local(Box::new(connection.map_err(|e| panic!("{}", e))));
-                        }
-
-                        Ok(client)
-                    });
-                Either::B(no_tls_fut)
-            }
-        }
+                Ok(client)
+            })
     }
 
     /// Forces the Table Stats cache to reset/refresh new data.
@@ -167,18 +137,11 @@ impl<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static> Config<T> {
     /// use rust_postgres_rest::Config;
     /// use tokio_postgres::tls::NoTls;
     ///
-    /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
-    /// config.set_tls(NoTls);
+    /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls);
     /// config.set_cache_reset_timer(300); // Cache will refresh every 5 minutes.
     /// ```
     pub fn set_cache_reset_timer(&mut self, seconds: u32) -> &mut Self {
         self.cache_reset_interval_seconds = seconds;
-        self
-    }
-
-    /// Sets a TLS connection to use when creating a database connection.
-    pub fn set_tls(&mut self, tls: T) -> &mut Self {
-        self.tls = Some(tls);
         self
     }
 }
@@ -189,8 +152,14 @@ mod tls_tests {
 
     use native_tls::{Certificate, TlsConnector};
     use postgres_native_tls::MakeTlsConnector;
-    // use pretty_assertions::assert_eq;
     use std::fs;
+    use tokio_postgres::NoTls;
+
+    #[test]
+    fn no_tls() {
+        let config = Config::new("postgresql://postgres:example@0.0.0.0:5433/postgres", NoTls);
+        config.connect().wait().unwrap();
+    }
 
     #[test]
     fn native_tls() {
@@ -202,9 +171,7 @@ mod tls_tests {
             .unwrap();
         let postgres_tls_connector = MakeTlsConnector::new(tls_connector);
 
-        let mut cfg = Config::new("host=localhost port=5433 user=postgres password=example dbname=postgres sslmode=require");
-        cfg.set_tls(postgres_tls_connector);
-
+        let cfg = Config::new("host=localhost port=5433 user=postgres password=example dbname=postgres sslmode=require", postgres_tls_connector);
         cfg.connect().wait().unwrap();
     }
 }
