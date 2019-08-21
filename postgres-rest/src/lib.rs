@@ -41,7 +41,7 @@ where
 impl<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static> Config<T> {
     /// Creates a new Config.
     /// ```
-    /// use rust_postgres_rest::Config;
+    /// use postgres_rest::Config;
     /// use tokio_postgres::tls::NoTls;
     ///
     /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls);
@@ -71,7 +71,7 @@ impl<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static> Config<T> {
     /// ```no_run
     /// use futures::future::{Future, ok};
     /// use futures::stream::Stream;
-    /// use rust_postgres_rest::{Config};
+    /// use postgres_rest::{Config};
     /// use tokio_postgres::tls::NoTls;
     ///
     /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls);
@@ -134,7 +134,7 @@ impl<T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static> Config<T> {
     /// Set the interval timer to automatically reset the table stats cache. If this is not set, the
     /// cache is never reset.
     /// ```
-    /// use rust_postgres_rest::Config;
+    /// use postgres_rest::Config;
     /// use tokio_postgres::tls::NoTls;
     ///
     /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls);

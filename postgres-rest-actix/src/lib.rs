@@ -11,7 +11,7 @@
 //!
 //! ```no_run
 //! use actix_web::{App, HttpServer};
-//! use rust_postgres_rest_actix::{Config};
+//! use postgres_rest_actix::{Config};
 //! use tokio_postgres::tls::NoTls;
 //! # use std::thread;
 //!
@@ -46,7 +46,7 @@
 ///
 /// ```no_run
 /// use actix_web::{App, HttpServer, web};
-/// use rust_postgres_rest_actix::{Config, endpoints};
+/// use postgres_rest_actix::{Config, endpoints};
 /// use tokio_postgres::tls::NoTls;
 ///
 /// fn main() {
@@ -87,7 +87,7 @@ use endpoints::{
 };
 
 pub use error::Error;
-use rust_postgres_rest::Config as InnerConfig;
+use postgres_rest::Config as InnerConfig;
 
 use actix_web::{web, Scope};
 use futures::future::Future;
@@ -98,7 +98,7 @@ use tokio_postgres::{
 
 /// Configures and creates the REST API `Scope`.
 /// ```no_run
-/// use rust_postgres_rest_actix::Config;
+/// use postgres_rest_actix::Config;
 /// use tokio_postgres::NoTls;
 ///
 /// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls);
@@ -129,7 +129,7 @@ where
 {
     /// Creates a Config object with default values. `db_url` must be [Postgres-formatted](https://www.postgresql.org/docs/current/libpq-connect.html#id-1.7.3.8.3.6).
     /// ```
-    /// use rust_postgres_rest_actix::Config;
+    /// use postgres_rest_actix::Config;
     /// use tokio_postgres::NoTls;
     ///
     /// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls);
@@ -157,7 +157,7 @@ where
     /// ```no_run
     /// use futures::future::{Future, ok};
     /// use futures::stream::Stream;
-    /// use rust_postgres_rest_actix::Config;
+    /// use postgres_rest_actix::Config;
     /// use tokio_postgres::NoTls;
     ///
     /// actix::run(|| Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls).connect()
@@ -187,7 +187,7 @@ where
 
     /// Creates the Actix scope url at `scope_name`, which contains all of the other API endpoints.
     /// ```no_run
-    /// use rust_postgres_rest_actix::Config;
+    /// use postgres_rest_actix::Config;
     /// use tokio_postgres::NoTls;
     ///
     /// let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls);
@@ -225,7 +225,7 @@ where
     /// Set the timer to automatically reset the table stats cache on a recurring interval. If this
     /// is not set, the cache is never reset after server start.
     /// ```
-    /// use rust_postgres_rest_actix::Config;
+    /// use postgres_rest_actix::Config;
     /// use tokio_postgres::NoTls;
     ///
     /// let mut config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls);

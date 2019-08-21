@@ -4,7 +4,8 @@ Use `actix-web` to serve a REST API for your PostgreSQL database.
 
 ```rust
 use actix_web::{App, HttpServer};
-use rust_postgres_rest_actix::{Config};
+use postgres_rest_actix::{Config};
+use tokio_postgres::NoTls;
 
 fn main() {
     let ip_address = "127.0.0.1:3000";
@@ -13,7 +14,7 @@ fn main() {
     HttpServer::new(move || {
         App::new().service(
             // appends an actix-web Scope under the "/api" endpoint to app.
-            Config::new("postgresql://postgres@0.0.0.0:5432/postgres")
+            Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls)
                 .generate_scope("/api"),
         )
     })
@@ -112,7 +113,17 @@ Will return the following JSON:
 
 #### Alias (`AS`) syntax is supported too
 
-Changing the previous API endpoint to `/api/child?columns=id,name,parent_id.name as parent_name,parent_id.company_id.name as parent_company_name` or `/api/child?columns=id,name,parent_id.name parent_name,parent_id.company_id.name parent_company_name` will return the aliased fields instead:
+Change the previous API endpoint:
+
+**Before:**  
+`/api/child?columns=id,name,parent_id.name,parent_id.company_id.name`
+
+**After:**  
+`/api/child?columns=id,name,parent_id.name as parent_name,parent_id.company_id.name as parent_company_name`  
+or  
+`/api/child?columns=id,name,parent_id.name parent_name,parent_id.company_id.name parent_company_name`
+
+Now, the response will return the aliased fields instead:
 
 ```json
 [
@@ -137,7 +148,10 @@ Changing the previous API endpoint to `/api/child?columns=id,name,parent_id.name
 The `Config` struct contains the configuration options used by this library.
 
 ```rust
-let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres");
+use postgres_rest_actix::Config;
+use tokio_postgres::NoTls;
+
+let config = Config::new("postgresql://postgres@0.0.0.0:5432/postgres", NoTls);
 let scope = config.generate_scope("/api");
 ```
 

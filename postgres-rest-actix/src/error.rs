@@ -1,6 +1,6 @@
 use actix_web::{http, HttpResponse};
 use failure::Fail;
-use rust_postgres_rest::Error as RestError;
+use postgres_rest::Error as RestError;
 use serde::Serialize;
 
 #[derive(Debug, Fail, Serialize)]

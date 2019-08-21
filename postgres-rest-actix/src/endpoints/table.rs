@@ -20,7 +20,7 @@ use super::query_params_from_request::{
     RequestQueryStringParams,
 };
 use crate::{Config, Error};
-use rust_postgres_rest::queries;
+use postgres_rest::queries;
 
 /// Deletes table rows and optionally returns the column data in the deleted rows.
 pub fn delete_table<T>(

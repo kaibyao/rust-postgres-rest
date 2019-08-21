@@ -1,7 +1,7 @@
 use actix::spawn as actix_spawn;
 use actix_web::{test::block_fn, App, HttpServer};
 use futures::{stream::Stream, Future};
-use rust_postgres_rest_actix::Config;
+use postgres_rest_actix::Config;
 use std::{fs::read_to_string, thread::spawn as thread_spawn};
 use tokio_postgres::{connect, NoTls};
 
