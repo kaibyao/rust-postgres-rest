@@ -1,5 +1,3 @@
-// nightly features
-#![feature(async_await)]
 // used for dev/tests
 #![deny(clippy::complexity, clippy::correctness, clippy::perf, clippy::style)]
 // to serialize large json (like the index)

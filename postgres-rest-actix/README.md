@@ -141,7 +141,7 @@ Now, the response will return the aliased fields instead:
 - Your tables & columns only contain letters, numbers, and underscore. We are converting query parameters/body parameters into an SQL abstract syntax tree (AST) before finally executing an SQL query in the background; there is no schema/model configuration (like in Diesel), so this restriction makes data easier to validate & secure.
 - You don’t need to query for `HStore`, `bit`, or `varbit` (technical limitations for now).
 - `actix-web >= 1.0.0`.
-- Rust >= 1.38 (that means nightly, for now).
+- Rust >= 1.39 (that means nightly, for now).
 
 ## Configuration
 
