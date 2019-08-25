@@ -239,16 +239,14 @@ fn build_update_statement(
     }
 
     // FROM string
-    let from_tables_str = if !fks.is_empty() {
-        ForeignKeyReference::join_foreign_key_references(
+    let from_tables_str;
+    if !fks.is_empty() {
+        from_tables_str = ForeignKeyReference::join_foreign_key_references(
             &fks,
             |(_, _, referred_table, _)| referred_table.to_string(),
             ", ",
-        )
-    } else {
-        "".to_string()
-    };
-    if &from_tables_str != "" {
+        );
+
         query_str_arr.push(" FROM ");
         query_str_arr.push(&from_tables_str);
     }

@@ -217,11 +217,9 @@ fn execute_insert<'a>(
     insert_statement_tokens.push(&values_params_str);
 
     // generate the ON CONFLICT string
-    let conflict_clause = match generate_conflict_str(&params, &columns) {
-        Some(conflict_str) => conflict_str,
-        None => "".to_string(),
-    };
-    if conflict_clause != "" {
+    let conflict_clause;
+    if let Some(conflict_str) = generate_conflict_str(&params, &columns) {
+        conflict_clause = conflict_str;
         insert_statement_tokens.push(&conflict_clause);
     }
 
