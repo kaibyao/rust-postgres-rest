@@ -1,4 +1,3 @@
-#![feature(async_await)]
 #![recursion_limit = "128"]
 
 mod setup;
@@ -565,6 +564,35 @@ fn get_table_records_foreign_keys_multiple_tables() {
     let response_body: Value = res.json().unwrap();
 
     assert_eq!(response_body, expected_response_body);
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[test]
+fn get_table_records_gt_1_fk_to_same_table() {
+    run_setup();
+
+    // test the cached path
+    let url = [
+        "http://",
+        &SERVER_IP,
+        ":",
+        &CACHE_PORT,
+        "/api/sibling?columns=name,parent_id.parent_id.name parent_name,sibling_id.name sibling_name",
+    ]
+    .join("");
+    let mut res = reqwest::get(&url).unwrap();
+    let response_body: Value = res.json().unwrap();
+
+    assert_eq!(
+        response_body,
+        json!([
+            {
+                "name": "Sansa",
+                "parent_name": "Ned",
+                "sibling_name": "Robb"
+            }
+        ])
+    );
     assert_eq!(res.status(), StatusCode::OK);
 }
 

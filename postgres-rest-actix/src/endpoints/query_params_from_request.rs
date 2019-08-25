@@ -1,7 +1,7 @@
 use crate::error::Error;
 use actix_web::HttpRequest;
-use rayon::prelude::*;
 use postgres_rest::queries::{DeleteParams, InsertParams, SelectParams, UpdateParams};
+use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 

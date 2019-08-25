@@ -658,9 +658,10 @@ impl ForeignKeyReference {
     }
 
     /// Given a list of foreign key references, construct a SQL string to be used in a query (INNER
-    /// JOIN, for example). Accepts 1) a closure that operates on a tuple argument: (referring
-    /// table, referring column, table referred, foreign key column referred), and returns a String,
-    /// and 2) a string that is used to join the strings emitted the function.
+    /// JOIN, for example). Arguments:
+    /// 1. A closure that operates on a tuple argument: (referring table, referring column, table
+    /// referred, foreign key column referred).
+    /// 1. A string that is used to join the strings emitted by the function in #1.
     pub fn join_foreign_key_references<F>(
         fk_refs: &[Self],
         str_conversion_fn: F,
@@ -671,7 +672,7 @@ impl ForeignKeyReference {
     {
         // a vec of tuples where each tuple contains: referring table name, referring table column
         // to equate, fk table name to join with, fk table column to equate
-        let join_data = Self::fk_join_expr_calc(fk_refs);
+        let join_data = Self::fk_tables_columns_from_foreign_key_references(fk_refs);
 
         join_data
             .into_iter()
@@ -680,9 +681,11 @@ impl ForeignKeyReference {
             .join(join_str)
     }
 
-    fn fk_join_expr_calc(fk_refs: &[Self]) -> Vec<(&str, &str, &str, &str)> {
-        // a vec of tuples where each tuple contains: referring table name, referring table column
-        // to equate, fk table name to join with, fk table column to equate
+    /// Takes an array of `ForeignKeyReference`s and returns a Vec of tuples. Each tuple contains:
+    /// (referring table name, referring table column, fk table name, fk table column).
+    pub fn fk_tables_columns_from_foreign_key_references(
+        fk_refs: &[Self],
+    ) -> Vec<(&str, &str, &str, &str)> {
         let mut join_data: Vec<(&str, &str, &str, &str)> = vec![];
 
         for fk in fk_refs {
@@ -693,7 +696,9 @@ impl ForeignKeyReference {
                 &fk.foreign_key_column,
             ));
 
-            join_data.par_extend(Self::fk_join_expr_calc(&fk.nested_fks));
+            join_data.par_extend(Self::fk_tables_columns_from_foreign_key_references(
+                &fk.nested_fks,
+            ));
         }
 
         join_data

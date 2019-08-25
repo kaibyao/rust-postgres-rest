@@ -2,6 +2,7 @@ use futures::{
     future::{err, Either, Future},
     stream::Stream,
 };
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use rayon::prelude::*;
 use regex::Regex;
@@ -176,30 +177,46 @@ fn build_select_statement(
     statement.push(&params.table);
 
     // build inner join expression
-    let inner_join_str = if is_fks_exist {
-        ForeignKeyReference::join_foreign_key_references(
-            &fks,
-            |(referring_table, referring_column, referred_table, referred_column)| {
-                // generate the INNER JOIN column equality expression
-                [
-                    referred_table,
-                    " ON ",
-                    referring_table,
-                    ".",
-                    referring_column,
-                    " = ",
-                    referred_table,
-                    ".",
-                    referred_column,
-                ]
-                .join("")
-            },
-            "\nINNER JOIN ",
-        )
-    } else {
-        "".to_string()
-    };
+
+    let inner_join_str;
     if is_fks_exist {
+        // More than 1 fk that has the same referred_table and referring table should first be
+        // joined with "AND"
+        let fk_tables_columns =
+            ForeignKeyReference::fk_tables_columns_from_foreign_key_references(&fks);
+        let table_ref_groups = &fk_tables_columns.into_iter().group_by(
+            |(referring_table, _referring_column, referred_table, _referred_column)| {
+                [*referring_table, *referred_table]
+            },
+        );
+        inner_join_str = table_ref_groups
+            .into_iter()
+            .map(|(key, same_table_ref_group)| {
+                let referred_table = key[1];
+
+                let equals_str = same_table_ref_group
+                    .map(
+                        |(referring_table, referring_column, referred_table, referred_column)| {
+                            [
+                                referring_table,
+                                ".",
+                                referring_column,
+                                " = ",
+                                referred_table,
+                                ".",
+                                referred_column,
+                            ]
+                            .join("")
+                        },
+                    )
+                    .collect::<Vec<String>>()
+                    .join(" AND ");
+
+                [referred_table, " ON ", &equals_str].join("")
+            })
+            .collect::<Vec<String>>()
+            .join("\nINNER JOIN ");
+
         statement.push(" INNER JOIN ");
         statement.push(&inner_join_str);
     }
@@ -669,6 +686,232 @@ mod build_select_statement_tests {
                             "a name".to_string()
                         )),
                     ]
+                );
+            }
+            Err(e) => {
+                panic!(e);
+            }
+        };
+    }
+
+    #[test]
+    fn gt_one_fk_to_same_table_from_one_table() {
+        match build_select_statement(
+            SelectParams {
+                columns: vec![
+                    "name".to_string(),
+                    "parent_id.parent_id.name parent_name".to_string(),
+                    "sibling_id.name sibling_name".to_string(),
+                ],
+                conditions: None,
+                distinct: None,
+                group_by: None,
+                limit: 100,
+                offset: 0,
+                order_by: None,
+                table: "sibling".to_string(),
+            },
+            vec![
+                TableColumnStat {
+                    column_name: "name".to_string(),
+                    column_type: "text",
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: false,
+                    foreign_key_table: None,
+                    foreign_key_column: None,
+                    foreign_key_column_type: None,
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "parent_id".to_string(),
+                    column_type: "int8",
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: true,
+                    foreign_key_table: Some("child".to_string()),
+                    foreign_key_column: Some("parent_id".to_string()),
+                    foreign_key_column_type: Some("int8"),
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+                TableColumnStat {
+                    column_name: "sibling_id".to_string(),
+                    column_type: "int8",
+                    default_value: None,
+                    is_nullable: true,
+                    is_foreign_key: true,
+                    foreign_key_table: Some("child".to_string()),
+                    foreign_key_column: Some("id".to_string()),
+                    foreign_key_column_type: Some("int8"),
+                    char_max_length: None,
+                    char_octet_length: None,
+                },
+            ],
+            vec![
+                ForeignKeyReference {
+                    original_refs: vec!["sibling_id.name".to_string()],
+                    referring_table: "sibling".to_string(),
+                    referring_column: "sibling_id".to_string(),
+                    referring_column_type: "int8",
+                    foreign_key_table: "child".to_string(),
+                    foreign_key_table_stats: vec![
+                        TableColumnStat {
+                            column_name: "school_id".to_string(),
+                            column_type: "int8",
+                            default_value: None,
+                            is_nullable: true,
+                            is_foreign_key: true,
+                            foreign_key_table: Some("school".to_string()),
+                            foreign_key_column: Some("id".to_string()),
+                            foreign_key_column_type: Some("int8"),
+                            char_max_length: None,
+                            char_octet_length: None,
+                        },
+                        TableColumnStat {
+                            column_name: "parent_id".to_string(),
+                            column_type: "int8",
+                            default_value: None,
+                            is_nullable: true,
+                            is_foreign_key: true,
+                            foreign_key_table: Some("adult".to_string()),
+                            foreign_key_column: Some("id".to_string()),
+                            foreign_key_column_type: Some("int8"),
+                            char_max_length: None,
+                            char_octet_length: None,
+                        },
+                        TableColumnStat {
+                            column_name: "name".to_string(),
+                            column_type: "text",
+                            default_value: None,
+                            is_nullable: true,
+                            is_foreign_key: false,
+                            foreign_key_table: None,
+                            foreign_key_column: None,
+                            foreign_key_column_type: None,
+                            char_max_length: None,
+                            char_octet_length: None,
+                        },
+                        TableColumnStat {
+                            column_name: "id".to_string(),
+                            column_type: "int8",
+                            default_value: None,
+                            is_nullable: false,
+                            is_foreign_key: false,
+                            foreign_key_table: None,
+                            foreign_key_column: None,
+                            foreign_key_column_type: None,
+                            char_max_length: None,
+                            char_octet_length: None,
+                        },
+                    ],
+                    foreign_key_column: "id".to_string(),
+                    foreign_key_column_type: "int8",
+                    nested_fks: vec![],
+                },
+                ForeignKeyReference {
+                    original_refs: vec!["parent_id.parent_id.name".to_string()],
+                    referring_table: "sibling".to_string(),
+                    referring_column: "parent_id".to_string(),
+                    referring_column_type: "int8",
+                    foreign_key_table: "child".to_string(),
+                    foreign_key_table_stats: vec![
+                        TableColumnStat {
+                            column_name: "parent_id".to_string(),
+                            column_type: "int8",
+                            default_value: None,
+                            is_nullable: true,
+                            is_foreign_key: true,
+                            foreign_key_table: Some("adult".to_string()),
+                            foreign_key_column: Some("id".to_string()),
+                            foreign_key_column_type: Some("int8"),
+                            char_max_length: None,
+                            char_octet_length: None,
+                        },
+                        TableColumnStat {
+                            column_name: "name".to_string(),
+                            column_type: "text",
+                            default_value: None,
+                            is_nullable: true,
+                            is_foreign_key: false,
+                            foreign_key_table: None,
+                            foreign_key_column: None,
+                            foreign_key_column_type: None,
+                            char_max_length: None,
+                            char_octet_length: None,
+                        },
+                        TableColumnStat {
+                            column_name: "id".to_string(),
+                            column_type: "int8",
+                            default_value: None,
+                            is_nullable: false,
+                            is_foreign_key: false,
+                            foreign_key_table: None,
+                            foreign_key_column: None,
+                            foreign_key_column_type: None,
+                            char_max_length: None,
+                            char_octet_length: None,
+                        },
+                    ],
+                    foreign_key_column: "parent_id".to_string(),
+                    foreign_key_column_type: "int8",
+                    nested_fks: vec![ForeignKeyReference {
+                        original_refs: vec!["parent_id.name".to_string()],
+                        referring_table: "child".to_string(),
+                        referring_column: "parent_id".to_string(),
+                        referring_column_type: "int8",
+                        foreign_key_table: "adult".to_string(),
+                        foreign_key_table_stats: vec![
+                            TableColumnStat {
+                                column_name: "company_id".to_string(),
+                                column_type: "int8",
+                                default_value: None,
+                                is_nullable: true,
+                                is_foreign_key: true,
+                                foreign_key_table: Some("company".to_string()),
+                                foreign_key_column: Some("id".to_string()),
+                                foreign_key_column_type: Some("int8"),
+                                char_max_length: None,
+                                char_octet_length: None,
+                            },
+                            TableColumnStat {
+                                column_name: "name".to_string(),
+                                column_type: "text",
+                                default_value: None,
+                                is_nullable: true,
+                                is_foreign_key: false,
+                                foreign_key_table: None,
+                                foreign_key_column: None,
+                                foreign_key_column_type: None,
+                                char_max_length: None,
+                                char_octet_length: None,
+                            },
+                            TableColumnStat {
+                                column_name: "id".to_string(),
+                                column_type: "int8",
+                                default_value: None,
+                                is_nullable: false,
+                                is_foreign_key: false,
+                                foreign_key_table: None,
+                                foreign_key_column: None,
+                                foreign_key_column_type: None,
+                                char_max_length: None,
+                                char_octet_length: None,
+                            },
+                        ],
+                        foreign_key_column: "id".to_string(),
+                        foreign_key_column_type: "int8",
+                        nested_fks: vec![],
+                    }],
+                },
+            ],
+            Expr::Identifier("".to_string()),
+        ) {
+            Ok((sql, _)) => {
+                assert_eq!(
+                    &sql,
+                    "SELECT sibling.name AS \"name\", adult.name AS \"parent_name\", child.name AS \"sibling_name\" FROM sibling INNER JOIN child ON sibling.sibling_id = child.id AND sibling.parent_id = child.parent_id\nINNER JOIN adult ON child.parent_id = adult.id LIMIT 100;"
                 );
             }
             Err(e) => {
