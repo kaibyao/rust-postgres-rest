@@ -40,5 +40,5 @@ features = ["postgres", "serde"]
 
 [dev-dependencies]
 native-tls = "0.2.3"
-postgres-native-tls = "0.2.0-rc.1"
+postgres-native-tls = "0.3.0"
 pretty_assertions = "0.6.1"
