@@ -10,7 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 actix = "0.8.3"
-actix-web = "1.0.5"
+actix-web = "3.3.2"
 failure = "0.1.5"
 futures = "0.1.28"
 futures03 = { package = "futures-preview", version = "0.3.0-alpha.18", features = ["compat"] }
