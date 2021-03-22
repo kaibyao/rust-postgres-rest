@@ -9,7 +9,7 @@ name = "postgres_rest"
 path = "src/lib.rs"
 
 [dependencies]
-actix = "0.8.3"
+actix = "0.11.0"
 
 # DO NOT USE BB8. INTEGRATION TESTS HAD DB CONNECTION TIMEOUTS.
 # If you really need a connection pool, look into pgbouncer or L337-postgres.
