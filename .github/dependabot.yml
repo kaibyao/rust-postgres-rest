@@ -1,0 +1,34 @@
+version: 2
+updates:
+- package-ecosystem: cargo
+  directory: "/"
+  schedule:
+    interval: daily
+  open-pull-requests-limit: 10
+  ignore:
+  - dependency-name: tokio-postgres
+    versions:
+    - 0.7.0
+    - 0.7.1
+  - dependency-name: tokio
+    versions:
+    - 1.1.0
+    - 1.1.1
+    - 1.2.0
+    - 1.3.0
+    - 1.4.0
+  - dependency-name: actix
+    versions:
+    - 0.10.0
+    - 0.11.0
+  - dependency-name: futures
+    versions:
+    - 0.3.12
+    - 0.3.13
+  - dependency-name: sqlparser
+    versions:
+    - 0.7.0
+    - 0.8.0
+  - dependency-name: postgres-protocol
+    versions:
+    - 0.6.0
